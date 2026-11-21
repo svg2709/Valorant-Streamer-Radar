@@ -6,6 +6,18 @@
 
 **Find out if anyone in your last Valorant lobby was streaming live on YouTube, Twitch, or Kick — automatically, silently, and strictly after the match ends.**
 
+<br />
+
+<a href="https://github.com/svg2709/ValStreamerRadar/releases/latest/download/val-streamer-notifier.exe">
+  <img src="https://img.shields.io/badge/Download%20for%20Windows%20(.exe)-Latest%20Release-ff5ca8?style=for-the-badge&logo=windows&logoColor=white" alt="Download Valorant Streamer Radar for Windows" />
+</a>
+&nbsp;
+<a href="https://github.com/svg2709/ValStreamerRadar/releases">
+  <img src="https://img.shields.io/badge/Releases%20Tab-View%20All%20Builds-141b27?style=for-the-badge&logo=github&logoColor=ffa6d2" alt="View All Releases" />
+</a>
+
+<br /><br />
+
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
 ![Version](https://img.shields.io/badge/Version-v0.5.0-fff5fa?style=flat-square&labelColor=141b27)
@@ -13,7 +25,7 @@
 
 <br />
 
-<img src="public/assets/aistudio/_C8772F4F-81DA-4AE6-82AB-4DD58E5C4F0D__fe1be8ec.png" alt="Valorant Streamer Radar Desktop App Preview" width="880" />
+<img src="docs/preview.png" alt="Valorant Streamer Radar Desktop App Preview" width="880" />
 
 </div>
 
@@ -47,21 +59,11 @@
 
 ---
 
-## How It Works
+## Download & Installation
 
-1. **Runs quietly in the tray** while Valorant is open and detects your active shard automatically.
-2. **Waits for the match to finish** (`InGame -> MainMenu` in `ShooterGame.log`), buffering match chat silently in memory if enabled.
-3. **Fetches your last completed match** (mode, map, agents, teams, and player Riot IDs) via Riot's local lockfile and post-match history endpoint.
-4. **Checks each player** against your local & community Streamer Directory, keyless/API live checks, and any stream links shared in match chat—then pops a **Windows Toast notification** and saves the result to your History tab.
-
----
-
-## Getting Started
-
-### Option 1: Download Prebuilt Windows `.exe` (GitHub Actions / Releases)
-1. Go to the **Actions** tab (or **Releases**) in this repository.
-2. Download the latest `val-streamer-notifier.exe` build artifact.
-3. Run `val-streamer-notifier.exe` while Valorant is installed on Windows 10/11.
+### Option 1: Direct Download (Recommended)
+1. Click the **[Download for Windows (.exe)](https://github.com/svg2709/ValStreamerRadar/releases/latest/download/val-streamer-notifier.exe)** button above (or open the **[Releases](https://github.com/svg2709/ValStreamerRadar/releases)** tab on the right side of this repo).
+2. Run `val-streamer-notifier.exe` on Windows 10/11 while Valorant is installed.
    *(If Windows SmartScreen shows a prompt for an unsigned open-source `.exe`, click **More info -> Run anyway**.)*
 
 ### Option 2: Build Locally on Windows (Rust 1.80+)
@@ -77,6 +79,43 @@ target\release\val-streamer-notifier.exe
 
 ---
 
+## How It Works
+
+1. **Runs quietly in the tray** while Valorant is open and detects your active shard automatically.
+2. **Waits for the match to finish** (`InGame -> MainMenu` in `ShooterGame.log`), buffering match chat silently in memory if enabled.
+3. **Fetches your last completed match** (mode, map, agents, teams, and player Riot IDs) via Riot's local lockfile and post-match history endpoint.
+4. **Checks each player** against your local & community Streamer Directory, keyless/API live checks, and any stream links shared in match chat—then pops a **Windows Toast notification** and saves the result to your History tab.
+
+---
+
+## Project Structure
+
+```text
+ValStreamerRadar/
+├── .github/workflows/
+│   └── build-windows.yml        # Automated Windows x64 build & GitHub Releases publisher
+├── docs/
+│   └── preview.png              # Desktop UI screenshot
+├── examples/
+│   ├── config.example.json      # Example %APPDATA% configuration
+│   └── streamers.example.json   # Example community directory JSON
+├── src/
+│   └── main.rs                  # Native Windows Rust application
+├── web/                         # Interactive browser preview & match simulator
+│   ├── components/
+│   ├── data/
+│   ├── types/
+│   ├── utils/
+│   ├── App.tsx
+│   ├── index.css
+│   └── main.tsx
+├── build.rs                     # Procedural pink-white gradient .ico generator
+├── Cargo.toml                   # Rust crate manifest & dependencies
+└── README.md
+```
+
+---
+
 ## Configuration
 
 Settings are managed directly inside the app's **Settings** tab and saved atomically to:
@@ -84,7 +123,7 @@ Settings are managed directly inside the app's **Settings** tab and saved atomic
 %APPDATA%\ValorantStreamerRadar\config.json
 ```
 
-The app creates this file automatically on first launch and works completely keyless out of the box:
+See [`examples/config.example.json`](examples/config.example.json). The app creates this file automatically on first launch and works completely keyless out of the box:
 
 ```json
 {
@@ -114,7 +153,7 @@ The app creates this file automatically on first launch and works completely key
 
 ## Community Directory Schema (`streamers.json`)
 
-To share a curated streamer database across friends or a community, host a `streamers.json` file in the `main` branch of your configured GitHub repository:
+See [`examples/streamers.example.json`](examples/streamers.example.json). To share a curated streamer database across friends or a community, host a `streamers.json` file in the `main` branch of your configured GitHub repository:
 
 ```json
 [

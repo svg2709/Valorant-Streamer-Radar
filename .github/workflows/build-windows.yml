@@ -31,15 +31,58 @@ jobs:
       - name: Build Windows release executable
         run: cargo build --release
 
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Path "target/release/val-streamer-notifier.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  val-streamer-notifier.exe" | Out-File -FilePath "target/release/val-streamer-notifier.exe.sha256" -Encoding ascii
+
       - name: Upload Windows executable artifact
         uses: actions/upload-artifact@v6
         with:
           name: val-streamer-notifier-windows-x64
-          path: target/release/val-streamer-notifier.exe
+          path: |
+            target/release/val-streamer-notifier.exe
+            target/release/val-streamer-notifier.exe.sha256
           if-no-files-found: error
 
-      - name: Attach executable to GitHub Release (on tag push)
+      - name: Update rolling 'latest' tag on main/master
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "${GITHUB_SHA}"
+          git push origin refs/tags/latest --force
+
+      - name: Publish to GitHub Releases (Latest Build)
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          name: Valorant Streamer Radar (Latest Windows Build)
+          make_latest: "true"
+          body: |
+            Automated Windows x64 build of **Valorant Streamer Radar** from commit `${{ github.sha }}`.
+
+            ### Quick Install
+            1. Download **`val-streamer-notifier.exe`** below.
+            2. Run it on Windows 10/11 while Valorant is installed (if Windows SmartScreen prompts for an unsigned open-source `.exe`, click **More info -> Run anyway**).
+            3. Runs silently in the system tray and scans strictly after each match ends.
+
+            > **Disclaimer:** Use at your own risk. See the [README](https://github.com/${{ github.repository }}#is-this-bannable) for safety details.
+          files: |
+            target/release/val-streamer-notifier.exe
+            target/release/val-streamer-notifier.exe.sha256
+
+      - name: Publish to GitHub Releases (Versioned Tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          files: target/release/val-streamer-notifier.exe
+          tag_name: ${{ github.ref_name }}
+          name: Valorant Streamer Radar ${{ github.ref_name }}
+          make_latest: "true"
+          generate_release_notes: true
+          files: |
+            target/release/val-streamer-notifier.exe
+            target/release/val-streamer-notifier.exe.sha256

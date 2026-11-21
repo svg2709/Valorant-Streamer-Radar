@@ -2843,8 +2843,119 @@ fn set_autostart(enable: bool) {
 #[cfg(not(windows))]
 fn set_autostart(_enable: bool) {}
 
+#[cfg(windows)]
+mod win32_window {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicIsize, Ordering};
+
+    const SW_SHOW: i32 = 5;
+    const SW_RESTORE: i32 = 9;
+    const WM_CLOSE: u32 = 0x0010;
+    const WINDOW_TITLE: &str = "Valorant Streamer Radar";
+
+    static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(
+            lp_enum_func: unsafe extern "system" fn(isize, isize) -> i32,
+            l_param: isize,
+        ) -> i32;
+        fn GetWindowThreadProcessId(h_wnd: isize, lpdw_process_id: *mut u32) -> u32;
+        fn GetWindowTextW(h_wnd: isize, lp_string: *mut u16, n_max_count: i32) -> i32;
+        fn IsWindow(h_wnd: isize) -> i32;
+        fn IsIconic(h_wnd: isize) -> i32;
+        fn ShowWindow(h_wnd: isize, n_cmd_show: i32) -> i32;
+        fn BringWindowToTop(h_wnd: isize) -> i32;
+        fn SetForegroundWindow(h_wnd: isize) -> i32;
+        fn InvalidateRect(h_wnd: isize, lp_rect: *const c_void, b_erase: i32) -> i32;
+        fn PostMessageW(h_wnd: isize, msg: u32, w_param: usize, l_param: isize) -> i32;
+    }
+
+    struct SearchCtx {
+        pid: u32,
+        hwnd: isize,
+    }
+
+    unsafe extern "system" fn enum_windows_cb(hwnd: isize, l_param: isize) -> i32 {
+        let ctx = &mut *(l_param as *mut SearchCtx);
+        let mut win_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut win_pid);
+        if win_pid != ctx.pid {
+            return 1;
+        }
+        let mut buf = [0u16; 128];
+        let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len > 0 {
+            let title = String::from_utf16_lossy(&buf[..len as usize]);
+            if title == WINDOW_TITLE {
+                ctx.hwnd = hwnd;
+                return 0; // stop enumerating
+            }
+        }
+        1
+    }
+
+    fn find_main_hwnd() -> isize {
+        let cached = MAIN_HWND.load(Ordering::Relaxed);
+        if cached != 0 && unsafe { IsWindow(cached) } != 0 {
+            return cached;
+        }
+        let mut ctx = SearchCtx {
+            pid: std::process::id(),
+            hwnd: 0,
+        };
+        unsafe {
+            EnumWindows(enum_windows_cb, (&mut ctx as *mut SearchCtx) as isize);
+        }
+        if ctx.hwnd != 0 {
+            MAIN_HWND.store(ctx.hwnd, Ordering::Relaxed);
+        }
+        ctx.hwnd
+    }
+
+    pub fn cache_main_hwnd() {
+        let _ = find_main_hwnd();
+    }
+
+    pub fn show_and_focus() {
+        let hwnd = find_main_hwnd();
+        if hwnd == 0 {
+            return;
+        }
+        unsafe {
+            ShowWindow(hwnd, SW_SHOW);
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+            InvalidateRect(hwnd, std::ptr::null(), 0);
+        }
+    }
+
+    pub fn post_close() {
+        let hwnd = find_main_hwnd();
+        if hwnd != 0 {
+            unsafe {
+                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod win32_window {
+    pub fn cache_main_hwnd() {}
+    pub fn show_and_focus() {}
+    pub fn post_close() {}
+}
+
 fn show_window(ctx: &egui::Context) {
     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+    // eframe 0.29 / winit 0.30 stops delivering RedrawRequested while a Win32 window is hidden,
+    // so send_viewport_cmd(Visible(true)) alone never runs until Win32 unhides and invalidates it.
+    win32_window::show_and_focus();
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -2855,6 +2966,7 @@ fn show_window(ctx: &egui::Context) {
 
 fn quit_app(ctx: &egui::Context) {
     QUIT.store(true, Ordering::Relaxed);
+    win32_window::post_close();
     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     ctx.request_repaint();
     // Dropping out of run_native removes the tray icon cleanly; this is just a safety net.
@@ -3246,6 +3358,7 @@ impl eframe::App for StreamerApp {
             if QUIT.load(Ordering::Relaxed) {
                 return; // let the real quit through
             }
+            win32_window::cache_main_hwnd();
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             WINDOW_VISIBLE.store(false, Ordering::Relaxed);
@@ -3256,6 +3369,7 @@ impl eframe::App for StreamerApp {
         // enforce hiding explicitly only when launched with `--background`.
         if self.pending_initial_hide {
             self.pending_initial_hide = false;
+            win32_window::cache_main_hwnd();
             WINDOW_VISIBLE.store(false, Ordering::Relaxed);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             return;
@@ -4591,10 +4705,19 @@ fn main() -> Result<()> {
 
             // Event-driven tray handling: works while the window is hidden and costs no polling.
             let ctx_tray = ctx.clone();
-            TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
-                if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+            TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => {
                     show_window(&ctx_tray);
                 }
+                _ => {}
             }));
             let ctx_menu = ctx.clone();
             let tx_menu = scan_tx.clone();

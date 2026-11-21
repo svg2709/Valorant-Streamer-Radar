@@ -1,0 +1,10 @@
+{
+  "youtube_api_key": "",
+  "twitch_client_id": "",
+  "twitch_client_secret": "",
+  "start_with_windows": true,
+  "shard_override": "auto",
+  "github_owner": "your-github-username",
+  "github_repo": "valorant-streamers-db",
+  "use_custom_toast_app_id": true
+}

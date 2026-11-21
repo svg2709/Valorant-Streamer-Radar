@@ -1,0 +1,20 @@
+[
+  {
+    "riot_id": "RohanYT#IND",
+    "platform": "YouTube",
+    "channel_name": "Rohan Gaming",
+    "channel_url": "https://www.youtube.com/@RohanGaming"
+  },
+  {
+    "riot_id": "VexFPS#MUM",
+    "platform": "Twitch",
+    "channel_name": "VexFPS",
+    "channel_url": "https://www.twitch.tv/vexfps"
+  },
+  {
+    "riot_id": "KairoClutch#AP",
+    "platform": "Kick",
+    "channel_name": "KairoClutch",
+    "channel_url": "https://kick.com/kairoclutch"
+  }
+]

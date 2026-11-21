@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Check,
+  CheckCircle2,
+  ChevronDown,
   Copy,
   Eye,
   EyeOff,
   ExternalLink,
+  KeyRound,
   Minus,
   Pencil,
   Plus,
@@ -13,6 +17,7 @@ import {
   ShieldCheck,
   Trash2,
   X,
+  XCircle,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -117,11 +122,59 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   // Settings draft state
   const [draft, setDraft] = useState<AppConfig>(config);
   const [showSecrets, setShowSecrets] = useState(false);
+  const [showApiGuide, setShowApiGuide] = useState(false);
+  const [ytKeyStatus, setYtKeyStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+  const [twitchKeyStatus, setTwitchKeyStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(config);
   }, [config]);
+
+  const handleTestYoutubeKey = () => {
+    const key = draft.youtube_api_key.trim();
+    if (!key) {
+      setYtKeyStatus({
+        kind: 'err',
+        msg: 'Paste a YouTube Data API v3 key first (or leave blank to run keyless).',
+      });
+      return;
+    }
+    if (!/^AIza[0-9A-Za-z_-]{20,}$/.test(key)) {
+      setYtKeyStatus({
+        kind: 'err',
+        msg: 'Key format looks unusual — Google Cloud YouTube keys normally start with "AIza".',
+      });
+      return;
+    }
+    setYtKeyStatus({
+      kind: 'ok',
+      msg: 'Key format looks valid (in the Windows app, Test Key runs a live Google API v3 check).',
+    });
+  };
+
+  const handleTestTwitchKeys = () => {
+    const cid = draft.twitch_client_id.trim();
+    const sec = draft.twitch_client_secret.trim();
+    if (!cid || !sec) {
+      setTwitchKeyStatus({
+        kind: 'err',
+        msg: 'Enter both Twitch Client ID and Client Secret first.',
+      });
+      return;
+    }
+    if (cid.length < 16 || sec.length < 16) {
+      setTwitchKeyStatus({
+        kind: 'err',
+        msg: 'Twitch Client ID / Secret look too short (expected 30-character alphanumeric tokens).',
+      });
+      return;
+    }
+    setTwitchKeyStatus({
+      kind: 'ok',
+      msg: 'Credentials format looks valid (in the Windows app, Test Twitch verifies live OAuth).',
+    });
+  };
 
   const effectiveShard = resolveEffectiveShard(config, detectedShard);
 
@@ -744,13 +797,13 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
 
             {/* Optional Platform API Keys */}
             <section className="rounded-lg border border-[#2B3A48] bg-[#182430] p-4">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-white">
                     Optional Platform API Keys
                   </h3>
                   <p className="mt-0.5 text-xs text-[#94A3B8]">
-                    Leave blank to run 100% keyless via YouTube ytInitialData, Twitch GQL, and Kick public API.
+                    Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.
                   </p>
                 </div>
                 <button
@@ -763,44 +816,182 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                 </button>
               </div>
 
-              <div className="mt-3 space-y-2.5">
+              <div className="mt-3.5 space-y-3.5">
+                {/* YouTube Data API v3 */}
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-[#ECE8E1]">
-                    YouTube Data API v3 Key
-                  </label>
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-[#ECE8E1]">
+                      YouTube Data API v3 Key
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <a
+                        href="https://console.cloud.google.com/apis/credentials"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded bg-[#FF4655] px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-[#e53a49] whitespace-nowrap"
+                      >
+                        Get YouTube Key
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleTestYoutubeKey}
+                        className="rounded border border-[#2B3A48] bg-[#21303F] px-2.5 py-1 text-[11px] font-medium text-[#ECE8E1] hover:bg-[#2a3c4e] whitespace-nowrap"
+                      >
+                        Test Key
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type={showSecrets ? 'text' : 'password'}
                     value={draft.youtube_api_key}
-                    onChange={(e) => setDraft({ ...draft, youtube_api_key: e.target.value })}
-                    placeholder="Optional — falls back to keyless search automatically"
+                    onChange={(e) => {
+                      setDraft({ ...draft, youtube_api_key: e.target.value });
+                      setYtKeyStatus(null);
+                    }}
+                    placeholder="AIza... (optional — falls back to keyless search automatically)"
                     className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-1.5 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
                   />
+                  {ytKeyStatus && (
+                    <div
+                      className={`mt-1.5 flex items-start gap-1.5 rounded border px-2.5 py-1.5 text-[11px] ${
+                        ytKeyStatus.kind === 'ok'
+                          ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
+                          : 'border-[#FF4655]/40 bg-[#FF4655]/10 text-[#FF4655]'
+                      }`}
+                    >
+                      {ytKeyStatus.kind === 'ok' ? (
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span>{ytKeyStatus.msg}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="grid gap-2.5 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-[#ECE8E1]">
-                      Twitch Client ID
-                    </label>
-                    <input
-                      type={showSecrets ? 'text' : 'password'}
-                      value={draft.twitch_client_id}
-                      onChange={(e) => setDraft({ ...draft, twitch_client_id: e.target.value })}
-                      placeholder="Optional Helix Client ID"
-                      className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-1.5 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
-                    />
+
+                {/* Twitch Helix API */}
+                <div>
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-[#ECE8E1]">
+                      Twitch Helix API (Client ID &amp; Secret)
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <a
+                        href="https://dev.twitch.tv/console/apps"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded bg-[#9146FF] px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-[#7c35e8] whitespace-nowrap"
+                      >
+                        Get Twitch Keys
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleTestTwitchKeys}
+                        className="rounded border border-[#2B3A48] bg-[#21303F] px-2.5 py-1 text-[11px] font-medium text-[#ECE8E1] hover:bg-[#2a3c4e] whitespace-nowrap"
+                      >
+                        Test Twitch
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-[#ECE8E1]">
-                      Twitch Client Secret
-                    </label>
-                    <input
-                      type={showSecrets ? 'text' : 'password'}
-                      value={draft.twitch_client_secret}
-                      onChange={(e) => setDraft({ ...draft, twitch_client_secret: e.target.value })}
-                      placeholder="Optional Helix Client Secret"
-                      className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-1.5 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
-                    />
+                  <div className="grid gap-2.5 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-[#94A3B8]">
+                        Twitch Client ID
+                      </label>
+                      <input
+                        type={showSecrets ? 'text' : 'password'}
+                        value={draft.twitch_client_id}
+                        onChange={(e) => {
+                          setDraft({ ...draft, twitch_client_id: e.target.value });
+                          setTwitchKeyStatus(null);
+                        }}
+                        placeholder="Optional Helix Client ID"
+                        className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-1.5 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-[#94A3B8]">
+                        Twitch Client Secret
+                      </label>
+                      <input
+                        type={showSecrets ? 'text' : 'password'}
+                        value={draft.twitch_client_secret}
+                        onChange={(e) => {
+                          setDraft({ ...draft, twitch_client_secret: e.target.value });
+                          setTwitchKeyStatus(null);
+                        }}
+                        placeholder="Optional Helix Client Secret"
+                        className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-1.5 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
+                      />
+                    </div>
                   </div>
+                  {twitchKeyStatus && (
+                    <div
+                      className={`mt-1.5 flex items-start gap-1.5 rounded border px-2.5 py-1.5 text-[11px] ${
+                        twitchKeyStatus.kind === 'ok'
+                          ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
+                          : 'border-[#FF4655]/40 bg-[#FF4655]/10 text-[#FF4655]'
+                      }`}
+                    >
+                      {twitchKeyStatus.kind === 'ok' ? (
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span>{twitchKeyStatus.msg}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Collapsible Step-by-Step API Key Tutorial */}
+                <div className="rounded-md border border-[#2B3A48] bg-[#0F1923]">
+                  <button
+                    type="button"
+                    onClick={() => setShowApiGuide((prev) => !prev)}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold text-[#2DD4BF] transition-colors hover:text-white"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <KeyRound className="h-3.5 w-3.5" />
+                      How to get free API keys (Step-by-Step Guide)
+                    </span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${showApiGuide ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                  {showApiGuide && (
+                    <div className="space-y-3 border-t border-[#2B3A48] px-3.5 py-3 text-[11.5px] leading-relaxed text-[#ECE8E1]">
+                      <div>
+                        <p className="font-semibold text-[#FF4655]">
+                          YouTube Data API v3 (Free — 10,000 units/day, no card needed)
+                        </p>
+                        <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[#CBD5E1]">
+                          <li>Click <strong className="text-white">Get YouTube Key</strong> above to open Google Cloud Console.</li>
+                          <li>Create a new project (e.g. <span className="font-mono text-white">Valorant-Radar</span>) from the top-left selector.</li>
+                          <li>Go to <strong className="text-white">APIs &amp; Services &rarr; Library</strong>, search <span className="font-mono text-white">YouTube Data API v3</span>, and click <strong className="text-white">Enable</strong>.</li>
+                          <li>Go to <strong className="text-white">APIs &amp; Services &rarr; Credentials &rarr; + CREATE CREDENTIALS &rarr; API key</strong>.</li>
+                          <li>Paste the <span className="font-mono text-white">AIza...</span> key above, click <strong className="text-white">Test Key</strong>, then <strong className="text-white">Save Settings</strong>.</li>
+                        </ol>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-[#9146FF]">
+                          Twitch Helix API (Free — requires 2FA on your Twitch account)
+                        </p>
+                        <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[#CBD5E1]">
+                          <li>Click <strong className="text-white">Get Twitch Keys</strong> above to open the Twitch Developer Console.</li>
+                          <li>Click <strong className="text-white">Register Your Application</strong> and name it <span className="font-mono text-white">Valorant Radar</span>.</li>
+                          <li>Set OAuth Redirect URL to <span className="font-mono text-white">http://localhost</span> and Category to <strong className="text-white">Application Integration</strong>.</li>
+                          <li>Open <strong className="text-white">Manage</strong> &rarr; copy <strong className="text-white">Client ID</strong>, click <strong className="text-white">New Secret</strong> &rarr; copy <strong className="text-white">Client Secret</strong>.</li>
+                          <li>Paste both above, click <strong className="text-white">Test Twitch</strong>, then <strong className="text-white">Save Settings</strong>.</li>
+                        </ol>
+                      </div>
+                      <p className="flex items-center gap-1.5 text-[11px] text-[#94A3B8]">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#FB923C]" />
+                        Kick needs no API key. Leaving all keys blank still works via keyless fallbacks.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>

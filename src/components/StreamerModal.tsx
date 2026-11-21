@@ -1,7 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  ShieldCheck,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { DirectoryStreamer, Platform } from '../types/radar';
-import { buildGithubIssueUrl, validateSubmission } from '../utils/validation';
+import {
+  buildGithubIssueUrl,
+  hostAllowed,
+  hostOf,
+  validateSubmission,
+} from '../utils/validation';
 
 interface StreamerModalProps {
   isOpen: boolean;
@@ -16,7 +28,22 @@ interface StreamerModalProps {
   ) => void;
 }
 
+type VerifyResult =
+  | { kind: 'ok'; msg: string }
+  | { kind: 'warn'; msg: string; suggestedName?: string; suggestedPlatform?: Platform }
+  | { kind: 'err'; msg: string; suggestedPlatform?: Platform };
+
 const PLATFORMS: Platform[] = ['YouTube', 'Twitch', 'Kick'];
+
+function extractHandleFromUrl(url: string): string {
+  const cleaned = url.split(/[?#]/)[0].replace(/\/+$/, '');
+  const seg = cleaned.split('/').pop() || '';
+  return seg.replace(/^@/, '');
+}
+
+function normalizeAlnum(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
 export const StreamerModal: React.FC<StreamerModalProps> = ({
   isOpen,
@@ -31,6 +58,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
   const [channelName, setChannelName] = useState('');
   const [channelUrl, setChannelUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [submittedIssueUrl, setSubmittedIssueUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,11 +75,113 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
         setChannelUrl('');
       }
       setError(null);
+      setVerifyResult(null);
       setSubmittedIssueUrl(null);
     }
   }, [isOpen, editingEntry]);
 
   if (!isOpen) return null;
+
+  const trimmedUrl = channelUrl.trim();
+  const parsedHost = hostOf(trimmedUrl);
+  const canOpenUrl = Boolean(parsedHost && hostAllowed(platform, parsedHost));
+
+  const handleVerify = () => {
+    const rid = riotId.trim();
+    const cname = channelName.trim();
+    const curl = channelUrl.trim();
+    setError(null);
+
+    // 1. Riot ID check
+    const hashIdx = rid.indexOf('#');
+    if (hashIdx === -1) {
+      setVerifyResult({
+        kind: 'err',
+        msg: 'Riot ID must include "#" (example: RohanYT#IND).',
+      });
+      return;
+    }
+    const namePart = rid.slice(0, hashIdx).trim();
+    const tagPart = rid.slice(hashIdx + 1);
+    if (
+      namePart.length < 3 ||
+      namePart.length > 16 ||
+      tagPart.length < 3 ||
+      tagPart.length > 5 ||
+      !/^[a-zA-Z0-9]+$/.test(tagPart)
+    ) {
+      setVerifyResult({
+        kind: 'err',
+        msg: 'Riot ID looks invalid (name 3-16 chars, tag 3-5 letters/digits).',
+      });
+      return;
+    }
+
+    // 2. Host & platform match check
+    const host = hostOf(curl);
+    if (!host) {
+      setVerifyResult({
+        kind: 'err',
+        msg: 'Channel URL must start with https:// and be a valid link.',
+      });
+      return;
+    }
+    if (!hostAllowed(platform, host)) {
+      const matched = PLATFORMS.find((p) => p !== platform && hostAllowed(p, host));
+      if (matched) {
+        setVerifyResult({
+          kind: 'err',
+          msg: `URL belongs to ${matched}, not ${platform}. Switch Platform to ${matched}.`,
+          suggestedPlatform: matched,
+        });
+      } else {
+        setVerifyResult({
+          kind: 'err',
+          msg: `URL host "${host}" is not an allowed ${platform} domain.`,
+        });
+      }
+      return;
+    }
+
+    // 3. Handle & display name cross-check
+    const handle = extractHandleFromUrl(curl);
+    if (!handle || handle.length < 3 || handle.includes('.')) {
+      setVerifyResult({
+        kind: 'err',
+        msg: `Channel URL is missing a valid ${platform} channel handle/slug at the end.`,
+      });
+      return;
+    }
+
+    if (!cname) {
+      setVerifyResult({
+        kind: 'warn',
+        msg: `Link format verified for ${platform} handle "${handle}". Click below to fill Channel Display Name.`,
+        suggestedName: handle,
+      });
+      return;
+    }
+
+    const normEntered = normalizeAlnum(cname);
+    const normHandle = normalizeAlnum(handle);
+    const roughMatch =
+      normEntered === normHandle ||
+      normEntered.includes(normHandle) ||
+      normHandle.includes(normEntered);
+
+    if (roughMatch) {
+      setVerifyResult({
+        kind: 'ok',
+        msg: `Verified! Riot ID format, ${platform} link, and channel name "${cname}" align. (The Windows app also performs a live channel lookup.)`,
+      });
+    } else {
+      setVerifyResult({
+        kind: 'warn',
+        msg: `Riot ID & ${platform} URL are valid, but URL handle is "${handle}" while display name is "${cname}". Click Open Link to double-check.`,
+        suggestedName: handle,
+      });
+    }
+  };
 
   const handleAction = (openGithub: boolean) => {
     const rid = riotId.trim();
@@ -89,7 +219,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
       aria-modal="true"
       aria-labelledby="streamer-modal-title"
     >
-      <div className="w-full max-w-[440px] rounded-[10px] border-[1.5px] border-[#FF4655] bg-[#182430] p-5 text-[#ECE8E1] shadow-2xl">
+      <div className="w-full max-w-[460px] rounded-[10px] border-[1.5px] border-[#FF4655] bg-[#182430] p-5 text-[#ECE8E1] shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2
@@ -160,6 +290,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 onChange={(e) => {
                   setRiotId(e.target.value);
                   setError(null);
+                  setVerifyResult(null);
                 }}
                 placeholder="e.g. RohanYT#IND"
                 className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
@@ -178,6 +309,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                     onClick={() => {
                       setPlatform(plat);
                       setError(null);
+                      setVerifyResult(null);
                     }}
                     className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
                       platform === plat
@@ -193,7 +325,10 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-[#ECE8E1]">
-                Channel Display Name
+                Channel Display Name{' '}
+                <span className="font-normal text-[#94A3B8]">
+                  (or leave blank &amp; click Verify to auto-fill)
+                </span>
               </label>
               <input
                 type="text"
@@ -201,6 +336,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 onChange={(e) => {
                   setChannelName(e.target.value);
                   setError(null);
+                  setVerifyResult(null);
                 }}
                 placeholder="e.g. Rohan Gaming"
                 className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-2 text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
@@ -217,6 +353,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 onChange={(e) => {
                   setChannelUrl(e.target.value);
                   setError(null);
+                  setVerifyResult(null);
                 }}
                 placeholder={
                   platform === 'YouTube'
@@ -228,6 +365,86 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
               />
             </div>
+
+            {/* Verify Link & Name Action Row */}
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={handleVerify}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#2DD4BF]/70 bg-[#21303F] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#2a3c4e] whitespace-nowrap"
+              >
+                <ShieldCheck className="h-3.5 w-3.5 text-[#2DD4BF]" />
+                Verify Link &amp; Name
+              </button>
+              {canOpenUrl ? (
+                <a
+                  href={trimmedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-md border border-[#2B3A48] bg-[#21303F] px-2.5 py-1.5 text-xs font-medium text-[#ECE8E1] transition-colors hover:bg-[#2a3c4e] whitespace-nowrap"
+                >
+                  Open Link
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <span className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border border-[#2B3A48]/60 bg-[#0F1923] px-2.5 py-1.5 text-xs text-[#64748B] whitespace-nowrap">
+                  Open Link
+                  <ExternalLink className="h-3 w-3" />
+                </span>
+              )}
+            </div>
+
+            {verifyResult && (
+              <div
+                className={`rounded-md border px-3 py-2 text-xs ${
+                  verifyResult.kind === 'ok'
+                    ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
+                    : verifyResult.kind === 'warn'
+                    ? 'border-[#FB923C]/40 bg-[#FB923C]/10 text-[#FB923C]'
+                    : 'border-[#FF4655]/40 bg-[#FF4655]/10 text-[#FF4655]'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  {verifyResult.kind === 'ok' ? (
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  ) : verifyResult.kind === 'warn' ? (
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  ) : (
+                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <div className="space-y-1.5">
+                    <p>{verifyResult.msg}</p>
+                    {verifyResult.kind !== 'ok' && verifyResult.suggestedPlatform && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPlatform(verifyResult.suggestedPlatform!);
+                          setVerifyResult(null);
+                        }}
+                        className="rounded border border-[#FF4655] bg-[#21303F] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#2a3c4e]"
+                      >
+                        Switch Platform to {verifyResult.suggestedPlatform}
+                      </button>
+                    )}
+                    {verifyResult.kind === 'warn' && verifyResult.suggestedName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChannelName(verifyResult.suggestedName!);
+                          setVerifyResult({
+                            kind: 'ok',
+                            msg: `Channel name updated to "${verifyResult.suggestedName}" and verified.`,
+                          });
+                        }}
+                        className="rounded border border-[#FB923C] bg-[#21303F] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#2a3c4e]"
+                      >
+                        Use detected name: {verifyResult.suggestedName}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {error && (
               <p className="text-xs font-medium text-[#FF4655]" role="alert">

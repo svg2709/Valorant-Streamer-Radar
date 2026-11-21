@@ -139,7 +139,7 @@ fn short(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
     } else {
-        s.chars().take(n).collect::<String>() + "…"
+        s.chars().take(n).collect::<String>() + "..."
     }
 }
 
@@ -322,11 +322,33 @@ fn default_platform() -> String {
     "YouTube".to_string()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RiotStatus {
+    Offline,
+    RiotClientOnly,
+    ValorantActive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CheckState {
+    Idle,
+    Checking,
+    Ok(String),
+    Warn { msg: String, suggested_name: Option<String> },
+    Err(String),
+}
+
+enum BgTask {
+    TestYouTubeKey(String),
+    TestTwitchKeys { client_id: String, client_secret: String },
+    VerifyStreamer { riot_id: String, platform: String, channel_name: String, channel_url: String },
+}
+
 struct AppState {
     status: String,
     is_scanning: bool,
     is_syncing_directory: bool,
-    valorant_running: bool,
+    riot_status: RiotStatus,
     detected_shard: String,
     config: AppConfig,
     history: Vec<StreamerEntry>,
@@ -334,6 +356,9 @@ struct AppState {
     remote_directory: Vec<DirectoryStreamer>,
     toast: Option<(String, Instant)>,
     last_scanned_match: Option<String>,
+    yt_key_check: CheckState,
+    twitch_key_check: CheckState,
+    streamer_verify: CheckState,
 }
 
 fn set_toast(state: &Arc<Mutex<AppState>>, msg: impl Into<String>) {
@@ -381,8 +406,11 @@ enum ScanTrigger {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EntitlementsResponse {
+    #[serde(default)]
     access_token: String,
+    #[serde(default)]
     token: String,
+    #[serde(default)]
     subject: String,
 }
 
@@ -511,7 +539,7 @@ fn urlencode(s: &str) -> String {
 // RIOT LOCAL CLIENT & MULTI-SHARD MATCH ENDPOINTS
 // ============================================================================
 
-fn read_riot_lockfile() -> Result<(String, String)> {
+fn read_riot_lockfile() -> Result<(String, String, String)> {
     let local_app_data = env::var_os("LOCALAPPDATA").context("LOCALAPPDATA not set")?;
     let lockfile_path = PathBuf::from(local_app_data)
         .join("Riot Games")
@@ -524,7 +552,8 @@ fn read_riot_lockfile() -> Result<(String, String)> {
     if parts.len() < 5 {
         return Err(anyhow!("Invalid lockfile format"));
     }
-    Ok((parts[2].to_string(), parts[3].to_string()))
+    let protocol = if parts[4].trim().is_empty() { "https" } else { parts[4].trim() };
+    Ok((parts[2].trim().to_string(), parts[3].trim().to_string(), protocol.to_string()))
 }
 
 static CLIENT_VERSION: Mutex<Option<(String, Instant)>> = Mutex::new(None);
@@ -658,20 +687,64 @@ async fn riot_json(rb: reqwest::RequestBuilder) -> Result<Value> {
     Ok(resp.json().await?)
 }
 
-async fn riot_authenticate(local: &Client, public: &Client) -> Result<RiotAuth> {
-    let (port, password) = read_riot_lockfile()?;
+async fn fetch_local_entitlements(local: &Client) -> Result<EntitlementsResponse> {
+    let (port, password, protocol) = read_riot_lockfile()?;
     let auth_header = format!("Basic {}", STANDARD.encode(format!("riot:{password}")));
-    let ent: EntitlementsResponse = local
-        .get(format!("https://127.0.0.1:{port}/entitlements/v1/token"))
+    let url = format!("{protocol}://127.0.0.1:{port}/entitlements/v1/token");
+
+    let resp = local
+        .get(&url)
         .header("Authorization", auth_header)
+        .header("Accept", "application/json")
+        .header("User-Agent", BROWSER_UA)
         .send()
         .await
-        .context("Riot Client local API unreachable")?
-        .error_for_status()
-        .context("Entitlements request rejected")?
-        .json()
-        .await
-        .context("Unexpected entitlements response")?;
+        .context("Riot Client local API unreachable (is Valorant running?)")?;
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let riot_msg = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|v| v["message"].as_str().map(String::from))
+            .unwrap_or_default();
+        log(format!("Entitlements HTTP {} from {}: {}", status.as_u16(), url, short(&body, 240)));
+
+        return match status.as_u16() {
+            400 | 404 => Err(anyhow!(
+                "Open & sign into Valorant first (Riot Client HTTP {}{})",
+                status.as_u16(),
+                if riot_msg.is_empty() { String::new() } else { format!(": {}", short(&riot_msg, 40)) }
+            )),
+            401 | 403 => Err(anyhow!(
+                "Riot lockfile rejected (HTTP {}) - restart Riot Client & Valorant",
+                status.as_u16()
+            )),
+            _ => Err(anyhow!("Riot entitlements returned HTTP {}", status.as_u16())),
+        };
+    }
+
+    let ent: EntitlementsResponse =
+        serde_json::from_str(&body).context("Unexpected entitlements JSON from Riot Client")?;
+    if ent.access_token.is_empty() || ent.token.is_empty() || ent.subject.is_empty() {
+        return Err(anyhow!("Valorant session not ready yet - sign in & enter lobby"));
+    }
+    Ok(ent)
+}
+
+async fn probe_riot_session(local: &Client) -> RiotStatus {
+    if read_riot_lockfile().is_err() {
+        return RiotStatus::Offline;
+    }
+    match fetch_local_entitlements(local).await {
+        Ok(_) => RiotStatus::ValorantActive,
+        Err(_) => RiotStatus::RiotClientOnly,
+    }
+}
+
+async fn riot_authenticate(local: &Client, public: &Client) -> Result<RiotAuth> {
+    // Re-read lockfile across brief retries to survive Riot Client startup / port rotation races.
+    let ent = retry(2, Duration::from_millis(1200), || fetch_local_entitlements(local)).await?;
     let version = client_version(public).await?;
     Ok(RiotAuth { access_token: ent.access_token, token: ent.token, subject: ent.subject, version })
 }
@@ -785,6 +858,10 @@ static SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
 static YT_DATA_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"var ytInitialData = (\{.*?\});</script>").unwrap());
 static TITLE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<title>(.*?) - YouTube</title>").unwrap());
+static OG_TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']"#).unwrap());
+static OG_TITLE_REV_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']"#).unwrap());
 static CANON_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"<link rel="canonical" href="([^"]+)""#).unwrap());
 
@@ -804,18 +881,270 @@ fn decode_entities(s: &str) -> String {
         .replace("&gt;", ">")
 }
 
-async fn http_get_text(client: &Client, url: &str) -> Option<String> {
+async fn http_get_text_status(client: &Client, url: &str) -> Result<(reqwest::StatusCode, String)> {
     let resp = client
         .get(url)
         .header("User-Agent", BROWSER_UA)
         .header("Accept-Language", "en-IN,en;q=0.9")
         .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
+        .await?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    Ok((status, body))
+}
+
+async fn http_get_text(client: &Client, url: &str) -> Option<String> {
+    let (status, body) = http_get_text_status(client, url).await.ok()?;
+    if !status.is_success() {
         return None;
     }
-    resp.text().await.ok()
+    Some(body)
+}
+
+async fn test_youtube_api_key(client: &Client, api_key: &str) -> CheckState {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return CheckState::Err("Paste a YouTube Data API v3 key first (or leave blank to run keyless).".into());
+    }
+    match client
+        .get("https://www.googleapis.com/youtube/v3/search")
+        .query(&[
+            ("part", "snippet"),
+            ("q", "Valorant"),
+            ("type", "video"),
+            ("maxResults", "1"),
+            ("key", key),
+        ])
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if status.is_success() {
+                CheckState::Ok("Valid! YouTube Data API v3 key is active.".into())
+            } else {
+                let reason = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .and_then(|v| v["error"]["message"].as_str().map(String::from))
+                    .unwrap_or_else(|| "Check that YouTube Data API v3 is enabled in Google Cloud".into());
+                CheckState::Err(format!("Rejected (HTTP {}): {}", status.as_u16(), short(&reason, 85)))
+            }
+        }
+        Err(e) => CheckState::Err(format!("Network error: {}", short(&e.to_string(), 80))),
+    }
+}
+
+async fn test_twitch_api_keys(client: &Client, client_id: &str, client_secret: &str) -> CheckState {
+    let cid = client_id.trim();
+    let sec = client_secret.trim();
+    if cid.is_empty() || sec.is_empty() {
+        return CheckState::Err("Enter both Twitch Client ID and Client Secret first.".into());
+    }
+    match client
+        .post("https://id.twitch.tv/oauth2/token")
+        .form(&[("client_id", cid), ("client_secret", sec), ("grant_type", "client_credentials")])
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if status.is_success() {
+                if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                    if let Some(tok) = v["access_token"].as_str() {
+                        let ttl = v["expires_in"].as_u64().unwrap_or(3600).saturating_sub(300);
+                        *lock(&TWITCH_TOKEN) = Some((tok.to_string(), Instant::now() + Duration::from_secs(ttl)));
+                    }
+                }
+                CheckState::Ok("Valid! Twitch Helix OAuth credentials verified.".into())
+            } else {
+                let reason = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .and_then(|v| v["message"].as_str().map(String::from))
+                    .unwrap_or_else(|| "Invalid Client ID or Client Secret".into());
+                CheckState::Err(format!("Rejected (HTTP {}): {}", status.as_u16(), short(&reason, 80)))
+            }
+        }
+        Err(e) => CheckState::Err(format!("Network error: {}", short(&e.to_string(), 80))),
+    }
+}
+
+fn names_roughly_match(entered: &str, detected: &str) -> bool {
+    let a = normalize(entered);
+    let b = normalize(detected);
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    a == b || a.contains(&b) || b.contains(&a)
+}
+
+async fn verify_streamer_entry(
+    client: &Client,
+    riot_id: &str,
+    platform: &str,
+    channel_name: &str,
+    channel_url: &str,
+) -> CheckState {
+    let rid = riot_id.trim();
+    let cname = channel_name.trim();
+    let curl = channel_url.trim();
+
+    // 1. Validate Riot ID format
+    let Some((name, tag)) = rid.split_once('#') else {
+        return CheckState::Err("Riot ID must include '#' (example: RohanYT#IND).".into());
+    };
+    let name_len = name.trim().chars().count();
+    if !(3..=16).contains(&name_len) || !(3..=5).contains(&tag.len()) || !tag.chars().all(|c| c.is_alphanumeric()) {
+        return CheckState::Err("Riot ID looks invalid (name 3-16 chars, tag 3-5 letters/digits).".into());
+    }
+
+    // 2. Validate URL host & detect wrong platform selection
+    let Some(host) = host_of(curl) else {
+        return CheckState::Err("Channel URL must start with https:// and be a valid link.".into());
+    };
+    if !host_allowed(platform, &host) {
+        for other in ["YouTube", "Twitch", "Kick"] {
+            if other != platform && host_allowed(other, &host) {
+                return CheckState::Err(format!(
+                    "URL belongs to {other}, not {platform}. Switch Platform to {other}."
+                ));
+            }
+        }
+        return CheckState::Err(format!("URL host '{host}' is not a valid {platform} domain."));
+    }
+
+    // 3. Live reachability + real channel name lookup
+    match platform {
+        "YouTube" => match http_get_text_status(client, curl).await {
+            Ok((status, html)) => {
+                if status == reqwest::StatusCode::NOT_FOUND {
+                    return CheckState::Err("YouTube channel not found (HTTP 404). Check the handle/URL.".into());
+                }
+                if !status.is_success() {
+                    return CheckState::Err(format!("YouTube returned HTTP {}. Check the channel link.", status.as_u16()));
+                }
+                let detected = OG_TITLE_RE
+                    .captures(&html)
+                    .or_else(|| OG_TITLE_REV_RE.captures(&html))
+                    .or_else(|| TITLE_RE.captures(&html))
+                    .map(|c| decode_entities(c[1].trim()))
+                    .unwrap_or_default();
+
+                if detected.is_empty() || detected.eq_ignore_ascii_case("YouTube") {
+                    return CheckState::Warn {
+                        msg: "Page loaded, but could not confirm channel name. Click 'Open Link' to verify.".into(),
+                        suggested_name: None,
+                    };
+                }
+                let live_note = if html.contains(r#""isLive":true"#) { " (LIVE now!)" } else { "" };
+                if cname.is_empty() {
+                    CheckState::Warn {
+                        msg: format!("Found YouTube channel '{detected}'{live_note}. Click 'Use detected name' to fill it."),
+                        suggested_name: Some(short(&detected, 64)),
+                    }
+                } else if names_roughly_match(cname, &detected) {
+                    CheckState::Ok(format!("Verified! Riot ID valid & YouTube channel '{detected}' matched{live_note}."))
+                } else {
+                    CheckState::Warn {
+                        msg: format!("Link works, but channel is named '{detected}'{live_note} (you entered '{cname}')."),
+                        suggested_name: Some(short(&detected, 64)),
+                    }
+                }
+            }
+            Err(e) => CheckState::Err(format!("Could not reach YouTube: {}", short(&e.to_string(), 75))),
+        },
+        "Twitch" => {
+            let login = last_path_segment(curl).to_lowercase();
+            if login.len() < 3 || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return CheckState::Err("Twitch URL must end with a channel name (e.g. https://www.twitch.tv/tenz).".into());
+            }
+            let body = serde_json::json!({
+                "query": "query($login: String!) { user(login: $login) { login displayName stream { title } } }",
+                "variables": { "login": login }
+            });
+            match client
+                .post("https://gql.twitch.tv/gql")
+                .header("Client-Id", "kimne78kx3ncx6brgo4mv6wki5h1ko")
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    let v: Value = resp.json().await.unwrap_or(Value::Null);
+                    let user = &v["data"]["user"];
+                    if !user.is_object() {
+                        return CheckState::Err(format!("Twitch user '{login}' does not exist. Check spelling."));
+                    }
+                    let display = user["displayName"].as_str().unwrap_or(&login).to_string();
+                    let live_note = if user["stream"].is_object() { " (LIVE now!)" } else { "" };
+                    if cname.is_empty() {
+                        CheckState::Warn {
+                            msg: format!("Found Twitch channel '{display}'{live_note}. Click 'Use detected name' to fill it."),
+                            suggested_name: Some(short(&display, 64)),
+                        }
+                    } else if names_roughly_match(cname, &display) {
+                        CheckState::Ok(format!("Verified! Riot ID valid & Twitch channel '{display}' matched{live_note}."))
+                    } else {
+                        CheckState::Warn {
+                            msg: format!("Link works, but Twitch channel is '{display}'{live_note} (you entered '{cname}')."),
+                            suggested_name: Some(short(&display, 64)),
+                        }
+                    }
+                }
+                Ok(resp) => CheckState::Warn {
+                    msg: format!("URL format valid, but Twitch check returned HTTP {}. Click 'Open Link' to verify.", resp.status().as_u16()),
+                    suggested_name: None,
+                },
+                Err(e) => CheckState::Err(format!("Could not reach Twitch: {}", short(&e.to_string(), 75))),
+            }
+        }
+        "Kick" => {
+            let slug = last_path_segment(curl).to_lowercase();
+            if slug.len() < 3 || !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                return CheckState::Err("Kick URL must end with a channel slug (e.g. https://kick.com/kairoclutch).".into());
+            }
+            match client
+                .get(format!("https://kick.com/api/v2/channels/{slug}"))
+                .header("User-Agent", BROWSER_UA)
+                .header("Accept", "application/json")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    let v: Value = resp.json().await.unwrap_or(Value::Null);
+                    let display = v["user"]["username"].as_str().unwrap_or(&slug).to_string();
+                    let live_note = if v["livestream"].is_object() { " (LIVE now!)" } else { "" };
+                    if cname.is_empty() {
+                        CheckState::Warn {
+                            msg: format!("Found Kick channel '{display}'{live_note}. Click 'Use detected name' to fill it."),
+                            suggested_name: Some(short(&display, 64)),
+                        }
+                    } else if names_roughly_match(cname, &display) {
+                        CheckState::Ok(format!("Verified! Riot ID valid & Kick channel '{display}' matched{live_note}."))
+                    } else {
+                        CheckState::Warn {
+                            msg: format!("Link works, but Kick channel is '{display}'{live_note} (you entered '{cname}')."),
+                            suggested_name: Some(short(&display, 64)),
+                        }
+                    }
+                }
+                Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                    CheckState::Err(format!("Kick channel '{slug}' not found (HTTP 404)."))
+                }
+                Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => CheckState::Warn {
+                    msg: "Format valid, but Kick Cloudflare blocked auto-check. Click 'Open Link' to confirm.".into(),
+                    suggested_name: None,
+                },
+                Ok(resp) => CheckState::Warn {
+                    msg: format!("URL format valid, Kick returned HTTP {}. Click 'Open Link' to confirm.", resp.status().as_u16()),
+                    suggested_name: None,
+                },
+                Err(e) => CheckState::Err(format!("Could not reach Kick: {}", short(&e.to_string(), 75))),
+            }
+        }
+        _ => CheckState::Err("Unsupported platform selected.".into()),
+    }
 }
 
 /// Directory-linked YouTube channel: check its `/live` endpoint directly.
@@ -1156,7 +1485,7 @@ fn show_toast(entry: &StreamerEntry, use_custom_app_id: bool) {
     let result = Toast::new(app_id)
         .title(&title)
         .text1(&line1)
-        .text2("Click to open stream • link copied to clipboard")
+        .text2("Click to open stream | link copied to clipboard")
         .duration(ToastDuration::Long)
         .on_activated(move |_| {
             let _ = open::that(&url);
@@ -1218,7 +1547,7 @@ async fn scan_player(
 ) -> Vec<StreamerEntry> {
     let player = player_info.record;
     let riot_id = format!("{}#{}", player.game_name, player.tag_line);
-    let timestamp = Local::now().format("%d %b %Y • %I:%M %p").to_string();
+    let timestamp = Local::now().format("%d %b %Y | %I:%M %p").to_string();
     let team_relation = player_info.team_relation;
     let agent_name = player_info.agent_name;
 
@@ -1293,7 +1622,7 @@ async fn sync_directory_only(public_client: Client, state: Arc<Mutex<AppState>>,
     if ok {
         set_toast(&state, format!("Synced directory from {owner}/{repo}"));
     } else {
-        set_toast(&state, "GitHub unreachable — using cached directory");
+        set_toast(&state, "GitHub unreachable - using cached directory");
     }
     repaint(&ctx);
 }
@@ -1329,7 +1658,7 @@ async fn scan_last_match(
         Ok(v) => v,
         Err(e) => {
             log(format!("Match fetch failed on {shard}: {e:#}"));
-            set_status(&state, &ctx, format!("Could not fetch match: {}", short(&e.to_string(), 70)));
+            set_status(&state, &ctx, format!("Could not fetch match: {}", short(&e.to_string(), 110)));
             return;
         }
     };
@@ -1388,7 +1717,7 @@ async fn scan_last_match(
     let status = if found > 0 {
         format!("Found {found} live stream(s) in last match!")
     } else {
-        format!("Last checked at {} • No live streamers found", Local::now().format("%I:%M %p"))
+        format!("Last checked at {} | No live streamers found", Local::now().format("%I:%M %p"))
     };
     set_status(&state, &ctx, status);
 }
@@ -1449,6 +1778,7 @@ fn detect_initial_shard(path: &Path) -> Option<String> {
 
 async fn watch_log(
     log_path: PathBuf,
+    local_client: Client,
     state: Arc<Mutex<AppState>>,
     ctx: egui::Context,
     tx: mpsc::UnboundedSender<ScanTrigger>,
@@ -1461,13 +1791,28 @@ async fn watch_log(
     let initial = fs::metadata(&log_path).ok();
     let mut last_pos = initial.as_ref().map(|m| m.len()).unwrap_or(0);
     let mut last_created = initial.and_then(|m| m.created().ok());
-    let mut last_running = None;
+    let mut last_riot_status: Option<RiotStatus> = None;
+    let mut last_probe: Option<Instant> = None;
 
     loop {
-        let running = read_riot_lockfile().is_ok();
-        if last_running != Some(running) {
-            last_running = Some(running);
-            lock(&state).valorant_running = running;
+        let has_lockfile = read_riot_lockfile().is_ok();
+        let should_probe = match (has_lockfile, last_riot_status, last_probe) {
+            (false, _, _) => false,
+            (true, None, _) | (true, Some(RiotStatus::Offline), _) => true,
+            (true, _, Some(at)) => at.elapsed() >= Duration::from_secs(5),
+            (true, _, None) => true,
+        };
+        let next_status = if !has_lockfile {
+            RiotStatus::Offline
+        } else if should_probe {
+            last_probe = Some(Instant::now());
+            probe_riot_session(&local_client).await
+        } else {
+            last_riot_status.unwrap_or(RiotStatus::RiotClientOnly)
+        };
+        if last_riot_status != Some(next_status) {
+            last_riot_status = Some(next_status);
+            lock(&state).riot_status = next_status;
             repaint(&ctx);
         }
 
@@ -1503,7 +1848,7 @@ async fn watch_log(
                         if line.contains("InGame") {
                             if !in_match {
                                 in_match = true;
-                                set_status(&state, &ctx, "In Match • Waiting for match end...");
+                                set_status(&state, &ctx, "In Match | Waiting for match end...");
                             }
                         } else if in_match && line.contains("MainMenu") {
                             in_match = false;
@@ -1591,9 +1936,118 @@ enum DirectorySourceTab {
     Community,
 }
 
+/// Crisp vector-painted icons (avoids missing Unicode glyphs in egui's bundled font).
+fn paint_status_dot(ui: &mut egui::Ui, color: Color32, glowing: bool) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
+    let c = rect.center();
+    if glowing {
+        ui.painter().circle_filled(c, 5.5, color.linear_multiply(0.28));
+    }
+    ui.painter().circle_filled(c, 3.6, color);
+}
+
+fn paint_check_icon(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+    let p = ui.painter();
+    let stroke = Stroke::new(1.8, color);
+    let a = egui::pos2(rect.left() + 2.5, rect.center().y + 0.5);
+    let b = egui::pos2(rect.left() + 5.5, rect.bottom() - 3.0);
+    let c = egui::pos2(rect.right() - 2.0, rect.top() + 3.0);
+    p.line_segment([a, b], stroke);
+    p.line_segment([b, c], stroke);
+}
+
+fn paint_cross_icon(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+    let p = ui.painter();
+    let stroke = Stroke::new(1.8, color);
+    let r = rect.shrink(3.0);
+    p.line_segment([r.left_top(), r.right_bottom()], stroke);
+    p.line_segment([r.right_top(), r.left_bottom()], stroke);
+}
+
+fn paint_warn_icon(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+    let p = ui.painter();
+    let stroke = Stroke::new(1.5, color);
+    let top = egui::pos2(rect.center().x, rect.top() + 1.5);
+    let bl = egui::pos2(rect.left() + 1.5, rect.bottom() - 2.0);
+    let br = egui::pos2(rect.right() - 1.5, rect.bottom() - 2.0);
+    p.line_segment([top, br], stroke);
+    p.line_segment([br, bl], stroke);
+    p.line_segment([bl, top], stroke);
+    p.circle_filled(egui::pos2(rect.center().x, rect.bottom() - 4.5), 1.0, color);
+}
+
+fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> {
+    let mut apply_name: Option<String> = None;
+    match state {
+        CheckState::Idle => {}
+        CheckState::Checking => {
+            ui.horizontal(|ui| {
+                paint_status_dot(ui, ENEMY_AMBER, true);
+                ui.label(RichText::new("Checking live credentials...").color(TEXT_MUTED).size(12.0));
+            });
+        }
+        CheckState::Ok(msg) => {
+            Frame::none()
+                .fill(LIVE_GREEN.linear_multiply(0.12))
+                .stroke(Stroke::new(1.0, LIVE_GREEN.linear_multiply(0.55)))
+                .rounding(Rounding::same(5.0))
+                .inner_margin(Margin::symmetric(8.0, 6.0))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        paint_check_icon(ui, LIVE_GREEN);
+                        ui.label(RichText::new(msg).color(LIVE_GREEN).size(12.0));
+                    });
+                });
+        }
+        CheckState::Warn { msg, suggested_name } => {
+            Frame::none()
+                .fill(ENEMY_AMBER.linear_multiply(0.12))
+                .stroke(Stroke::new(1.0, ENEMY_AMBER.linear_multiply(0.55)))
+                .rounding(Rounding::same(5.0))
+                .inner_margin(Margin::symmetric(8.0, 6.0))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        paint_warn_icon(ui, ENEMY_AMBER);
+                        ui.label(RichText::new(msg).color(ENEMY_AMBER).size(12.0));
+                    });
+                    if let Some(name) = suggested_name {
+                        ui.add_space(5.0);
+                        let use_btn = egui::Button::new(
+                            RichText::new(format!("Use detected name: {name}")).color(Color32::WHITE).strong().size(11.5),
+                        )
+                        .fill(BTN_SECONDARY)
+                        .stroke(Stroke::new(1.0, ENEMY_AMBER))
+                        .rounding(Rounding::same(4.0));
+                        if ui.add(use_btn).clicked() {
+                            apply_name = Some(name.clone());
+                        }
+                    }
+                });
+        }
+        CheckState::Err(msg) => {
+            Frame::none()
+                .fill(ACCENT_RED.linear_multiply(0.12))
+                .stroke(Stroke::new(1.0, ACCENT_RED.linear_multiply(0.6)))
+                .rounding(Rounding::same(5.0))
+                .inner_margin(Margin::symmetric(8.0, 6.0))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        paint_cross_icon(ui, ACCENT_RED);
+                        ui.label(RichText::new(msg).color(ACCENT_RED).size(12.0));
+                    });
+                });
+        }
+    }
+    apply_name
+}
+
 struct StreamerApp {
     state: Arc<Mutex<AppState>>,
     manual_scan_tx: mpsc::UnboundedSender<ScanTrigger>,
+    bg_tx: mpsc::UnboundedSender<BgTask>,
     pending_initial_hide: bool,
     active_tab: ActiveTab,
     // History filters
@@ -1621,6 +2075,7 @@ impl StreamerApp {
         cc: &eframe::CreationContext<'_>,
         state: Arc<Mutex<AppState>>,
         tx: mpsc::UnboundedSender<ScanTrigger>,
+        bg_tx: mpsc::UnboundedSender<BgTask>,
         start_hidden: bool,
     ) -> Self {
         let mut visuals = egui::Visuals::dark();
@@ -1638,6 +2093,7 @@ impl StreamerApp {
         Self {
             state,
             manual_scan_tx: tx,
+            bg_tx,
             pending_initial_hide: start_hidden,
             active_tab: ActiveTab::History,
             search_query: String::new(),
@@ -1672,6 +2128,7 @@ impl StreamerApp {
             self.input_channel_url.clear();
         }
         self.modal_error = None;
+        lock(&self.state).streamer_verify = CheckState::Idle;
         self.show_add_modal = true;
     }
 
@@ -1794,12 +2251,15 @@ impl eframe::App for StreamerApp {
             status,
             is_scanning,
             is_syncing_dir,
-            valorant_running,
+            riot_status,
             active_shard,
             history,
             local_dir,
             remote_dir,
             toast,
+            streamer_verify,
+            yt_key_check,
+            twitch_key_check,
         ) = {
             let mut s = lock(&self.state);
             if matches!(&s.toast, Some((_, at)) if at.elapsed() > TOAST_TTL) {
@@ -1810,12 +2270,15 @@ impl eframe::App for StreamerApp {
                 s.status.clone(),
                 s.is_scanning,
                 s.is_syncing_directory,
-                s.valorant_running,
+                s.riot_status,
                 shard,
                 s.history.clone(),
                 s.local_directory.clone(),
                 s.remote_directory.clone(),
                 s.toast.as_ref().map(|(m, _)| m.clone()),
+                s.streamer_verify.clone(),
+                s.yt_key_check.clone(),
+                s.twitch_key_check.clone(),
             )
         };
         if toast.is_some() {
@@ -1839,12 +2302,24 @@ impl eframe::App for StreamerApp {
                         });
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            let (dot, text) = if valorant_running {
-                                (LIVE_GREEN, format!("Valorant Active ({})", shard_label(active_shard)))
-                            } else {
-                                (TEXT_MUTED, format!("Waiting for Valorant ({})", shard_label(active_shard)))
+                            let (dot, glowing, text) = match riot_status {
+                                RiotStatus::ValorantActive => (
+                                    LIVE_GREEN,
+                                    true,
+                                    format!("Valorant Active ({})", shard_label(active_shard)),
+                                ),
+                                RiotStatus::RiotClientOnly => (
+                                    ENEMY_AMBER,
+                                    true,
+                                    format!("Riot Client Open - Launch Valorant ({})", shard_label(active_shard)),
+                                ),
+                                RiotStatus::Offline => (
+                                    TEXT_MUTED,
+                                    false,
+                                    format!("Waiting for Valorant ({})", shard_label(active_shard)),
+                                ),
                             };
-                            ui.label(RichText::new("●").color(dot).size(11.0));
+                            paint_status_dot(ui, dot, glowing);
                             ui.label(RichText::new(text).color(TEXT_MUTED).size(12.5));
                             ui.label(RichText::new("  |  ").color(CARD_BORDER));
                             ui.label(RichText::new(&status).color(TEXT_MUTED).size(12.5));
@@ -1918,12 +2393,18 @@ impl eframe::App for StreamerApp {
             } else {
                 "Register Streamer to Directory"
             };
-            let (mut submit_gh, mut submit_local, mut cancel) = (false, false, false);
+            let (mut submit_gh, mut submit_local, mut cancel, mut trigger_verify) = (false, false, false, false);
+            let mut apply_suggested_name: Option<String> = None;
+            let mut changed_input = false;
+            let is_verifying = matches!(streamer_verify, CheckState::Checking);
+
             egui::Window::new(modal_title)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .fixed_size([430.0, 320.0])
+                .default_width(460.0)
+                .min_width(460.0)
+                .max_width(460.0)
                 .frame(
                     Frame::none()
                         .fill(CARD_BG)
@@ -1936,45 +2417,100 @@ impl eframe::App for StreamerApp {
                     ui.add_space(12.0);
 
                     ui.label(RichText::new("Riot ID (IGN#TAG)").strong().color(TEXT_PRIMARY));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.input_riot_id)
-                            .hint_text("e.g. RohanYT#IND")
-                            .desired_width(f32::INFINITY)
-                            .margin(Margin::symmetric(8.0, 6.0)),
-                    );
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.input_riot_id)
+                                .hint_text("e.g. RohanYT#IND")
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        changed_input = true;
+                    }
                     ui.add_space(8.0);
 
                     ui.label(RichText::new("Platform").strong().color(TEXT_PRIMARY));
                     ui.horizontal(|ui| {
                         for plat in ["YouTube", "Twitch", "Kick"] {
-                            ui.selectable_value(&mut self.input_platform, plat.to_string(), plat);
+                            if ui.selectable_value(&mut self.input_platform, plat.to_string(), plat).changed() {
+                                changed_input = true;
+                            }
                         }
                     });
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Channel Display Name").strong().color(TEXT_PRIMARY));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.input_channel_name)
-                            .hint_text("e.g. Rohan Gaming")
-                            .desired_width(f32::INFINITY)
-                            .margin(Margin::symmetric(8.0, 6.0)),
-                    );
+                    ui.label(RichText::new("Channel Display Name (or leave blank & click Verify to auto-fill)").strong().color(TEXT_PRIMARY));
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.input_channel_name)
+                                .hint_text("e.g. Rohan Gaming")
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        changed_input = true;
+                    }
                     ui.add_space(8.0);
 
                     ui.label(RichText::new("Channel URL").strong().color(TEXT_PRIMARY));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.input_channel_url)
-                            .hint_text("e.g. https://www.youtube.com/@RohanGaming")
-                            .desired_width(f32::INFINITY)
-                            .margin(Margin::symmetric(8.0, 6.0)),
-                    );
+                    let url_hint = match self.input_platform.as_str() {
+                        "Twitch" => "e.g. https://www.twitch.tv/tenz",
+                        "Kick" => "e.g. https://kick.com/kairoclutch",
+                        _ => "e.g. https://www.youtube.com/@RohanGaming",
+                    };
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.input_channel_url)
+                                .hint_text(url_hint)
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        changed_input = true;
+                    }
+
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        let verify_label = if is_verifying { "Verifying..." } else { "Verify Link & Name" };
+                        let verify_btn = egui::Button::new(RichText::new(verify_label).color(Color32::WHITE).strong().size(12.0))
+                            .fill(BTN_SECONDARY)
+                            .stroke(Stroke::new(1.0, ALLY_TEAL))
+                            .rounding(Rounding::same(5.0))
+                            .min_size(Vec2::new(140.0, 28.0));
+                        if ui.add_enabled(!is_verifying, verify_btn).clicked() {
+                            trigger_verify = true;
+                        }
+
+                        let can_open = host_of(self.input_channel_url.trim())
+                            .map(|h| host_allowed(&self.input_platform, &h))
+                            .unwrap_or(false);
+                        let open_btn = egui::Button::new(RichText::new("Open Link").color(TEXT_PRIMARY).size(12.0))
+                            .fill(BTN_SECONDARY)
+                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .rounding(Rounding::same(5.0))
+                            .min_size(Vec2::new(82.0, 28.0));
+                        if ui.add_enabled(can_open, open_btn).clicked() {
+                            let _ = open::that(self.input_channel_url.trim());
+                        }
+                    });
+
+                    if !matches!(streamer_verify, CheckState::Idle) {
+                        ui.add_space(8.0);
+                        apply_suggested_name = render_check_banner(ui, &streamer_verify);
+                    }
 
                     if let Some(err) = &self.modal_error {
                         ui.add_space(6.0);
-                        ui.label(RichText::new(err).color(ACCENT_RED).size(12.0));
+                        ui.horizontal_wrapped(|ui| {
+                            paint_cross_icon(ui, ACCENT_RED);
+                            ui.label(RichText::new(err).color(ACCENT_RED).size(12.0));
+                        });
                     }
 
-                    ui.add_space(16.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
                         let submit_btn = egui::Button::new(
                             RichText::new("Save & Submit to GitHub").color(Color32::WHITE).strong(),
@@ -1998,6 +2534,26 @@ impl eframe::App for StreamerApp {
                             .clicked();
                     });
                 });
+
+            if changed_input {
+                self.modal_error = None;
+                lock(&self.state).streamer_verify = CheckState::Idle;
+            }
+            if let Some(name) = apply_suggested_name {
+                self.input_channel_name = name.clone();
+                self.modal_error = None;
+                lock(&self.state).streamer_verify = CheckState::Ok(format!("Channel name updated to '{name}' and verified."));
+            }
+            if trigger_verify {
+                self.modal_error = None;
+                lock(&self.state).streamer_verify = CheckState::Checking;
+                let _ = self.bg_tx.send(BgTask::VerifyStreamer {
+                    riot_id: self.input_riot_id.clone(),
+                    platform: self.input_platform.clone(),
+                    channel_name: self.input_channel_name.clone(),
+                    channel_url: self.input_channel_url.clone(),
+                });
+            }
             if submit_gh {
                 self.submit_modal(true);
             } else if submit_local {
@@ -2005,6 +2561,7 @@ impl eframe::App for StreamerApp {
             } else if cancel {
                 self.show_add_modal = false;
                 self.editing_original = None;
+                lock(&self.state).streamer_verify = CheckState::Idle;
             }
         }
 
@@ -2014,7 +2571,7 @@ impl eframe::App for StreamerApp {
             .show(ctx, |ui| match self.active_tab {
                 ActiveTab::History => self.render_history_tab(ui, &history),
                 ActiveTab::Directory => self.render_directory_tab(ui, &local_dir, &remote_dir, is_syncing_dir),
-                ActiveTab::Settings => self.render_settings_tab(ui),
+                ActiveTab::Settings => self.render_settings_tab(ui, &yt_key_check, &twitch_key_check),
             });
     }
 }
@@ -2143,7 +2700,7 @@ impl StreamerApp {
                                     meta_parts.push(&entry.queue_name);
                                 }
                                 meta_parts.push(&entry.timestamp);
-                                ui.label(RichText::new(meta_parts.join("  •  ")).color(TEXT_MUTED).size(11.5));
+                                ui.label(RichText::new(meta_parts.join("  |  ")).color(TEXT_MUTED).size(11.5));
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2311,7 +2868,7 @@ impl StreamerApp {
         }
     }
 
-    fn render_settings_tab(&mut self, ui: &mut egui::Ui) {
+    fn render_settings_tab(&mut self, ui: &mut egui::Ui, yt_check: &CheckState, twitch_check: &CheckState) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             Frame::none()
                 .fill(CARD_BG)
@@ -2371,34 +2928,140 @@ impl StreamerApp {
                             ui.checkbox(&mut self.show_api_secrets, "Show keys");
                         });
                     });
-                    ui.label(RichText::new("Leave blank to use keyless fallbacks on YouTube, Twitch, and Kick.").color(TEXT_MUTED).size(12.0));
+                    ui.label(RichText::new("Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.").color(TEXT_MUTED).size(12.0));
                     ui.add_space(10.0);
 
-                    ui.label(RichText::new("YouTube Data API v3 Key").strong().color(TEXT_PRIMARY).size(12.5));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.cfg_draft.youtube_api_key)
-                            .password(!self.show_api_secrets)
-                            .desired_width(f32::INFINITY)
-                            .margin(Margin::symmetric(8.0, 6.0)),
-                    );
-                    ui.add_space(8.0);
+                    // YouTube Data API v3 Key row
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("YouTube Data API v3 Key").strong().color(TEXT_PRIMARY).size(12.5));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let yt_busy = matches!(yt_check, CheckState::Checking);
+                            let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).color(TEXT_PRIMARY).size(11.5))
+                                .fill(BTN_SECONDARY)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(4.0));
+                            if ui.add_enabled(!yt_busy, test_yt).clicked() {
+                                lock(&self.state).yt_key_check = CheckState::Checking;
+                                let _ = self.bg_tx.send(BgTask::TestYouTubeKey(self.cfg_draft.youtube_api_key.clone()));
+                            }
+                            let get_yt = egui::Button::new(RichText::new("Get YouTube Key").color(Color32::WHITE).strong().size(11.5))
+                                .fill(ACCENT_RED)
+                                .rounding(Rounding::same(4.0));
+                            if ui.add(get_yt).on_hover_text("Opens Google Cloud Console -> Credentials").clicked() {
+                                let _ = open::that("https://console.cloud.google.com/apis/credentials");
+                            }
+                        });
+                    });
+                    ui.add_space(4.0);
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.cfg_draft.youtube_api_key)
+                                .password(!self.show_api_secrets)
+                                .hint_text("AIza... (optional)")
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        lock(&self.state).yt_key_check = CheckState::Idle;
+                    }
+                    if !matches!(yt_check, CheckState::Idle) {
+                        ui.add_space(5.0);
+                        render_check_banner(ui, yt_check);
+                    }
+                    ui.add_space(10.0);
 
-                    ui.label(RichText::new("Twitch Client ID").strong().color(TEXT_PRIMARY).size(12.5));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_id)
-                            .password(!self.show_api_secrets)
-                            .desired_width(f32::INFINITY)
-                            .margin(Margin::symmetric(8.0, 6.0)),
-                    );
-                    ui.add_space(8.0);
+                    // Twitch Helix Client ID + Secret row
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Twitch Helix API (Client ID & Secret)").strong().color(TEXT_PRIMARY).size(12.5));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let tw_busy = matches!(twitch_check, CheckState::Checking);
+                            let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).color(TEXT_PRIMARY).size(11.5))
+                                .fill(BTN_SECONDARY)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(4.0));
+                            if ui.add_enabled(!tw_busy, test_tw).clicked() {
+                                lock(&self.state).twitch_key_check = CheckState::Checking;
+                                let _ = self.bg_tx.send(BgTask::TestTwitchKeys {
+                                    client_id: self.cfg_draft.twitch_client_id.clone(),
+                                    client_secret: self.cfg_draft.twitch_client_secret.clone(),
+                                });
+                            }
+                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(Color32::WHITE).strong().size(11.5))
+                                .fill(TWITCH_PURPLE)
+                                .rounding(Rounding::same(4.0));
+                            if ui.add(get_tw).on_hover_text("Opens Twitch Developer Console -> Applications").clicked() {
+                                let _ = open::that("https://dev.twitch.tv/console/apps");
+                            }
+                        });
+                    });
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Twitch Client ID").color(TEXT_MUTED).size(11.5));
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_id)
+                                .password(!self.show_api_secrets)
+                                .hint_text("Optional Helix Client ID")
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        lock(&self.state).twitch_key_check = CheckState::Idle;
+                    }
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Twitch Client Secret").color(TEXT_MUTED).size(11.5));
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_secret)
+                                .password(!self.show_api_secrets)
+                                .hint_text("Optional Helix Client Secret")
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        lock(&self.state).twitch_key_check = CheckState::Idle;
+                    }
+                    if !matches!(twitch_check, CheckState::Idle) {
+                        ui.add_space(5.0);
+                        render_check_banner(ui, twitch_check);
+                    }
 
-                    ui.label(RichText::new("Twitch Client Secret").strong().color(TEXT_PRIMARY).size(12.5));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_secret)
-                            .password(!self.show_api_secrets)
-                            .desired_width(f32::INFINITY)
-                            .margin(Margin::symmetric(8.0, 6.0)),
-                    );
+                    ui.add_space(12.0);
+                    egui::CollapsingHeader::new(
+                        RichText::new("How to get free API keys (Step-by-Step Guide)")
+                            .color(ALLY_TEAL)
+                            .strong()
+                            .size(12.5),
+                    )
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        Frame::none()
+                            .fill(BG_DARK)
+                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .rounding(Rounding::same(6.0))
+                            .inner_margin(Margin::same(12.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("YouTube Data API v3 (Free - 10,000 units/day, no card needed)").strong().color(ACCENT_RED).size(12.0));
+                                ui.label(RichText::new("1. Click 'Get YouTube Key' above to open Google Cloud Console.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("2. Create a new project (e.g. Valorant-Radar) from the top-left selector.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("3. Open APIs & Services -> Library, search 'YouTube Data API v3', click Enable.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("4. Open APIs & Services -> Credentials -> + CREATE CREDENTIALS -> API key.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("5. Paste the AIza... key above, click 'Test Key', then 'Save Settings'.").color(TEXT_PRIMARY).size(11.5));
+
+                                ui.add_space(8.0);
+                                ui.label(RichText::new("Twitch Helix API (Free - requires 2FA on your Twitch account)").strong().color(TWITCH_PURPLE).size(12.0));
+                                ui.label(RichText::new("1. Click 'Get Twitch Keys' above to open Twitch Developer Console.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("2. Click 'Register Your Application', name it 'Valorant Radar'.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("3. Set OAuth Redirect URL to http://localhost and Category to Application Integration.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("4. Open Manage -> copy Client ID, click 'New Secret' -> copy Client Secret.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("5. Paste both above, click 'Test Twitch', then 'Save Settings'.").color(TEXT_PRIMARY).size(11.5));
+
+                                ui.add_space(6.0);
+                                ui.label(RichText::new("Kick does not need an API key. Leaving keys empty still works via keyless fallbacks.").color(TEXT_MUTED).size(11.0));
+                            });
+                    });
                 });
 
             ui.add_space(12.0);
@@ -2479,10 +3142,10 @@ fn main() -> Result<()> {
     register_toast_app_id(config.use_custom_toast_app_id);
 
     let state = Arc::new(Mutex::new(AppState {
-        status: "Idle • Monitoring ShooterGame.log".to_string(),
+        status: "Idle | Monitoring ShooterGame.log".to_string(),
         is_scanning: false,
         is_syncing_directory: false,
-        valorant_running: false,
+        riot_status: RiotStatus::Offline,
         detected_shard: "ap".to_string(),
         config: config.clone(),
         history: load_json("streamer_history.json"),
@@ -2490,6 +3153,9 @@ fn main() -> Result<()> {
         remote_directory: load_json("directory_cache.json"),
         toast: None,
         last_scanned_match: None,
+        yt_key_check: CheckState::Idle,
+        twitch_key_check: CheckState::Idle,
+        streamer_verify: CheckState::Idle,
     }));
 
     let tray_menu = Menu::new();
@@ -2507,6 +3173,7 @@ fn main() -> Result<()> {
         .build()?;
 
     let (scan_tx, mut scan_rx) = mpsc::unbounded_channel::<ScanTrigger>();
+    let (bg_tx, mut bg_rx) = mpsc::unbounded_channel::<BgTask>();
 
     let window_icon = Arc::new(egui::IconData {
         rgba: radar_icon_rgba(),
@@ -2518,7 +3185,7 @@ fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Valorant Streamer Radar")
             .with_icon(window_icon)
-            .with_inner_size([820.0, 560.0])
+            .with_inner_size([840.0, 580.0])
             .with_min_inner_size([660.0, 440.0])
             .with_visible(!start_hidden),
         ..Default::default()
@@ -2526,6 +3193,7 @@ fn main() -> Result<()> {
 
     let state_for_app = state.clone();
     let tx_for_app = scan_tx.clone();
+    let bg_tx_for_app = bg_tx.clone();
 
     eframe::run_native(
         "Valorant Streamer Radar",
@@ -2576,6 +3244,7 @@ fn main() -> Result<()> {
                 rt.block_on(async move {
                     let local_client = Client::builder()
                         .danger_accept_invalid_certs(true) // Riot's local API uses a self-signed cert
+                        .http1_only()
                         .no_proxy()
                         .timeout(Duration::from_secs(10))
                         .build()
@@ -2586,8 +3255,35 @@ fn main() -> Result<()> {
                         .build()
                         .expect("public HTTP client");
 
+                    // Non-blocking worker for API key tests & live streamer credential verification.
+                    let (st_check, cx_check, pub_check) = (state_bg.clone(), ctx_bg.clone(), public_client.clone());
+                    tokio::spawn(async move {
+                        while let Some(task) = bg_rx.recv().await {
+                            let (st, cx, client) = (st_check.clone(), cx_check.clone(), pub_check.clone());
+                            tokio::spawn(async move {
+                                match task {
+                                    BgTask::TestYouTubeKey(key) => {
+                                        let res = test_youtube_api_key(&client, &key).await;
+                                        lock(&st).yt_key_check = res;
+                                        repaint(&cx);
+                                    }
+                                    BgTask::TestTwitchKeys { client_id, client_secret } => {
+                                        let res = test_twitch_api_keys(&client, &client_id, &client_secret).await;
+                                        lock(&st).twitch_key_check = res;
+                                        repaint(&cx);
+                                    }
+                                    BgTask::VerifyStreamer { riot_id, platform, channel_name, channel_url } => {
+                                        let res = verify_streamer_entry(&client, &riot_id, &platform, &channel_name, &channel_url).await;
+                                        lock(&st).streamer_verify = res;
+                                        repaint(&cx);
+                                    }
+                                }
+                            });
+                        }
+                    });
+
                     // Single worker serializes all scans (manual + post-match) and survives panics.
-                    let (st, cx) = (state_bg.clone(), ctx_bg.clone());
+                    let (st, cx, local_scan) = (state_bg.clone(), ctx_bg.clone(), local_client.clone());
                     tokio::spawn(async move {
                         while let Some(first) = scan_rx.recv().await {
                             let mut trigger = first;
@@ -2614,7 +3310,7 @@ fn main() -> Result<()> {
 
                             lock(&st).is_scanning = true;
                             let handle = tokio::spawn(scan_last_match(
-                                local_client.clone(),
+                                local_scan.clone(),
                                 public_client.clone(),
                                 st.clone(),
                                 cx.clone(),
@@ -2634,14 +3330,14 @@ fn main() -> Result<()> {
                         .join("Saved")
                         .join("Logs")
                         .join("ShooterGame.log");
-                    watch_log(log_path, state_bg, ctx_bg, tx_bg).await;
+                    watch_log(log_path, local_client, state_bg, ctx_bg, tx_bg).await;
                 });
             });
             if let Err(e) = spawned {
                 log(format!("Failed to spawn background thread: {e}"));
             }
 
-            Ok(Box::new(StreamerApp::new(cc, state_for_app, tx_for_app, start_hidden)))
+            Ok(Box::new(StreamerApp::new(cc, state_for_app, tx_for_app, bg_tx_for_app, start_hidden)))
         }),
     )
     .map_err(|e| anyhow!("GUI error: {e}"))

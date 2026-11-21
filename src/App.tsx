@@ -10,6 +10,7 @@ import {
   DEFAULT_CONFIG,
   DesktopTab,
   DirectoryStreamer,
+  LastMatchSummary,
   LogLineEntry,
   Platform,
   SHARD_LABELS,
@@ -34,6 +35,7 @@ const STORAGE_KEYS = {
   config: 'vsr_v050_config',
   history: 'vsr_v050_history',
   customDir: 'vsr_v050_custom_dir',
+  lastMatch: 'vsr_v050_last_match',
 };
 
 function loadStored<T>(key: string, fallback: T): T {
@@ -77,8 +79,20 @@ export default function App() {
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isSyncingDirectory, setIsSyncingDirectory] = useState<boolean>(false);
   const [detectedShard, setDetectedShard] = useState<ShardCode>('ap');
-  const [status, setStatus] = useState<string>('Idle • Monitoring ShooterGame.log');
+  const [status, setStatus] = useState<string>('Idle | Monitoring ShooterGame.log');
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>(SIM_SCENARIOS[0].id);
+  const [lastScannedMatch, setLastScannedMatch] = useState<LastMatchSummary | null>(() =>
+    loadStored<LastMatchSummary | null>(STORAGE_KEYS.lastMatch, {
+      match_id: INITIAL_HISTORY[0]?.match_id ?? 'match-seed-01',
+      queue_name: INITIAL_HISTORY[0]?.queue_name ?? 'Competitive',
+      map_name: INITIAL_HISTORY[0]?.map_name ?? 'Ascent',
+      my_agent: 'Omen',
+      players_checked: 9,
+      streamers_found: INITIAL_HISTORY.filter((h) => h.match_id === INITIAL_HISTORY[0]?.match_id).length,
+      scanned_at: INITIAL_HISTORY[0]?.timestamp ?? formatRadarTimestamp(new Date()),
+      shard: SHARD_LABELS.ap,
+    })
+  );
 
   // Modals & Toasts
   const [modalOpen, setModalOpen] = useState<boolean>(false);
@@ -127,6 +141,14 @@ export default function App() {
       // ignore
     }
   }, [customDirectory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.lastMatch, JSON.stringify(lastScannedMatch));
+    } catch {
+      // ignore
+    }
+  }, [lastScannedMatch]);
 
   useEffect(() => {
     return () => {
@@ -233,22 +255,33 @@ export default function App() {
           }
         }
 
+        const playersChecked = scenario.players.length;
+        setLastScannedMatch({
+          match_id: uniqueMatchId,
+          queue_name: scenario.queue_name,
+          map_name: scenario.map_name,
+          my_agent: 'Jett',
+          players_checked: playersChecked,
+          streamers_found: foundEntries.length,
+          scanned_at: timestamp,
+          shard: SHARD_LABELS[shardForScan],
+        });
+
         if (foundEntries.length > 0) {
           setHistory((prev) => [...foundEntries, ...prev].slice(0, 300));
-          setStatus(`Found ${foundEntries.length} live stream(s) in last match!`);
+          setStatus(
+            `Found ${foundEntries.length} live stream(s) in ${scenario.queue_name} on ${scenario.map_name}!`
+          );
           showWinRtToast(foundEntries[0]);
           showInlineToast(
-            `Found ${foundEntries.length} live stream(s) — first URL copied!`
+            `Found ${foundEntries.length} live stream(s) in ${scenario.queue_name} (${scenario.map_name}) — first URL copied!`
           );
           if (navigator.clipboard?.writeText) {
             navigator.clipboard.writeText(foundEntries[0].url).catch(() => {});
           }
         } else {
           setStatus(
-            `Last checked at ${new Date().toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })} • No live streamers found`
+            `Scanned ${scenario.queue_name} on ${scenario.map_name} (${playersChecked} players) | No live streamers found`
           );
         }
 
@@ -526,6 +559,7 @@ export default function App() {
               detectedShard={detectedShard}
               config={config}
               history={history}
+              lastScannedMatch={lastScannedMatch}
               customDirectory={customDirectory}
               communityDirectory={communityDirectory}
               toastMessage={inlineToast}

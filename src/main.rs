@@ -344,6 +344,20 @@ enum BgTask {
     VerifyStreamer { riot_id: String, platform: String, channel_name: String, channel_url: String },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LastMatchSummary {
+    match_id: String,
+    queue_name: String,
+    map_name: String,
+    #[serde(default)]
+    my_agent: String,
+    players_checked: usize,
+    streamers_found: usize,
+    scanned_at: String,
+    #[serde(default)]
+    shard: String,
+}
+
 struct AppState {
     status: String,
     is_scanning: bool,
@@ -356,6 +370,7 @@ struct AppState {
     remote_directory: Vec<DirectoryStreamer>,
     toast: Option<(String, Instant)>,
     last_scanned_match: Option<String>,
+    last_match_summary: Option<LastMatchSummary>,
     yt_key_check: CheckState,
     twitch_key_check: CheckState,
     streamer_verify: CheckState,
@@ -430,6 +445,7 @@ struct MatchContext {
     match_id: String,
     map_name: String,
     queue_name: String,
+    my_agent: String,
     players: Vec<MatchPlayerInfo>,
 }
 
@@ -622,18 +638,39 @@ fn map_name_from_id(map_id: &str) -> String {
     map_id.rsplit('/').next().unwrap_or("").to_string()
 }
 
-fn queue_name_from_id(queue_id: &str) -> String {
+fn queue_name_from_id(queue_id: &str, game_mode: &str) -> String {
     match queue_id.trim().to_ascii_lowercase().as_str() {
-        "competitive" => "Competitive".to_string(),
-        "unrated" => "Unrated".to_string(),
-        "swiftplay" => "Swiftplay".to_string(),
-        "spikerush" => "Spike Rush".to_string(),
-        "deathmatch" => "Deathmatch".to_string(),
-        "hurm" => "Team Deathmatch".to_string(),
-        "premier" => "Premier".to_string(),
-        "ggteam" => "Escalation".to_string(),
-        "" => "Custom".to_string(),
-        other => other.to_string(),
+        "competitive" => return "Competitive".to_string(),
+        "unrated" => return "Unrated".to_string(),
+        "swiftplay" => return "Swiftplay".to_string(),
+        "spikerush" => return "Spike Rush".to_string(),
+        "deathmatch" => return "Deathmatch".to_string(),
+        "hurm" => return "Team Deathmatch".to_string(),
+        "premier" => return "Premier".to_string(),
+        "ggteam" => return "Escalation".to_string(),
+        "onefa" => return "Replication".to_string(),
+        "snowball" => return "Snowball Fight".to_string(),
+        "newmap" => return "New Map".to_string(),
+        "" => {}
+        other => return other.to_string(),
+    }
+    let gm = game_mode.to_ascii_lowercase();
+    if gm.contains("deathmatch") {
+        "Deathmatch".to_string()
+    } else if gm.contains("hurm") {
+        "Team Deathmatch".to_string()
+    } else if gm.contains("quickbomb") {
+        "Spike Rush".to_string()
+    } else if gm.contains("swiftplay") {
+        "Swiftplay".to_string()
+    } else if gm.contains("gungame") {
+        "Escalation".to_string()
+    } else if gm.contains("oneforall") {
+        "Replication".to_string()
+    } else if gm.contains("snowball") {
+        "Snowball Fight".to_string()
+    } else {
+        "Custom".to_string()
     }
 }
 
@@ -771,7 +808,10 @@ async fn fetch_match_context(
     let details = riot_json(riot_headers(public.get(url), auth)).await?;
 
     let map_name = map_name_from_id(details["matchInfo"]["mapId"].as_str().unwrap_or(""));
-    let queue_name = queue_name_from_id(details["matchInfo"]["queueID"].as_str().unwrap_or(""));
+    let queue_name = queue_name_from_id(
+        details["matchInfo"]["queueID"].as_str().unwrap_or(""),
+        details["matchInfo"]["gameMode"].as_str().unwrap_or(""),
+    );
 
     let mut player_meta: HashMap<String, (String, String)> = HashMap::new();
     let mut puuids: Vec<String> = Vec::new();
@@ -789,7 +829,7 @@ async fn fetch_match_context(
         return Err(anyhow!("Match details contained no players yet"));
     }
 
-    let my_team = player_meta.get(&auth.subject).map(|(t, _)| t.clone()).unwrap_or_default();
+    let (my_team, my_agent) = player_meta.get(&auth.subject).cloned().unwrap_or_default();
 
     let names_val = riot_json(riot_headers(
         public.put(format!("https://pd.{shard}.a.pvp.net/name-service/v2/players")).json(&puuids),
@@ -816,6 +856,7 @@ async fn fetch_match_context(
         match_id: match_id.to_string(),
         map_name,
         queue_name,
+        my_agent,
         players,
     })
 }
@@ -1662,8 +1703,16 @@ async fn scan_last_match(
             return;
         }
     };
-    let MatchContext { match_id, map_name, queue_name, players } = match_ctx;
+    let MatchContext { match_id, map_name, queue_name, my_agent, players } = match_ctx;
     lock(&state).last_scanned_match = Some(match_id.clone());
+
+    let display_map = if map_name.is_empty() { "Unknown Map" } else { map_name.as_str() };
+    let display_queue = if queue_name.is_empty() { "Match" } else { queue_name.as_str() };
+    set_status(
+        &state,
+        &ctx,
+        format!("Scanning {display_queue} on {display_map} ({})...", shard_label(shard)),
+    );
 
     let (remote, _) = fetch_remote_directory(&public_client, &config.github_owner, &config.github_repo).await;
     let local_dir = {
@@ -1678,6 +1727,7 @@ async fn scan_last_match(
     let sem = Arc::new(Semaphore::new(4));
     let mut set = JoinSet::new();
     let mut seen = HashSet::new();
+    let mut players_checked = 0usize;
     for player_info in players {
         if player_info.record.subject == my_puuid
             || player_info.record.game_name.trim().is_empty()
@@ -1685,6 +1735,7 @@ async fn scan_last_match(
         {
             continue;
         }
+        players_checked += 1;
         let (client, cfg, dir, tok, mid, map_n, queue_n, sem) = (
             public_client.clone(),
             config.clone(),
@@ -1714,10 +1765,26 @@ async fn scan_last_match(
         }
     }
 
+    let checked_time = Local::now().format("%d %b %Y | %I:%M %p").to_string();
+    let summary = LastMatchSummary {
+        match_id,
+        queue_name: display_queue.to_string(),
+        map_name: display_map.to_string(),
+        my_agent,
+        players_checked,
+        streamers_found: found,
+        scanned_at: checked_time,
+        shard: shard_label(shard).to_string(),
+    };
+    save_json("last_match.json", &summary);
+    lock(&state).last_match_summary = Some(summary);
+
     let status = if found > 0 {
-        format!("Found {found} live stream(s) in last match!")
+        format!("Found {found} live stream(s) in {display_queue} on {display_map}!")
     } else {
-        format!("Last checked at {} | No live streamers found", Local::now().format("%I:%M %p"))
+        format!(
+            "Scanned {display_queue} on {display_map} ({players_checked} players) | No live streamers found"
+        )
     };
     set_status(&state, &ctx, status);
 }
@@ -2257,6 +2324,7 @@ impl eframe::App for StreamerApp {
             local_dir,
             remote_dir,
             toast,
+            last_match_summary,
             streamer_verify,
             yt_key_check,
             twitch_key_check,
@@ -2276,6 +2344,7 @@ impl eframe::App for StreamerApp {
                 s.local_directory.clone(),
                 s.remote_directory.clone(),
                 s.toast.as_ref().map(|(m, _)| m.clone()),
+                s.last_match_summary.clone(),
                 s.streamer_verify.clone(),
                 s.yt_key_check.clone(),
                 s.twitch_key_check.clone(),
@@ -2569,7 +2638,7 @@ impl eframe::App for StreamerApp {
         egui::CentralPanel::default()
             .frame(Frame::none().fill(BG_DARK).inner_margin(Margin::symmetric(22.0, 16.0)))
             .show(ctx, |ui| match self.active_tab {
-                ActiveTab::History => self.render_history_tab(ui, &history),
+                ActiveTab::History => self.render_history_tab(ui, &history, last_match_summary.as_ref()),
                 ActiveTab::Directory => self.render_directory_tab(ui, &local_dir, &remote_dir, is_syncing_dir),
                 ActiveTab::Settings => self.render_settings_tab(ui, &yt_key_check, &twitch_key_check),
             });
@@ -2577,7 +2646,65 @@ impl eframe::App for StreamerApp {
 }
 
 impl StreamerApp {
-    fn render_history_tab(&mut self, ui: &mut egui::Ui, history: &[StreamerEntry]) {
+    fn render_history_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        history: &[StreamerEntry],
+        last_match: Option<&LastMatchSummary>,
+    ) {
+        if let Some(m) = last_match {
+            let mode_color = match m.queue_name.as_str() {
+                "Competitive" | "Premier" => ACCENT_RED,
+                "Deathmatch" | "Team Deathmatch" => ALLY_TEAL,
+                "Swiftplay" | "Spike Rush" | "Escalation" => ENEMY_AMBER,
+                _ => TEXT_PRIMARY,
+            };
+            Frame::none()
+                .fill(HEADER_BG)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .rounding(Rounding::same(7.0))
+                .inner_margin(Margin::symmetric(14.0, 9.0))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("LAST SCANNED MATCH").size(10.5).strong().color(TEXT_MUTED));
+                        Frame::none()
+                            .fill(mode_color.linear_multiply(0.16))
+                            .stroke(Stroke::new(1.0, mode_color))
+                            .rounding(Rounding::same(4.0))
+                            .inner_margin(Margin::symmetric(6.0, 1.5))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(&m.queue_name).size(11.0).strong().color(mode_color));
+                            });
+                        ui.label(RichText::new(&m.map_name).size(12.5).strong().color(Color32::WHITE));
+                        if !m.my_agent.is_empty() {
+                            ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                            ui.label(RichText::new(format!("Agent: {}", m.my_agent)).color(TEXT_PRIMARY).size(12.0));
+                        }
+                        ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                        ui.label(
+                            RichText::new(format!("{} players checked", m.players_checked))
+                                .color(TEXT_MUTED)
+                                .size(12.0),
+                        );
+                        ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                        if m.streamers_found > 0 {
+                            ui.label(
+                                RichText::new(format!("{} live found", m.streamers_found))
+                                    .color(LIVE_GREEN)
+                                    .strong()
+                                    .size(12.0),
+                            );
+                        } else {
+                            ui.label(RichText::new("0 live").color(TEXT_MUTED).size(12.0));
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(&m.scanned_at).color(TEXT_MUTED).size(11.0));
+                        });
+                    });
+                });
+            ui.add_space(10.0);
+        }
+
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
@@ -3141,6 +3268,9 @@ fn main() -> Result<()> {
     set_autostart(config.start_with_windows);
     register_toast_app_id(config.use_custom_toast_app_id);
 
+    let saved_last_match: Option<LastMatchSummary> = load_json("last_match.json");
+    let initial_last_match_id = saved_last_match.as_ref().map(|m| m.match_id.clone());
+
     let state = Arc::new(Mutex::new(AppState {
         status: "Idle | Monitoring ShooterGame.log".to_string(),
         is_scanning: false,
@@ -3152,7 +3282,8 @@ fn main() -> Result<()> {
         local_directory: load_json("custom_streamers.json"),
         remote_directory: load_json("directory_cache.json"),
         toast: None,
-        last_scanned_match: None,
+        last_scanned_match: initial_last_match_id,
+        last_match_summary: saved_last_match,
         yt_key_check: CheckState::Idle,
         twitch_key_check: CheckState::Idle,
         streamer_verify: CheckState::Idle,

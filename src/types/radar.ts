@@ -37,6 +37,17 @@ export interface StreamerEntry {
   queue_name: string;
 }
 
+export interface LastMatchSummary {
+  match_id: string;
+  queue_name: string;
+  map_name: string;
+  my_agent?: string;
+  players_checked: number;
+  streamers_found: number;
+  scanned_at: string;
+  shard: string;
+}
+
 export type DesktopTab = 'history' | 'directory' | 'settings';
 export type StudioView = 'simulator' | 'lab';
 

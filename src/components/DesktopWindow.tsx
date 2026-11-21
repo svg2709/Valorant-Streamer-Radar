@@ -23,6 +23,7 @@ import {
   AppConfig,
   DesktopTab,
   DirectoryStreamer,
+  LastMatchSummary,
   Platform,
   SHARD_LABELS,
   ShardCode,
@@ -49,6 +50,7 @@ interface DesktopWindowProps {
   detectedShard: ShardCode;
   config: AppConfig;
   history: StreamerEntry[];
+  lastScannedMatch: LastMatchSummary | null;
   customDirectory: DirectoryStreamer[];
   communityDirectory: DirectoryStreamer[];
   toastMessage: string | null;
@@ -94,6 +96,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   detectedShard,
   config,
   history,
+  lastScannedMatch,
   customDirectory,
   communityDirectory,
   toastMessage,
@@ -390,6 +393,73 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
         {/* TAB 1: HISTORY */}
         {activeTab === 'history' && (
           <div>
+            {lastScannedMatch && (
+              <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#2B3A48] bg-[#0B131B] px-3.5 py-2.5 text-xs">
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                  <span className="text-[10px] font-bold tracking-wider text-[#94A3B8]">
+                    LAST SCANNED MATCH
+                  </span>
+                  <span
+                    className="rounded border px-1.5 py-0.5 text-[11px] font-semibold"
+                    style={{
+                      color:
+                        lastScannedMatch.queue_name === 'Competitive' ||
+                        lastScannedMatch.queue_name === 'Premier'
+                          ? '#FF4655'
+                          : lastScannedMatch.queue_name.includes('Deathmatch')
+                          ? '#2DD4BF'
+                          : lastScannedMatch.queue_name === 'Swiftplay' ||
+                            lastScannedMatch.queue_name === 'Spike Rush'
+                          ? '#FB923C'
+                          : '#ECE8E1',
+                      borderColor:
+                        lastScannedMatch.queue_name === 'Competitive' ||
+                        lastScannedMatch.queue_name === 'Premier'
+                          ? '#FF4655'
+                          : lastScannedMatch.queue_name.includes('Deathmatch')
+                          ? '#2DD4BF'
+                          : lastScannedMatch.queue_name === 'Swiftplay' ||
+                            lastScannedMatch.queue_name === 'Spike Rush'
+                          ? '#FB923C'
+                          : '#2B3A48',
+                    }}
+                  >
+                    {lastScannedMatch.queue_name}
+                  </span>
+                  <span className="font-semibold text-white">
+                    {lastScannedMatch.map_name}
+                  </span>
+                  {lastScannedMatch.my_agent && (
+                    <>
+                      <span className="text-[#2B3A48]">|</span>
+                      <span className="text-[#ECE8E1]">
+                        Agent: {lastScannedMatch.my_agent}
+                      </span>
+                    </>
+                  )}
+                  <span className="text-[#2B3A48]">|</span>
+                  <span className="font-mono text-[#94A3B8] tabular-nums">
+                    {lastScannedMatch.players_checked} players checked
+                  </span>
+                  <span className="text-[#2B3A48]">|</span>
+                  <span
+                    className={
+                      lastScannedMatch.streamers_found > 0
+                        ? 'font-semibold text-[#22C55E]'
+                        : 'text-[#94A3B8]'
+                    }
+                  >
+                    {lastScannedMatch.streamers_found > 0
+                      ? `${lastScannedMatch.streamers_found} live found`
+                      : '0 live'}
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] text-[#94A3B8] tabular-nums">
+                  {lastScannedMatch.scanned_at}
+                </span>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2.5">
                 <div className="relative w-72 sm:w-80">

@@ -24,7 +24,11 @@ import {
   INITIAL_HISTORY,
   SIM_SCENARIOS,
 } from './data/mockMatches';
-import { formatRadarTimestamp, resolveEffectiveShard } from './utils/validation';
+import {
+  extractChatStreamPlug,
+  formatRadarTimestamp,
+  resolveEffectiveShard,
+} from './utils/validation';
 import { RadarIcon } from './components/RadarIcon';
 import { DesktopWindow } from './components/DesktopWindow';
 import { StreamerModal } from './components/StreamerModal';
@@ -60,9 +64,10 @@ export default function App() {
   const [desktopTab, setDesktopTab] = useState<DesktopTab>('history');
   const [windowVisible, setWindowVisible] = useState<boolean>(true);
 
-  const [config, setConfig] = useState<AppConfig>(() =>
-    loadStored(STORAGE_KEYS.config, DEFAULT_CONFIG)
-  );
+  const [config, setConfig] = useState<AppConfig>(() => ({
+    ...DEFAULT_CONFIG,
+    ...loadStored<Partial<AppConfig>>(STORAGE_KEYS.config, DEFAULT_CONFIG),
+  }));
   const [history, setHistory] = useState<StreamerEntry[]>(() =>
     loadStored(STORAGE_KEYS.history, INITIAL_HISTORY)
   );
@@ -221,6 +226,12 @@ export default function App() {
           'scan',
           `Match details: ${scenario.map_name} (${scenario.queue_name}) · 9 players resolved via name-service/v2`
         );
+        if (config.capture_in_game_chat && scenario.chatLog?.length) {
+          pushLog(
+            'chat',
+            `GET https://127.0.0.1:52194/chat/v6/messages -> ${scenario.chatLog.length} match chat message(s) buffered`
+          );
+        }
         pushLog(
           'scan',
           `Merged ${customDirectory.length} custom + ${communityDirectory.length} community directory entries (${config.github_owner}/${config.github_repo})`
@@ -232,7 +243,17 @@ export default function App() {
         const uniqueMatchId = `${scenario.match_id}-${Date.now().toString().slice(-4)}`;
         const foundEntries: StreamerEntry[] = [];
 
+        const chatByPlayer = new Map<string, string>();
+        if (config.capture_in_game_chat && scenario.chatLog) {
+          for (const line of scenario.chatLog) {
+            chatByPlayer.set(line.riot_id.toLowerCase(), line.body);
+          }
+        }
+
         for (const p of scenario.players) {
+          const chatBody = chatByPlayer.get(p.riot_id.toLowerCase());
+          const chatPlug = chatBody ? extractChatStreamPlug(chatBody, p.riot_id) : null;
+
           if (p.liveStream) {
             const entry: StreamerEntry = {
               match_id: uniqueMatchId,
@@ -246,11 +267,45 @@ export default function App() {
               map_name: scenario.map_name,
               agent_name: p.agent_name,
               queue_name: scenario.queue_name,
+              chat_message:
+                chatPlug && chatPlug.platform === p.liveStream.platform
+                  ? chatPlug.rawMessage
+                  : undefined,
+              source: p.detectionSource === 'directory' ? 'Directory' : 'Heuristic',
             };
             foundEntries.push(entry);
             pushLog(
               'hit',
               `LIVE HIT [${p.liveStream.platform}] ${p.riot_id} (${p.team_relation}, ${p.agent_name}) via ${p.detectionSource} -> ${p.liveStream.url}`
+            );
+          }
+
+          if (
+            chatPlug &&
+            (!p.liveStream || p.liveStream.platform !== chatPlug.platform)
+          ) {
+            const chatEntry: StreamerEntry = {
+              match_id: uniqueMatchId,
+              riot_id: p.riot_id,
+              platform: chatPlug.platform,
+              channel: chatPlug.channel,
+              title:
+                chatPlug.matchType === 'live-mention'
+                  ? `Mentioned live on ${chatPlug.platform} in match chat`
+                  : `Shared ${chatPlug.platform} stream link in match chat`,
+              url: chatPlug.url,
+              timestamp,
+              team_relation: p.team_relation,
+              map_name: scenario.map_name,
+              agent_name: p.agent_name,
+              queue_name: scenario.queue_name,
+              chat_message: chatPlug.rawMessage,
+              source: 'Chat',
+            };
+            foundEntries.push(chatEntry);
+            pushLog(
+              'chat',
+              `CHAT PLUG [${chatPlug.platform}] ${p.riot_id} said "${chatPlug.rawMessage}" -> extracted ${chatPlug.url}`
             );
           }
         }
@@ -432,18 +487,19 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B131B] text-[#ECE8E1] flex flex-col lg:flex-row">
+    <div className="flex min-h-screen flex-col bg-[#090D14] text-[#F3EFF4] lg:flex-row">
       {/* Sidebar Navigation Rail */}
-      <aside className="w-full shrink-0 border-b border-[#2B3A48] bg-[#080E14] lg:w-[248px] lg:border-r lg:border-b-0">
+      <aside className="w-full shrink-0 border-b border-[#273144] bg-[#070A10] lg:w-[248px] lg:border-r lg:border-b-0">
         <div className="flex h-full flex-col justify-between p-4">
           <div>
             <div className="flex items-center gap-2.5 px-2 py-1.5">
               <RadarIcon size={26} className="shrink-0" />
               <span
-                className="text-lg font-bold tracking-wide text-white whitespace-nowrap"
+                className="text-lg font-bold tracking-wide whitespace-nowrap"
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                <span className="text-[#FF4655]">VALORANT</span> RADAR
+                <span className="text-pink-white-gradient">VALORANT</span>{' '}
+                <span className="text-[#FFF5FA]">RADAR</span>
               </span>
             </div>
 
@@ -462,13 +518,13 @@ export default function App() {
                     onClick={() => setStudioView(id)}
                     className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
                       active
-                        ? 'bg-[#182430] text-white'
-                        : 'text-[#94A3B8] hover:bg-[#0F1923] hover:text-white'
+                        ? 'border border-[#FF5CA8]/40 bg-[#141B27] text-[#FFF5FA]'
+                        : 'border border-transparent text-[#98A2B8] hover:bg-[#0D111A] hover:text-white'
                     }`}
                   >
                     <IconComp
                       className={`h-4 w-4 shrink-0 ${
-                        active ? 'text-[#FF4655]' : 'text-[#64748B]'
+                        active ? 'text-[#FF5CA8]' : 'text-[#64748B]'
                       }`}
                     />
                     <span>{label}</span>
@@ -477,26 +533,32 @@ export default function App() {
               })}
             </nav>
 
-            <div className="mt-6 border-t border-[#2B3A48] pt-5 px-2">
-              <p className="text-[11px] font-semibold text-[#94A3B8]">
+            <div className="mt-6 border-t border-[#273144] px-2 pt-5">
+              <p className="text-[11px] font-semibold text-[#98A2B8]">
                 Active Radar Profile
               </p>
               <dl className="mt-2.5 space-y-2 text-xs">
                 <div>
                   <dt className="text-[11px] text-[#64748B]">Directory Repo</dt>
-                  <dd className="truncate font-mono text-[11px] text-[#ECE8E1]">
+                  <dd className="truncate font-mono text-[11px] text-[#F3EFF4]">
                     {config.github_owner}/{config.github_repo}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-[11px] text-[#64748B]">Effective Shard</dt>
-                  <dd className="font-mono text-[11px] text-[#ECE8E1]">
+                  <dd className="font-mono text-[11px] text-[#F3EFF4]">
                     {SHARD_LABELS[effectiveShard]}
                   </dd>
                 </div>
                 <div>
+                  <dt className="text-[11px] text-[#64748B]">In-Game Chat Reader</dt>
+                  <dd className="font-mono text-[11px] text-[#FFA6D2]">
+                    {config.capture_in_game_chat ? 'Enabled (Post-Match)' : 'Disabled'}
+                  </dd>
+                </div>
+                <div>
                   <dt className="text-[11px] text-[#64748B]">Toast Branding</dt>
-                  <dd className="font-mono text-[11px] text-[#ECE8E1]">
+                  <dd className="font-mono text-[11px] text-[#F3EFF4]">
                     {config.use_custom_toast_app_id
                       ? 'Valorant Streamer Radar'
                       : 'Windows PowerShell'}
@@ -511,15 +573,15 @@ export default function App() {
                   setDesktopTab('settings');
                   setWindowVisible(true);
                 }}
-                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[#2B3A48] bg-[#182430] px-3 py-1.5 text-xs font-medium text-[#ECE8E1] transition-colors hover:border-[#FF4655]"
+                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[#273144] bg-[#141B27] px-3 py-1.5 text-xs font-medium text-[#F3EFF4] transition-colors hover:border-[#FF5CA8]"
               >
-                <Settings className="h-3.5 w-3.5" />
+                <Settings className="h-3.5 w-3.5 text-[#FFA6D2]" />
                 Open Settings
               </button>
             </div>
           </div>
 
-          <div className="mt-6 hidden border-t border-[#2B3A48] pt-3 px-2 text-[11px] text-[#64748B] lg:block">
+          <div className="mt-6 hidden border-t border-[#273144] px-2 pt-3 text-[11px] text-[#64748B] lg:block">
             <p className="font-mono">v0.5.0 · Post-Match Only</p>
           </div>
         </div>
@@ -527,20 +589,20 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-8 border-b border-[#2B3A48] bg-[#0B131B] px-6 py-3.5">
-          <div className="flex items-center gap-2 text-xs text-[#94A3B8] whitespace-nowrap min-w-0">
-            <span className="font-medium text-[#ECE8E1]">Valorant Streamer Radar</span>
-            <span className="text-[#2B3A48]">/</span>
-            <span className="truncate text-[#94A3B8]">{viewBreadcrumbs[studioView]}</span>
+        <header className="flex items-center justify-between gap-8 border-b border-[#273144] bg-[#090D14] px-6 py-3.5">
+          <div className="flex min-w-0 items-center gap-2 text-xs text-[#98A2B8] whitespace-nowrap">
+            <span className="font-medium text-[#FFF5FA]">Valorant Streamer Radar</span>
+            <span className="text-[#273144]">/</span>
+            <span className="truncate text-[#98A2B8]">{viewBreadcrumbs[studioView]}</span>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex shrink-0 items-center gap-3">
             <button
               type="button"
               onClick={handlePreviewToast}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#2B3A48] bg-[#21303F] px-3.5 py-2 text-xs font-semibold text-[#ECE8E1] transition-colors hover:border-[#FF4655] hover:text-white whitespace-nowrap shrink-0"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#FF5CA8]/40 bg-[#1D2636] px-3.5 py-2 text-xs font-semibold text-[#FFF5FA] transition-colors hover:border-[#FF5CA8] hover:bg-[#253044] whitespace-nowrap"
             >
-              <Bell className="h-3.5 w-3.5" />
+              <Bell className="h-3.5 w-3.5 text-[#FFA6D2]" />
               Test Toast Notification
             </button>
           </div>

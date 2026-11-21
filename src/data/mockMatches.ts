@@ -67,6 +67,8 @@ export const INITIAL_HISTORY: StreamerEntry[] = [
     map_name: 'Ascent',
     agent_name: 'Jett',
     queue_name: 'Competitive',
+    chat_message: 'gg guys im live on yt https://youtube.com/@RohanGaming drop a sub!',
+    source: 'Chat',
   },
   {
     match_id: 'm-8a4f91e0-ap-01',
@@ -80,6 +82,7 @@ export const INITIAL_HISTORY: StreamerEntry[] = [
     map_name: 'Ascent',
     agent_name: 'Omen',
     queue_name: 'Competitive',
+    source: 'Directory',
   },
   {
     match_id: 'm-71c02b44-ap-02',
@@ -93,6 +96,7 @@ export const INITIAL_HISTORY: StreamerEntry[] = [
     map_name: 'Lotus',
     agent_name: 'Clove',
     queue_name: 'Swiftplay',
+    source: 'Directory',
   },
 ];
 
@@ -104,6 +108,20 @@ export const SIM_SCENARIOS: SimMatchScenario[] = [
     map_name: 'Sunset',
     queue_name: 'Competitive',
     match_id: 'm-99d14a8e-ap-sunset',
+    chatLog: [
+      {
+        riot_id: 'AaravLive#BOM',
+        body: 'gg wp! im live on yt https://youtube.com/@AaravLive come say hi',
+      },
+      {
+        riot_id: 'NehaPlays#007',
+        body: 'yo im live on yt @NehaValPlays rn check out the clutch',
+      },
+      {
+        riot_id: 'Desktop#9901',
+        body: 'nt team good half',
+      },
+    ],
     players: [
       {
         riot_id: 'AaravLive#BOM',
@@ -129,11 +147,11 @@ export const SIM_SCENARIOS: SimMatchScenario[] = [
           url: 'https://www.twitch.tv/siddhu',
         },
       },
+      { riot_id: 'NehaPlays#007', team_relation: 'Ally', agent_name: 'Sage', detectionSource: 'chat' },
       { riot_id: 'Desktop#9901', team_relation: 'Ally', agent_name: 'Cypher', detectionSource: 'none' },
       { riot_id: 'Alive#MUM', team_relation: 'Enemy', agent_name: 'Omen', detectionSource: 'none' },
       { riot_id: 'KabirSmoke#441', team_relation: 'Ally', agent_name: 'Brimstone', detectionSource: 'none' },
       { riot_id: 'ZoroDash#IND', team_relation: 'Enemy', agent_name: 'Jett', detectionSource: 'none' },
-      { riot_id: 'NehaPlays#007', team_relation: 'Ally', agent_name: 'Sage', detectionSource: 'none' },
       { riot_id: 'BlazePeak#AP1', team_relation: 'Enemy', agent_name: 'Breach', detectionSource: 'none' },
       { riot_id: 'PixelTap#882', team_relation: 'Enemy', agent_name: 'Killjoy', detectionSource: 'none' },
     ],
@@ -145,6 +163,12 @@ export const SIM_SCENARIOS: SimMatchScenario[] = [
     map_name: 'Haven',
     queue_name: 'Premier',
     match_id: 'm-52b81f0c-eu-haven',
+    chatLog: [
+      {
+        riot_id: 'RiftWalker#FR',
+        body: 'ggs! streaming this premier match on ttv/riftwalkerfps',
+      },
+    ],
     players: [
       {
         riot_id: 'NyxAim#EUW',
@@ -158,10 +182,10 @@ export const SIM_SCENARIOS: SimMatchScenario[] = [
           url: 'https://www.twitch.tv/nyxaim',
         },
       },
+      { riot_id: 'RiftWalker#FR', team_relation: 'Ally', agent_name: 'Jett', detectionSource: 'chat' },
       { riot_id: 'Valkyrie#EU1', team_relation: 'Ally', agent_name: 'Vyse', detectionSource: 'none' },
       { riot_id: 'Kestrel#DE2', team_relation: 'Ally', agent_name: 'Omen', detectionSource: 'none' },
       { riot_id: 'Frostbite#UK9', team_relation: 'Enemy', agent_name: 'Sova', detectionSource: 'none' },
-      { riot_id: 'RiftWalker#FR', team_relation: 'Ally', agent_name: 'Jett', detectionSource: 'none' },
       { riot_id: 'Cinder#NL4', team_relation: 'Enemy', agent_name: 'Cypher', detectionSource: 'none' },
       { riot_id: 'Solstice#SE', team_relation: 'Ally', agent_name: 'Breach', detectionSource: 'none' },
       { riot_id: 'EchoTap#PL', team_relation: 'Enemy', agent_name: 'Skye', detectionSource: 'none' },
@@ -169,12 +193,18 @@ export const SIM_SCENARIOS: SimMatchScenario[] = [
     ],
   },
   {
-    id: 'na-unrated',
-    label: 'NA / Americas • Unrated on Abyss',
+    id: 'na-deathmatch',
+    label: 'NA / Americas • Deathmatch on Abyss',
     shard: 'na',
     map_name: 'Abyss',
-    queue_name: 'Unrated',
+    queue_name: 'Deathmatch',
     match_id: 'm-38e70c19-na-abyss',
+    chatLog: [
+      {
+        riot_id: 'NeonDrift#US2',
+        body: 'warming up im live on yt right now if anyone wants to watch',
+      },
+    ],
     players: [
       {
         riot_id: 'DevOpsJett#NA1',
@@ -188,8 +218,8 @@ export const SIM_SCENARIOS: SimMatchScenario[] = [
           url: 'https://kick.com/devopsjett',
         },
       },
+      { riot_id: 'NeonDrift#US2', team_relation: 'Ally', agent_name: 'Neon', detectionSource: 'chat' },
       { riot_id: 'MapleShot#CAN', team_relation: 'Enemy', agent_name: 'Clove', detectionSource: 'none' },
-      { riot_id: 'NeonDrift#US2', team_relation: 'Ally', agent_name: 'Neon', detectionSource: 'none' },
       { riot_id: 'GhostPeek#TX', team_relation: 'Enemy', agent_name: 'Gekko', detectionSource: 'none' },
       { riot_id: 'Orbit#NA9', team_relation: 'Ally', agent_name: 'Deadlock', detectionSource: 'none' },
       { riot_id: 'VandalOnly#BR', team_relation: 'Enemy', agent_name: 'Raze', detectionSource: 'none' },

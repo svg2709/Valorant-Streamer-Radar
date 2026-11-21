@@ -1,4 +1,22 @@
 #[cfg(windows)]
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)).round() as u8
+}
+
+#[cfg(windows)]
+fn pink_white_gradient(t: f32) -> [u8; 4] {
+    // Diagonal Sakura Pink (#FF4D94) -> Soft Blush (#FFA6D2) -> Pearl White (#FFF5FA)
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.55 {
+        let k = t / 0.55;
+        [lerp_u8(255, 255, k), lerp_u8(77, 166, k), lerp_u8(148, 210, k), 255]
+    } else {
+        let k = (t - 0.55) / 0.45;
+        [lerp_u8(255, 255, k), lerp_u8(166, 245, k), lerp_u8(210, 250, k), 255]
+    }
+}
+
+#[cfg(windows)]
 fn render_icon_rgba(size: u32) -> Vec<u8> {
     let mut rgba = vec![0u8; (size * size * 4) as usize];
     let border = 2.0 / 32.0;
@@ -11,12 +29,16 @@ fn render_icon_rgba(size: u32) -> Vec<u8> {
             let in_border = u < border || u > 1.0 - border || v < border || v > 1.0 - border;
             let du = (u - 0.5).abs();
             let arm_x = (0.78 - v) * 0.46;
-            let in_v = (0.22..=0.78).contains(&v) && (du - arm_x).abs() <= 0.075;
+            let in_v = (0.24..=0.78).contains(&v) && (du - arm_x).abs() <= 0.078;
+            let dot_dist = ((u - 0.5).powi(2) + (v - 0.28).powi(2)).sqrt();
+            let in_dot = dot_dist <= 0.075;
 
-            let px: [u8; 4] = if in_border || in_v {
-                [255, 70, 85, 255] // Crimson #FF4655
+            let px: [u8; 4] = if in_border || in_v || in_dot {
+                let grad_t = if in_dot { 0.92 } else { u * 0.55 + (1.0 - v) * 0.45 };
+                pink_white_gradient(grad_t)
             } else {
-                [15, 25, 35, 255] // Obsidian #0F1923
+                // Deep dark obsidian with subtle plum-midnight depth (#0D111A -> #181326)
+                [lerp_u8(13, 24, v), lerp_u8(17, 19, v), lerp_u8(26, 38, v), 255]
             };
             rgba[idx..idx + 4].copy_from_slice(&px);
         }

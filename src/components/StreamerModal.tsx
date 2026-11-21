@@ -214,269 +214,272 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="streamer-modal-title"
     >
-      <div className="w-full max-w-[460px] rounded-[10px] border-[1.5px] border-[#FF4655] bg-[#182430] p-5 text-[#ECE8E1] shadow-2xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2
-              id="streamer-modal-title"
-              className="text-base font-semibold text-white"
+      <div className="w-full max-w-[460px] overflow-hidden rounded-[10px] border-[1.5px] border-[#FF5CA8] bg-[#141B27] text-[#F3EFF4] shadow-2xl">
+        <div className="h-[3px] w-full bg-pink-white-strip" />
+        <div className="p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2
+                id="streamer-modal-title"
+                className="text-base font-semibold text-[#FFF5FA]"
+              >
+                {editingEntry
+                  ? 'Edit Custom Streamer Entry'
+                  : 'Register Streamer to Directory'}
+              </h2>
+              <p className="mt-0.5 text-xs text-[#98A2B8]">
+                Link a Valorant Riot ID to a verified stream channel
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 text-[#98A2B8] transition-colors hover:bg-[#1D2636] hover:text-white"
+              aria-label="Close modal"
             >
-              {editingEntry
-                ? 'Edit Custom Streamer Entry'
-                : 'Register Streamer to Directory'}
-            </h2>
-            <p className="mt-0.5 text-xs text-[#94A3B8]">
-              Link a Valorant Riot ID to a verified stream channel
-            </p>
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-[#94A3B8] transition-colors hover:bg-[#21303F] hover:text-white"
-            aria-label="Close modal"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
 
-        {submittedIssueUrl ? (
-          <div className="mt-4 space-y-4">
-            <div className="rounded-md border border-[#22C55E]/40 bg-[#0F1923] p-3.5 text-xs text-[#ECE8E1]">
-              <p className="font-semibold text-[#22C55E]">
-                Saved locally to custom_streamers.json
-              </p>
-              <p className="mt-1.5 text-[#94A3B8]">
-                In the native Windows app, your browser automatically opens the
-                pre-filled GitHub Issue below for{' '}
-                <span className="font-mono text-[#ECE8E1]">
-                  {githubOwner}/{githubRepo}
-                </span>
-                .
-              </p>
-              <a
-                href={submittedIssueUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-3 inline-flex items-center gap-1.5 rounded bg-[#FF4655] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#e53a49]"
-              >
-                Open Pre-filled GitHub Issue
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-md border border-[#2B3A48] bg-[#21303F] px-4 py-2 text-xs font-medium text-[#ECE8E1] hover:bg-[#2a3c4e]"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 space-y-3">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-[#ECE8E1]">
-                Riot ID (IGN#TAG)
-              </label>
-              <input
-                type="text"
-                value={riotId}
-                onChange={(e) => {
-                  setRiotId(e.target.value);
-                  setError(null);
-                  setVerifyResult(null);
-                }}
-                placeholder="e.g. RohanYT#IND"
-                className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-[#ECE8E1]">
-                Platform
-              </label>
-              <div className="flex items-center gap-1.5 rounded-md bg-[#0F1923] p-1">
-                {PLATFORMS.map((plat) => (
-                  <button
-                    key={plat}
-                    type="button"
-                    onClick={() => {
-                      setPlatform(plat);
-                      setError(null);
-                      setVerifyResult(null);
-                    }}
-                    className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
-                      platform === plat
-                        ? 'bg-[#21303F] text-white'
-                        : 'text-[#94A3B8] hover:text-white'
-                    }`}
-                  >
-                    {plat}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-[#ECE8E1]">
-                Channel Display Name{' '}
-                <span className="font-normal text-[#94A3B8]">
-                  (or leave blank &amp; click Verify to auto-fill)
-                </span>
-              </label>
-              <input
-                type="text"
-                value={channelName}
-                onChange={(e) => {
-                  setChannelName(e.target.value);
-                  setError(null);
-                  setVerifyResult(null);
-                }}
-                placeholder="e.g. Rohan Gaming"
-                className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-2 text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-[#ECE8E1]">
-                Channel URL
-              </label>
-              <input
-                type="url"
-                value={channelUrl}
-                onChange={(e) => {
-                  setChannelUrl(e.target.value);
-                  setError(null);
-                  setVerifyResult(null);
-                }}
-                placeholder={
-                  platform === 'YouTube'
-                    ? 'https://www.youtube.com/@RohanGaming'
-                    : platform === 'Twitch'
-                    ? 'https://www.twitch.tv/vexfps'
-                    : 'https://kick.com/kairoclutch'
-                }
-                className="w-full rounded border border-[#2B3A48] bg-[#0F1923] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF4655] focus:outline-none"
-              />
-            </div>
-
-            {/* Verify Link & Name Action Row */}
-            <div className="flex flex-wrap items-center gap-2 pt-0.5">
-              <button
-                type="button"
-                onClick={handleVerify}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#2DD4BF]/70 bg-[#21303F] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#2a3c4e] whitespace-nowrap"
-              >
-                <ShieldCheck className="h-3.5 w-3.5 text-[#2DD4BF]" />
-                Verify Link &amp; Name
-              </button>
-              {canOpenUrl ? (
+          {submittedIssueUrl ? (
+            <div className="mt-4 space-y-4">
+              <div className="rounded-md border border-[#22C55E]/40 bg-[#0D111A] p-3.5 text-xs text-[#F3EFF4]">
+                <p className="font-semibold text-[#22C55E]">
+                  Saved locally to custom_streamers.json
+                </p>
+                <p className="mt-1.5 text-[#98A2B8]">
+                  In the native Windows app, your browser automatically opens the
+                  pre-filled GitHub Issue below for{' '}
+                  <span className="font-mono text-[#F3EFF4]">
+                    {githubOwner}/{githubRepo}
+                  </span>
+                  .
+                </p>
                 <a
-                  href={trimmedUrl}
+                  href={submittedIssueUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-[#2B3A48] bg-[#21303F] px-2.5 py-1.5 text-xs font-medium text-[#ECE8E1] transition-colors hover:bg-[#2a3c4e] whitespace-nowrap"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded bg-pink-white-gradient bg-pink-white-gradient-hover px-3 py-1.5 text-xs font-bold text-[#0D111A]"
                 >
-                  Open Link
-                  <ExternalLink className="h-3 w-3" />
+                  Open Pre-filled GitHub Issue
+                  <ExternalLink className="h-3.5 w-3.5" />
                 </a>
-              ) : (
-                <span className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border border-[#2B3A48]/60 bg-[#0F1923] px-2.5 py-1.5 text-xs text-[#64748B] whitespace-nowrap">
-                  Open Link
-                  <ExternalLink className="h-3 w-3" />
-                </span>
-              )}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-md border border-[#273144] bg-[#1D2636] px-4 py-2 text-xs font-medium text-[#F3EFF4] hover:bg-[#253044]"
+                >
+                  Done
+                </button>
+              </div>
             </div>
+          ) : (
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                  Riot ID (IGN#TAG)
+                </label>
+                <input
+                  type="text"
+                  value={riotId}
+                  onChange={(e) => {
+                    setRiotId(e.target.value);
+                    setError(null);
+                    setVerifyResult(null);
+                  }}
+                  placeholder="e.g. RohanYT#IND"
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                />
+              </div>
 
-            {verifyResult && (
-              <div
-                className={`rounded-md border px-3 py-2 text-xs ${
-                  verifyResult.kind === 'ok'
-                    ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
-                    : verifyResult.kind === 'warn'
-                    ? 'border-[#FB923C]/40 bg-[#FB923C]/10 text-[#FB923C]'
-                    : 'border-[#FF4655]/40 bg-[#FF4655]/10 text-[#FF4655]'
-                }`}
-              >
-                <div className="flex items-start gap-2">
-                  {verifyResult.kind === 'ok' ? (
-                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  ) : verifyResult.kind === 'warn' ? (
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  ) : (
-                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  )}
-                  <div className="space-y-1.5">
-                    <p>{verifyResult.msg}</p>
-                    {verifyResult.kind !== 'ok' && verifyResult.suggestedPlatform && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPlatform(verifyResult.suggestedPlatform!);
-                          setVerifyResult(null);
-                        }}
-                        className="rounded border border-[#FF4655] bg-[#21303F] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#2a3c4e]"
-                      >
-                        Switch Platform to {verifyResult.suggestedPlatform}
-                      </button>
-                    )}
-                    {verifyResult.kind === 'warn' && verifyResult.suggestedName && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setChannelName(verifyResult.suggestedName!);
-                          setVerifyResult({
-                            kind: 'ok',
-                            msg: `Channel name updated to "${verifyResult.suggestedName}" and verified.`,
-                          });
-                        }}
-                        className="rounded border border-[#FB923C] bg-[#21303F] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#2a3c4e]"
-                      >
-                        Use detected name: {verifyResult.suggestedName}
-                      </button>
-                    )}
-                  </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                  Platform
+                </label>
+                <div className="flex items-center gap-1.5 rounded-md bg-[#0D111A] p-1">
+                  {PLATFORMS.map((plat) => (
+                    <button
+                      key={plat}
+                      type="button"
+                      onClick={() => {
+                        setPlatform(plat);
+                        setError(null);
+                        setVerifyResult(null);
+                      }}
+                      className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+                        platform === plat
+                          ? 'border border-[#FF5CA8]/60 bg-[#1D2636] text-[#FFF5FA]'
+                          : 'border border-transparent text-[#98A2B8] hover:text-white'
+                      }`}
+                    >
+                      {plat}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
 
-            {error && (
-              <p className="text-xs font-medium text-[#FF4655]" role="alert">
-                {error}
-              </p>
-            )}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                  Channel Display Name{' '}
+                  <span className="font-normal text-[#98A2B8]">
+                    (or leave blank &amp; click Verify to auto-fill)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={channelName}
+                  onChange={(e) => {
+                    setChannelName(e.target.value);
+                    setError(null);
+                    setVerifyResult(null);
+                  }}
+                  placeholder="e.g. Rohan Gaming"
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                />
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => handleAction(true)}
-                className="rounded-md bg-[#FF4655] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#e53a49] whitespace-nowrap"
-              >
-                Save &amp; Submit to GitHub
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAction(false)}
-                className="rounded-md border border-[#2B3A48] bg-[#21303F] px-3.5 py-2 text-xs font-medium text-[#ECE8E1] transition-colors hover:bg-[#2a3c4e] whitespace-nowrap"
-              >
-                Save Local
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="ml-auto rounded-md px-3 py-2 text-xs font-medium text-[#94A3B8] transition-colors hover:text-white whitespace-nowrap"
-              >
-                Cancel
-              </button>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                  Channel URL
+                </label>
+                <input
+                  type="url"
+                  value={channelUrl}
+                  onChange={(e) => {
+                    setChannelUrl(e.target.value);
+                    setError(null);
+                    setVerifyResult(null);
+                  }}
+                  placeholder={
+                    platform === 'YouTube'
+                      ? 'https://www.youtube.com/@RohanGaming'
+                      : platform === 'Twitch'
+                      ? 'https://www.twitch.tv/vexfps'
+                      : 'https://kick.com/kairoclutch'
+                  }
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                />
+              </div>
+
+              {/* Verify Link & Name Action Row */}
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={handleVerify}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[#FFA6D2]/60 bg-[#1D2636] px-3 py-1.5 text-xs font-semibold text-[#FFF5FA] transition-colors hover:border-[#FF5CA8] hover:bg-[#253044] whitespace-nowrap"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5 text-[#FFA6D2]" />
+                  Verify Link &amp; Name
+                </button>
+                {canOpenUrl ? (
+                  <a
+                    href={trimmedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-[#273144] bg-[#1D2636] px-2.5 py-1.5 text-xs font-medium text-[#F3EFF4] transition-colors hover:bg-[#253044] whitespace-nowrap"
+                  >
+                    Open Link
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : (
+                  <span className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border border-[#273144]/60 bg-[#0D111A] px-2.5 py-1.5 text-xs text-[#64748B] whitespace-nowrap">
+                    Open Link
+                    <ExternalLink className="h-3 w-3" />
+                  </span>
+                )}
+              </div>
+
+              {verifyResult && (
+                <div
+                  className={`rounded-md border px-3 py-2 text-xs ${
+                    verifyResult.kind === 'ok'
+                      ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
+                      : verifyResult.kind === 'warn'
+                      ? 'border-[#FB923C]/40 bg-[#FB923C]/10 text-[#FB923C]'
+                      : 'border-[#FF668A]/40 bg-[#FF668A]/10 text-[#FF668A]'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {verifyResult.kind === 'ok' ? (
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    ) : verifyResult.kind === 'warn' ? (
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <div className="space-y-1.5">
+                      <p>{verifyResult.msg}</p>
+                      {verifyResult.kind !== 'ok' && verifyResult.suggestedPlatform && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPlatform(verifyResult.suggestedPlatform!);
+                            setVerifyResult(null);
+                          }}
+                          className="rounded border border-[#FF5CA8] bg-[#1D2636] px-2 py-0.5 text-[11px] font-semibold text-[#FFF5FA] hover:bg-[#253044]"
+                        >
+                          Switch Platform to {verifyResult.suggestedPlatform}
+                        </button>
+                      )}
+                      {verifyResult.kind === 'warn' && verifyResult.suggestedName && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setChannelName(verifyResult.suggestedName!);
+                            setVerifyResult({
+                              kind: 'ok',
+                              msg: `Channel name updated to "${verifyResult.suggestedName}" and verified.`,
+                            });
+                          }}
+                          className="rounded border border-[#FB923C] bg-[#1D2636] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#253044]"
+                        >
+                          Use detected name: {verifyResult.suggestedName}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <p className="text-xs font-medium text-[#FF668A]" role="alert">
+                  {error}
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleAction(true)}
+                  className="rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-4 py-2 text-xs font-bold text-[#0D111A] whitespace-nowrap"
+                >
+                  Save &amp; Submit to GitHub
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAction(false)}
+                  className="rounded-md border border-[#273144] bg-[#1D2636] px-3.5 py-2 text-xs font-medium text-[#F3EFF4] transition-colors hover:bg-[#253044] whitespace-nowrap"
+                >
+                  Save Local
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="ml-auto rounded-md px-3 py-2 text-xs font-medium text-[#98A2B8] transition-colors hover:text-white whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Bell,
   ChevronUp,
+  ExternalLink,
+  MessageSquareQuote,
   Play,
   Power,
   Radio,
@@ -14,6 +16,7 @@ import {
   ShardCode,
   SimMatchScenario,
 } from '../types/radar';
+import { extractChatStreamPlug } from '../utils/validation';
 import { RadarIcon } from './RadarIcon';
 
 interface MatchTrayLabProps {
@@ -37,12 +40,20 @@ interface MatchTrayLabProps {
 }
 
 const CATEGORY_COLORS: Record<LogLineEntry['category'], string> = {
-  log: '#94A3B8',
+  log: '#98A2B8',
   shard: '#38BDF8',
-  riot: '#A78BFA',
-  scan: '#ECE8E1',
+  riot: '#A770FF',
+  chat: '#FFA6D2',
+  scan: '#F3EFF4',
   hit: '#22C55E',
 };
+
+const SAMPLE_CHAT_LINES = [
+  'gg guys im live on yt https://youtube.com/@RohanGaming',
+  'yo im live on yt @NehaValPlays rn',
+  'streaming this ranked game on ttv/vexfps',
+  'im live on yt come watch',
+];
 
 export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
   scenarios,
@@ -64,31 +75,38 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
   onClearLogs,
 }) => {
   const [trayMenuOpen, setTrayMenuOpen] = useState(false);
+  const [sampleChat, setSampleChat] = useState(SAMPLE_CHAT_LINES[0]);
+  const [sampleSender, setSampleSender] = useState('RohanYT#IND');
 
   const selectedScenario =
     scenarios.find((s) => s.id === selectedScenarioId) ?? scenarios[0];
+
+  const extractedChatPlug = useMemo(
+    () => extractChatStreamPlug(sampleChat, sampleSender),
+    [sampleChat, sampleSender]
+  );
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-12">
         {/* Left: Interactive Pipeline Controls */}
         <div className="space-y-4 xl:col-span-7">
-          <div className="rounded-lg border border-[#2B3A48] bg-[#182430] p-5">
-            <h3 className="text-sm font-semibold text-white">
-              Post-Match Detection Pipeline Simulator
+          <div className="rounded-lg border border-[#273144] bg-[#141B27] p-5">
+            <h3 className="text-sm font-semibold text-[#FFF5FA]">
+              Post-Match Detection &amp; In-Game Chat Pipeline Simulator
             </h3>
-            <p className="mt-1 text-xs leading-relaxed text-[#94A3B8]">
-              Step through the exact user-space lifecycle of{' '}
-              <span className="font-mono text-[#ECE8E1]">val-streamer-notifier</span>:
-              lockfile detection, passive shard discovery from{' '}
-              <span className="font-mono text-[#ECE8E1]">ShooterGame.log</span>,
-              <span className="font-mono text-[#ECE8E1]"> InGame &rarr; MainMenu</span>{' '}
+            <p className="mt-1 text-xs leading-relaxed text-[#98A2B8]">
+              Step through the user-space lifecycle of{' '}
+              <span className="font-mono text-[#F3EFF4]">val-streamer-notifier</span>:
+              lockfile detection, silent in-game chat buffering via{' '}
+              <span className="font-mono text-[#FFA6D2]">/chat/v6/messages</span>,{' '}
+              <span className="font-mono text-[#F3EFF4]">InGame &rarr; MainMenu</span>{' '}
               transition, concurrent 9-player scan, and WinRT toast notification.
             </p>
 
             {/* Scenario picker */}
             <div className="mt-4">
-              <label className="mb-1.5 block text-xs font-medium text-[#ECE8E1]">
+              <label className="mb-1.5 block text-xs font-medium text-[#F3EFF4]">
                 Simulated Match Scenario
               </label>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -102,14 +120,14 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                       onClick={() => onSelectScenario(sc.id)}
                       className={`rounded-md border px-3 py-2 text-left transition-colors ${
                         active
-                          ? 'border-[#FF4655] bg-[#21303F] text-white'
-                          : 'border-[#2B3A48] bg-[#0F1923] text-[#94A3B8] hover:text-white'
+                          ? 'border-[#FF5CA8] bg-[#1D2636] text-[#FFF5FA]'
+                          : 'border-[#273144] bg-[#0D111A] text-[#98A2B8] hover:text-white'
                       }`}
                     >
-                      <p className="font-mono text-[11px] font-semibold uppercase text-[#FF4655]">
+                      <p className="font-mono text-[11px] font-semibold uppercase text-[#FFA6D2]">
                         {SHARD_LABELS[sc.shard]}
                       </p>
-                      <p className="mt-0.5 text-xs font-medium text-white">
+                      <p className="mt-0.5 text-xs font-medium text-[#FFF5FA]">
                         {sc.map_name} · {sc.queue_name}
                       </p>
                     </button>
@@ -125,8 +143,8 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                 onClick={onToggleValorant}
                 className={`inline-flex items-center gap-1.5 rounded-md border px-3.5 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
                   valorantRunning
-                    ? 'border-[#22C55E]/60 bg-[#0F1923] text-[#22C55E]'
-                    : 'border-[#2B3A48] bg-[#21303F] text-[#ECE8E1] hover:bg-[#2a3c4e]'
+                    ? 'border-[#22C55E]/60 bg-[#0D111A] text-[#22C55E]'
+                    : 'border-[#273144] bg-[#1D2636] text-[#F3EFF4] hover:bg-[#253044]'
                 }`}
               >
                 <Power className="h-3.5 w-3.5" />
@@ -137,9 +155,9 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                 type="button"
                 disabled={!valorantRunning || inMatch || isScanning}
                 onClick={onSimulateEnterMatch}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#2B3A48] bg-[#21303F] px-3.5 py-2 text-xs font-semibold text-[#ECE8E1] transition-colors hover:bg-[#2a3c4e] disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#273144] bg-[#1D2636] px-3.5 py-2 text-xs font-semibold text-[#F3EFF4] transition-colors hover:bg-[#253044] disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
               >
-                <Play className="h-3.5 w-3.5" />
+                <Play className="h-3.5 w-3.5 text-[#FFA6D2]" />
                 1. Enter Match (InGame)
               </button>
 
@@ -147,7 +165,7 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                 type="button"
                 disabled={!valorantRunning || !inMatch || isScanning}
                 onClick={onSimulateEndMatch}
-                className="inline-flex items-center gap-1.5 rounded-md bg-[#FF4655] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#e53a49] disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-4 py-2 text-xs font-bold text-[#0D111A] disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
               >
                 <Square className="h-3.5 w-3.5" />
                 2. End Match (MainMenu &rarr; Scan)
@@ -156,40 +174,142 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
               <button
                 type="button"
                 onClick={onPreviewToast}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#2B3A48] bg-[#0F1923] px-3.5 py-2 text-xs font-medium text-[#ECE8E1] transition-colors hover:border-[#FF4655] whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#273144] bg-[#0D111A] px-3.5 py-2 text-xs font-medium text-[#F3EFF4] transition-colors hover:border-[#FF5CA8] whitespace-nowrap"
               >
-                <Bell className="h-3.5 w-3.5" />
+                <Bell className="h-3.5 w-3.5 text-[#FFA6D2]" />
                 Test WinRT Toast
               </button>
             </div>
           </div>
 
+          {/* Interactive In-Game Chat Stream Link Extractor */}
+          <div className="rounded-lg border border-[#FF5CA8]/35 bg-[#141B27] p-5">
+            <div className="flex items-center gap-2">
+              <MessageSquareQuote className="h-4 w-4 text-[#FF5CA8]" />
+              <h4 className="text-xs font-semibold text-[#FFF5FA]">
+                Live In-Game Text Chat Stream Link Extractor
+              </h4>
+            </div>
+            <p className="mt-1 text-xs text-[#98A2B8]">
+              Test how <span className="font-mono text-[#F3EFF4]">extract_chat_stream_plug()</span> parses
+              in-game chat plugs like &ldquo;im live on yt&rdquo;, handles, and stream URLs.
+            </p>
+
+            <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-[11px] text-[#98A2B8]">Sender Riot ID</label>
+                <input
+                  type="text"
+                  value={sampleSender}
+                  onChange={(e) => setSampleSender(e.target.value)}
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-2.5 py-1.5 font-mono text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-[11px] text-[#98A2B8]">In-Game Chat Message</label>
+                <input
+                  type="text"
+                  value={sampleChat}
+                  onChange={(e) => setSampleChat(e.target.value)}
+                  placeholder="Type a chat message like 'im live on yt @RohanGaming'"
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-2.5 py-1.5 text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {SAMPLE_CHAT_LINES.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setSampleChat(preset)}
+                  className="rounded border border-[#273144] bg-[#090D14] px-2 py-1 text-[10.5px] text-[#98A2B8] transition-colors hover:border-[#FF5CA8]/60 hover:text-[#FFF5FA]"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 rounded-md border border-[#273144] bg-[#090D14] p-3 text-xs">
+              {extractedChatPlug ? (
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded border border-[#FF5CA8]/60 bg-[#FF5CA8]/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-[#FFF5FA]">
+                      {extractedChatPlug.platform}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#22C55E]">
+                      Captured ({extractedChatPlug.matchType})
+                    </span>
+                    <span className="text-[#98A2B8]">·</span>
+                    <span className="font-medium text-[#FFA6D2]">
+                      Channel: {extractedChatPlug.channel}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <span className="truncate font-mono text-[11px] text-[#F3EFF4]">
+                      {extractedChatPlug.url}
+                    </span>
+                    <a
+                      href={extractedChatPlug.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#FFA6D2] hover:text-[#FFF5FA]"
+                    >
+                      Open
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[#64748B]">
+                  No stream link or &ldquo;live on YT / Twitch / Kick&rdquo; mention detected in this message.
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Scenario Roster Preview */}
-          <div className="rounded-lg border border-[#2B3A48] bg-[#182430] p-5">
+          <div className="rounded-lg border border-[#273144] bg-[#141B27] p-5">
             <div className="flex items-center justify-between gap-2">
-              <h4 className="text-xs font-semibold text-white">
+              <h4 className="text-xs font-semibold text-[#FFF5FA]">
                 Post-Match Lobby Roster ({selectedScenario.map_name} ·{' '}
                 {selectedScenario.queue_name})
               </h4>
-              <span className="font-mono text-[11px] text-[#94A3B8]">
+              <span className="font-mono text-[11px] text-[#98A2B8]">
                 9 other players · Semaphore(4)
               </span>
             </div>
 
+            {selectedScenario.chatLog && selectedScenario.chatLog.length > 0 && (
+              <div className="mt-3 rounded-md border border-[#FF5CA8]/30 bg-[#090D14] p-3">
+                <p className="text-[10.5px] font-semibold tracking-wider text-[#FFA6D2] uppercase">
+                  Buffered Match Text Chat ({selectedScenario.chatLog.length} messages)
+                </p>
+                <div className="mt-1.5 space-y-1 font-mono text-[11px]">
+                  {selectedScenario.chatLog.map((c, idx) => (
+                    <div key={`${c.riot_id}-${idx}`} className="text-[#98A2B8]">
+                      <span className="text-[#FFF5FA]">{c.riot_id}:</span>{' '}
+                      <span className="text-[#F3EFF4]">{c.body}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-[#2B3A48] text-[11px] text-[#94A3B8]">
+                  <tr className="border-b border-[#273144] text-[11px] text-[#98A2B8]">
                     <th className="py-2 pr-3 font-medium">Riot ID</th>
                     <th className="py-2 pr-3 font-medium">Team</th>
                     <th className="py-2 pr-3 font-medium">Agent</th>
                     <th className="py-2 font-medium">Expected Detection</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#2B3A48]/60">
+                <tbody className="divide-y divide-[#273144]/60">
                   {selectedScenario.players.map((p) => (
-                    <tr key={p.riot_id} className="hover:bg-[#0F1923]/50">
-                      <td className="py-2 pr-3 font-mono text-[#ECE8E1]">{p.riot_id}</td>
+                    <tr key={p.riot_id} className="hover:bg-[#0D111A]/50">
+                      <td className="py-2 pr-3 font-mono text-[#F3EFF4]">{p.riot_id}</td>
                       <td
                         className="py-2 pr-3 font-medium"
                         style={{
@@ -198,11 +318,15 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                       >
                         {p.team_relation}
                       </td>
-                      <td className="py-2 pr-3 text-[#94A3B8]">{p.agent_name}</td>
+                      <td className="py-2 pr-3 text-[#98A2B8]">{p.agent_name}</td>
                       <td className="py-2 font-mono text-[11px]">
                         {p.liveStream ? (
                           <span className="text-[#22C55E]">
                             LIVE ({p.liveStream.platform} · {p.detectionSource})
+                          </span>
+                        ) : p.detectionSource === 'chat' ? (
+                          <span className="text-[#FFA6D2]">
+                            CHAT PLUG (extracted post-match)
                           </span>
                         ) : (
                           <span className="text-[#64748B]">Not live</span>
@@ -219,28 +343,28 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
         {/* Right: Simulated Windows System Tray & Live Trace Log */}
         <div className="space-y-4 xl:col-span-5">
           {/* Simulated Windows Taskbar System Tray */}
-          <div className="rounded-lg border border-[#2B3A48] bg-[#182430] p-5">
-            <h3 className="text-sm font-semibold text-white">
+          <div className="rounded-lg border border-[#273144] bg-[#141B27] p-5">
+            <h3 className="text-sm font-semibold text-[#FFF5FA]">
               Windows System Tray Simulator
             </h3>
-            <p className="mt-1 text-xs text-[#94A3B8]">
-              Event-driven <span className="font-mono text-[#ECE8E1]">tray-icon 0.19</span>{' '}
+            <p className="mt-1 text-xs text-[#98A2B8]">
+              Event-driven <span className="font-mono text-[#F3EFF4]">tray-icon 0.19</span>{' '}
               menu. Left-click restores the hidden window; right-click opens the tray menu.
             </p>
 
             <div className="relative mt-4">
               {trayMenuOpen && (
-                <div className="mb-2 ml-auto w-56 rounded-lg border border-[#2B3A48] bg-[#0B131B] p-1.5 shadow-2xl">
+                <div className="mb-2 ml-auto w-56 rounded-lg border border-[#273144] bg-[#090D14] p-1.5 shadow-2xl">
                   <button
                     type="button"
                     onClick={() => {
                       onOpenWindowFromTray();
                       setTrayMenuOpen(false);
                     }}
-                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs text-[#ECE8E1] hover:bg-[#21303F]"
+                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs text-[#F3EFF4] hover:bg-[#1D2636]"
                   >
                     <span>Open Streamer History</span>
-                    <span className="font-mono text-[10px] text-[#94A3B8]">Visible</span>
+                    <span className="font-mono text-[10px] text-[#98A2B8]">Visible</span>
                   </button>
                   <button
                     type="button"
@@ -249,19 +373,19 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                       onRunManualScan();
                       setTrayMenuOpen(false);
                     }}
-                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs text-[#ECE8E1] hover:bg-[#21303F] disabled:opacity-45"
+                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs text-[#F3EFF4] hover:bg-[#1D2636] disabled:opacity-45"
                   >
                     <span>Check Last Match Now</span>
-                    <Radio className="h-3.5 w-3.5 text-[#FF4655]" />
+                    <Radio className="h-3.5 w-3.5 text-[#FF5CA8]" />
                   </button>
-                  <div className="my-1 border-t border-[#2B3A48]" />
+                  <div className="my-1 border-t border-[#273144]" />
                   <button
                     type="button"
                     onClick={() => {
                       onHideWindowToTray();
                       setTrayMenuOpen(false);
                     }}
-                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs text-[#94A3B8] hover:bg-[#21303F] hover:text-white"
+                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs text-[#98A2B8] hover:bg-[#1D2636] hover:text-white"
                   >
                     <span>{windowVisible ? 'Hide Window to Tray' : 'Window Already Hidden'}</span>
                   </button>
@@ -269,10 +393,10 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
               )}
 
               {/* Simulated Windows 11 Taskbar Corner */}
-              <div className="flex items-center justify-between rounded-md border border-[#2B3A48] bg-[#080E14] px-4 py-2.5">
-                <div className="text-[11px] text-[#94A3B8]">
+              <div className="flex items-center justify-between rounded-md border border-[#273144] bg-[#070A10] px-4 py-2.5">
+                <div className="text-[11px] text-[#98A2B8]">
                   Active Shard:{' '}
-                  <span className="font-mono text-[#ECE8E1]">
+                  <span className="font-mono text-[#F3EFF4]">
                     {SHARD_LABELS[effectiveShard]}
                   </span>
                 </div>
@@ -280,7 +404,7 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                   <button
                     type="button"
                     onClick={() => setTrayMenuOpen((prev) => !prev)}
-                    className="rounded p-1.5 text-[#94A3B8] transition-colors hover:bg-[#182430] hover:text-white"
+                    className="rounded p-1.5 text-[#98A2B8] transition-colors hover:bg-[#141B27] hover:text-white"
                     title="Toggle tray context menu"
                   >
                     <ChevronUp
@@ -300,14 +424,14 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                       setTrayMenuOpen((prev) => !prev);
                     }}
                     title="Valorant Streamer Radar (Left-click: open window, Right-click: menu)"
-                    className="rounded border border-[#2B3A48] bg-[#0F1923] p-1 transition-colors hover:border-[#FF4655]"
+                    className="rounded border border-[#273144] bg-[#0D111A] p-1 transition-colors hover:border-[#FF5CA8]"
                   >
                     <RadarIcon size={18} />
                   </button>
                   <button
                     type="button"
                     onClick={() => setTrayMenuOpen((prev) => !prev)}
-                    className="rounded border border-[#2B3A48] bg-[#21303F] px-2.5 py-1 text-[11px] font-medium text-[#ECE8E1] hover:bg-[#2a3c4e]"
+                    className="rounded border border-[#273144] bg-[#1D2636] px-2.5 py-1 text-[11px] font-medium text-[#F3EFF4] hover:bg-[#253044]"
                   >
                     Tray Menu
                   </button>
@@ -317,21 +441,21 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
           </div>
 
           {/* Live ShooterGame.log & radar.log Trace */}
-          <div className="rounded-lg border border-[#2B3A48] bg-[#0B131B]">
-            <div className="flex items-center justify-between border-b border-[#2B3A48] px-4 py-3">
-              <span className="font-mono text-xs font-semibold text-[#ECE8E1]">
+          <div className="rounded-lg border border-[#273144] bg-[#090D14]">
+            <div className="flex items-center justify-between border-b border-[#273144] px-4 py-3">
+              <span className="font-mono text-xs font-semibold text-[#F3EFF4]">
                 ShooterGame.log &amp; radar.log Trace
               </span>
               <button
                 type="button"
                 onClick={onClearLogs}
-                className="inline-flex items-center gap-1 text-[11px] text-[#94A3B8] hover:text-white"
+                className="inline-flex items-center gap-1 text-[11px] text-[#98A2B8] hover:text-white"
               >
                 <RotateCcw className="h-3 w-3" />
                 Clear
               </button>
             </div>
-            <div className="h-[340px] overflow-y-auto p-3.5 font-mono text-[11px] leading-relaxed">
+            <div className="h-[380px] overflow-y-auto p-3.5 font-mono text-[11px] leading-relaxed">
               {logs.length === 0 ? (
                 <p className="text-[#64748B]">
                   No log events yet. Start Valorant and trigger a match transition to watch

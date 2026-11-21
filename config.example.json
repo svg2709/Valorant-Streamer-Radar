@@ -6,5 +6,6 @@
   "shard_override": "auto",
   "github_owner": "your-github-username",
   "github_repo": "valorant-streamers-db",
-  "use_custom_toast_app_id": true
+  "use_custom_toast_app_id": true,
+  "capture_in_game_chat": true
 }

@@ -38,16 +38,19 @@ const SINGLE_INSTANCE_PORT: u16 = 47831;
 const MAX_HISTORY: usize = 300;
 const TOAST_TTL: Duration = Duration::from_secs(4);
 
-const BG_DARK: Color32 = Color32::from_rgb(15, 25, 35);
-const HEADER_BG: Color32 = Color32::from_rgb(11, 19, 27);
-const CARD_BG: Color32 = Color32::from_rgb(24, 36, 48);
-const CARD_BORDER: Color32 = Color32::from_rgb(43, 58, 72);
-const BTN_SECONDARY: Color32 = Color32::from_rgb(33, 48, 63);
-const ACCENT_RED: Color32 = Color32::from_rgb(255, 70, 85);
-const TWITCH_PURPLE: Color32 = Color32::from_rgb(145, 70, 255);
+const BG_DARK: Color32 = Color32::from_rgb(13, 17, 26);
+const HEADER_BG: Color32 = Color32::from_rgb(9, 13, 20);
+const CARD_BG: Color32 = Color32::from_rgb(20, 27, 39);
+const CARD_BORDER: Color32 = Color32::from_rgb(39, 49, 68);
+const BTN_SECONDARY: Color32 = Color32::from_rgb(29, 38, 54);
+const ACCENT_PINK: Color32 = Color32::from_rgb(255, 92, 168);
+const ACCENT_BLUSH: Color32 = Color32::from_rgb(255, 166, 210);
+const ACCENT_PEARL: Color32 = Color32::from_rgb(255, 245, 250);
+const ERR_ROSE: Color32 = Color32::from_rgb(255, 102, 138);
+const TWITCH_PURPLE: Color32 = Color32::from_rgb(167, 112, 255);
 const KICK_GREEN: Color32 = Color32::from_rgb(83, 252, 24);
-const TEXT_PRIMARY: Color32 = Color32::from_rgb(236, 232, 225);
-const TEXT_MUTED: Color32 = Color32::from_rgb(148, 163, 184);
+const TEXT_PRIMARY: Color32 = Color32::from_rgb(243, 239, 244);
+const TEXT_MUTED: Color32 = Color32::from_rgb(152, 162, 184);
 const LIVE_GREEN: Color32 = Color32::from_rgb(34, 197, 94);
 const ALLY_TEAL: Color32 = Color32::from_rgb(45, 212, 191);
 const ENEMY_AMBER: Color32 = Color32::from_rgb(251, 146, 60);
@@ -170,17 +173,50 @@ where
     Err(last)
 }
 
-/// Generates the 32x32 RGBA pixel buffer (Obsidian #0F1923 fill, 2px Crimson #FF4655 border & "V").
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)).round() as u8
+}
+
+fn pink_white_rgba(t: f32) -> [u8; 4] {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.55 {
+        let k = t / 0.55;
+        [255, lerp_u8(77, 166, k), lerp_u8(148, 210, k), 255]
+    } else {
+        let k = (t - 0.55) / 0.45;
+        [255, lerp_u8(166, 245, k), lerp_u8(210, 250, k), 255]
+    }
+}
+
+fn pink_white_color(t: f32) -> Color32 {
+    let px = pink_white_rgba(t);
+    Color32::from_rgb(px[0], px[1], px[2])
+}
+
+/// Generates the 32x32 RGBA pixel buffer (Obsidian fill with diagonal Pink-to-White gradient border, "V", and radar dot).
 fn radar_icon_rgba() -> Vec<u8> {
     let size = 32u32;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let border = 2.0 / 32.0;
     for y in 0..size {
         for x in 0..size {
             let idx = ((y * size + x) * 4) as usize;
-            let in_border = x < 2 || x >= size - 2 || y < 2 || y >= size - 2;
-            let dx = (x as i32 - 16).abs();
-            let in_v = (7..=24).contains(&y) && (dx - ((24 - y as i32) / 2)).abs() <= 2;
-            let px: [u8; 4] = if in_border || in_v { [255, 70, 85, 255] } else { [15, 25, 35, 255] };
+            let u = (x as f32 + 0.5) / size as f32;
+            let v = (y as f32 + 0.5) / size as f32;
+
+            let in_border = u < border || u > 1.0 - border || v < border || v > 1.0 - border;
+            let du = (u - 0.5).abs();
+            let arm_x = (0.78 - v) * 0.46;
+            let in_v = (0.24..=0.78).contains(&v) && (du - arm_x).abs() <= 0.078;
+            let dot_dist = ((u - 0.5).powi(2) + (v - 0.28).powi(2)).sqrt();
+            let in_dot = dot_dist <= 0.075;
+
+            let px: [u8; 4] = if in_border || in_v || in_dot {
+                let grad_t = if in_dot { 0.92 } else { u * 0.55 + (1.0 - v) * 0.45 };
+                pink_white_rgba(grad_t)
+            } else {
+                [lerp_u8(13, 24, v), lerp_u8(17, 19, v), lerp_u8(26, 38, v), 255]
+            };
             rgba[idx..idx + 4].copy_from_slice(&px);
         }
     }
@@ -257,6 +293,8 @@ struct AppConfig {
     github_repo: String,
     #[serde(default = "default_true")]
     use_custom_toast_app_id: bool,
+    #[serde(default = "default_true")]
+    capture_in_game_chat: bool,
 }
 
 fn default_true() -> bool {
@@ -286,6 +324,7 @@ impl Default for AppConfig {
             github_owner: default_github_owner(),
             github_repo: default_github_repo(),
             use_custom_toast_app_id: true,
+            capture_in_game_chat: true,
         }
     }
 }
@@ -316,6 +355,39 @@ struct StreamerEntry {
     agent_name: String,
     #[serde(default)]
     queue_name: String,
+    #[serde(default)]
+    chat_message: String,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ChatMessage {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    mid: String,
+    #[serde(default)]
+    cid: String,
+    #[serde(default)]
+    puuid: String,
+    #[serde(default)]
+    game_name: String,
+    #[serde(default)]
+    game_tag: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default, rename = "type")]
+    msg_type: String,
+}
+
+#[derive(Debug, Clone)]
+struct ChatStreamPlug {
+    platform: String,
+    url: Option<String>,
+    handle: Option<String>,
+    raw_message: String,
+    priority: u8,
 }
 
 fn default_platform() -> String {
@@ -371,6 +443,7 @@ struct AppState {
     toast: Option<(String, Instant)>,
     last_scanned_match: Option<String>,
     last_match_summary: Option<LastMatchSummary>,
+    chat_buffer: Vec<ChatMessage>,
     yt_key_check: CheckState,
     twitch_key_check: CheckState,
     streamer_verify: CheckState,
@@ -767,6 +840,235 @@ async fn fetch_local_entitlements(local: &Client) -> Result<EntitlementsResponse
         return Err(anyhow!("Valorant session not ready yet - sign in & enter lobby"));
     }
     Ok(ent)
+}
+
+async fn fetch_local_chat_messages(local: &Client) -> Result<Vec<ChatMessage>> {
+    let (port, password, protocol) = read_riot_lockfile()?;
+    let auth_header = format!("Basic {}", STANDARD.encode(format!("riot:{password}")));
+    let url = format!("{protocol}://127.0.0.1:{port}/chat/v6/messages");
+
+    let resp = local
+        .get(&url)
+        .header("Authorization", auth_header)
+        .header("Accept", "application/json")
+        .header("User-Agent", BROWSER_UA)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        return Err(anyhow!("Local chat API returned HTTP {}", resp.status().as_u16()));
+    }
+    let val: Value = resp.json().await?;
+    let msgs: Vec<ChatMessage> = val["messages"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect())
+        .unwrap_or_default();
+    Ok(msgs)
+}
+
+fn is_match_chat_message(m: &ChatMessage) -> bool {
+    if m.body.trim().is_empty() {
+        return false;
+    }
+    let cid = m.cid.to_ascii_lowercase();
+    let ty = m.msg_type.to_ascii_lowercase();
+    cid.contains("ares-coregame") || cid.contains("ares-pregame") || ty == "groupchat"
+}
+
+fn chat_msg_key(m: &ChatMessage) -> String {
+    if !m.id.is_empty() {
+        m.id.clone()
+    } else if !m.mid.is_empty() {
+        m.mid.clone()
+    } else {
+        format!("{}:{}", m.puuid, m.body.trim())
+    }
+}
+
+fn merge_chat_messages(target: &mut Vec<ChatMessage>, incoming: Vec<ChatMessage>) {
+    let mut existing: HashSet<String> = target.iter().map(chat_msg_key).collect();
+    for m in incoming {
+        if !is_match_chat_message(&m) {
+            continue;
+        }
+        let key = chat_msg_key(&m);
+        if existing.insert(key) {
+            target.push(m);
+        }
+    }
+    if target.len() > 250 {
+        let drop_n = target.len() - 250;
+        target.drain(0..drop_n);
+    }
+}
+
+static CHAT_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\b(?:https?://)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be|twitch\.tv|kick\.com)/[^\s<>"'\)\]]+"#).unwrap()
+});
+static CHAT_YT_SHORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:yt|youtube)\s*(?:/|:|@|-)\s*@?([a-z0-9._-]{3,30})\b").unwrap()
+});
+static CHAT_TW_SHORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:ttv|twitch)\s*(?:/|:|@|-)\s*([a-z0-9_]{3,25})\b").unwrap()
+});
+static CHAT_KICK_SHORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bkick\s*(?:/|:|@|-)\s*([a-z0-9_-]{3,25})\b").unwrap()
+});
+static CHAT_AT_HANDLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:^|\s)@([a-z0-9._-]{3,30})\b").unwrap()
+});
+static CHAT_LIVE_INTENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:live|streaming|stream|watch|tune\s+in|sub|subscribe|follow|check\s+(?:out\s+)?my|going\s+live|im\s+live|i'm\s+live)\b").unwrap()
+});
+static CHAT_YT_WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(?:yt|youtube)\b").unwrap());
+static CHAT_TW_WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(?:ttv|twitch)\b").unwrap());
+static CHAT_KICK_WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bkick\b").unwrap());
+
+fn is_chat_stop_word(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "live" | "stream" | "streaming" | "valorant" | "val" | "gaming" | "channel"
+            | "link" | "here" | "now" | "guys" | "bro" | "pls" | "please" | "check"
+            | "watch" | "sub" | "follow" | "search" | "find" | "look" | "youtube"
+            | "twitch" | "kick" | "ttv" | "com" | "www" | "http" | "https" | "results"
+            | "shorts" | "playlist" | "videos" | "featured" | "about" | "streams"
+    )
+}
+
+fn handle_from_stream_url(platform: &str, url: &str) -> Option<String> {
+    let clean = strip_query(url).trim_end_matches('/');
+    let rest = clean.strip_prefix("https://").or_else(|| clean.strip_prefix("http://"))?;
+    let mut parts = rest.split('/').skip(1);
+    let first = parts.next().unwrap_or("");
+    let second = parts.next().unwrap_or("");
+    match platform {
+        "YouTube" => {
+            if let Some(h) = first.strip_prefix('@') {
+                if h.len() >= 2 {
+                    return Some(h.to_string());
+                }
+            }
+            if matches!(first.to_ascii_lowercase().as_str(), "c" | "user" | "channel") && !second.is_empty() {
+                return Some(second.to_string());
+            }
+            None
+        }
+        "Twitch" | "Kick" => {
+            let slug = first.trim_start_matches('@');
+            if slug.len() >= 3 && !is_chat_stop_word(slug) {
+                Some(slug.to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn extract_chat_stream_plug(body: &str) -> Option<ChatStreamPlug> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Priority 3: Direct YouTube / Twitch / Kick URL (with or without https://)
+    for m in CHAT_URL_RE.find_iter(trimmed) {
+        let raw_link = m.as_str().trim_end_matches(|c: char| matches!(c, '.' | ',' | '!' | '?' | ';' | ':' | ')' | ']'));
+        let full_url = if raw_link.to_ascii_lowercase().starts_with("http://")
+            || raw_link.to_ascii_lowercase().starts_with("https://")
+        {
+            raw_link.to_string()
+        } else {
+            format!("https://{raw_link}")
+        };
+        let Some(host) = host_of(&full_url) else {
+            continue;
+        };
+        let platform = if host_allowed("YouTube", &host) {
+            "YouTube"
+        } else if host_allowed("Twitch", &host) {
+            "Twitch"
+        } else if host_allowed("Kick", &host) {
+            "Kick"
+        } else {
+            continue;
+        };
+        let handle = handle_from_stream_url(platform, &full_url);
+        return Some(ChatStreamPlug {
+            platform: platform.to_string(),
+            url: Some(full_url),
+            handle,
+            raw_message: trimmed.to_string(),
+            priority: 3,
+        });
+    }
+
+    // Priority 2: Shorthand like "ttv/vexfps", "yt/@RohanGaming", "kick/kairo"
+    for (re, platform) in [
+        (&*CHAT_YT_SHORT_RE, "YouTube"),
+        (&*CHAT_TW_SHORT_RE, "Twitch"),
+        (&*CHAT_KICK_SHORT_RE, "Kick"),
+    ] {
+        if let Some(caps) = re.captures(trimmed) {
+            let handle = caps[1].trim_matches(|c: char| c == '.' || c == '-');
+            if handle.len() >= 3 && !is_chat_stop_word(handle) {
+                let url = match platform {
+                    "YouTube" => format!("https://www.youtube.com/@{handle}"),
+                    "Twitch" => format!("https://www.twitch.tv/{handle}"),
+                    _ => format!("https://kick.com/{handle}"),
+                };
+                return Some(ChatStreamPlug {
+                    platform: platform.to_string(),
+                    url: Some(url),
+                    handle: Some(handle.to_string()),
+                    raw_message: trimmed.to_string(),
+                    priority: 2,
+                });
+            }
+        }
+    }
+
+    // Priority 1/2: Live/stream self-promo intent ("im live on yt", "streaming on twitch @name")
+    if CHAT_LIVE_INTENT_RE.is_match(trimmed) {
+        let platform = if CHAT_YT_WORD_RE.is_match(trimmed) {
+            Some("YouTube")
+        } else if CHAT_TW_WORD_RE.is_match(trimmed) {
+            Some("Twitch")
+        } else if CHAT_KICK_WORD_RE.is_match(trimmed) {
+            Some("Kick")
+        } else {
+            None
+        };
+
+        if let Some(plat) = platform {
+            if let Some(caps) = CHAT_AT_HANDLE_RE.captures(trimmed) {
+                let handle = caps[1].trim_matches(|c: char| c == '.' || c == '-');
+                if handle.len() >= 3 && !is_chat_stop_word(handle) {
+                    let url = match plat {
+                        "YouTube" => format!("https://www.youtube.com/@{handle}"),
+                        "Twitch" => format!("https://www.twitch.tv/{handle}"),
+                        _ => format!("https://kick.com/{handle}"),
+                    };
+                    return Some(ChatStreamPlug {
+                        platform: plat.to_string(),
+                        url: Some(url),
+                        handle: Some(handle.to_string()),
+                        raw_message: trimmed.to_string(),
+                        priority: 2,
+                    });
+                }
+            }
+            return Some(ChatStreamPlug {
+                platform: plat.to_string(),
+                url: None,
+                handle: None,
+                raw_message: trimmed.to_string(),
+                priority: 1,
+            });
+        }
+    }
+
+    None
 }
 
 async fn probe_riot_session(local: &Client) -> RiotStatus {
@@ -1491,7 +1793,7 @@ fn register_toast_app_id(enable: bool) {
     match hkcu.create_subkey(&subkey) {
         Ok((key, _)) => {
             let _ = key.set_value("DisplayName", &"Valorant Streamer Radar");
-            let _ = key.set_value("IconBackgroundColor", &"FF0F1923");
+            let _ = key.set_value("IconBackgroundColor", &"FF0D111A");
             if let Some(icon_path) = ensure_toast_icon_file() {
                 let _ = key.set_value("IconUri", &icon_path.to_string_lossy().to_string());
             }
@@ -1516,8 +1818,13 @@ fn show_toast(entry: &StreamerEntry, use_custom_app_id: bool) {
     } else {
         format!(" ({})", entry.team_relation)
     };
-    let title = format!("[{}] LIVE: {}{}", entry.platform, entry.riot_id, relation);
-    let line1 = format!("{} ({})", short(&entry.title, 90), entry.channel);
+    let tag = if entry.source == "Chat" { "CHAT LIVE" } else { "LIVE" };
+    let title = format!("[{}] {}: {}{}", entry.platform, tag, entry.riot_id, relation);
+    let line1 = if !entry.chat_message.is_empty() && entry.source == "Chat" {
+        format!("Chat: \"{}\"", short(&entry.chat_message, 90))
+    } else {
+        format!("{} ({})", short(&entry.title, 90), entry.channel)
+    };
     let app_id = if use_custom_app_id && CUSTOM_APP_ID_READY.load(Ordering::Relaxed) {
         CUSTOM_TOAST_APP_ID
     } else {
@@ -1553,16 +1860,22 @@ fn record_and_notify(
 ) {
     let is_new = {
         let mut s = lock(state);
-        let exists = s
+        if let Some(existing) = s
             .history
-            .iter()
-            .any(|e| e.match_id == entry.match_id && e.riot_id == entry.riot_id && e.platform == entry.platform);
-        if !exists {
+            .iter_mut()
+            .find(|e| e.match_id == entry.match_id && e.riot_id == entry.riot_id && e.platform == entry.platform)
+        {
+            if existing.chat_message.is_empty() && !entry.chat_message.is_empty() {
+                existing.chat_message = entry.chat_message.clone();
+                save_json("streamer_history.json", &s.history);
+            }
+            false
+        } else {
             s.history.insert(0, entry.clone());
             s.history.truncate(MAX_HISTORY);
             save_json("streamer_history.json", &s.history);
+            true
         }
-        !exists
     };
     repaint(ctx);
 
@@ -1585,6 +1898,7 @@ async fn scan_player(
     map_name: String,
     queue_name: String,
     player_info: MatchPlayerInfo,
+    chat_plug: Option<ChatStreamPlug>,
 ) -> Vec<StreamerEntry> {
     let player = player_info.record;
     let riot_id = format!("{}#{}", player.game_name, player.tag_line);
@@ -1592,7 +1906,7 @@ async fn scan_player(
     let team_relation = player_info.team_relation;
     let agent_name = player_info.agent_name;
 
-    let make = |platform: &str, channel: String, title: String, url: String| StreamerEntry {
+    let make = |platform: &str, channel: String, title: String, url: String, source: &str, chat_msg: String| StreamerEntry {
         match_id: match_id.clone(),
         riot_id: riot_id.clone(),
         platform: platform.to_string(),
@@ -1604,13 +1918,17 @@ async fn scan_player(
         map_name: map_name.clone(),
         agent_name: agent_name.clone(),
         queue_name: queue_name.clone(),
+        chat_message: chat_msg,
+        source: source.to_string(),
     };
+
+    let mut out = Vec::new();
+    let mut ran_heuristics = false;
 
     // Phase 1: exact Riot ID mapping (authoritative; skips noisy heuristics when present)
     let linked: Vec<&DirectoryStreamer> =
         directory.iter().filter(|d| d.riot_id.eq_ignore_ascii_case(&riot_id)).collect();
     if !linked.is_empty() {
-        let mut out = Vec::new();
         for d in linked {
             let handle = last_path_segment(&d.channel_url);
             let hit = match d.platform.as_str() {
@@ -1621,28 +1939,109 @@ async fn scan_player(
                 _ => check_youtube_channel_live(&client, &d.channel_url).await,
             };
             if let Some((title, url)) = hit {
-                out.push(make(&d.platform, d.channel_name.clone(), title, url));
+                out.push(make(&d.platform, d.channel_name.clone(), title, url, "Directory", String::new()));
             }
         }
-        return out;
+    } else {
+        // Phase 2: concurrent heuristic fallback
+        ran_heuristics = true;
+        let (yt, tw, kick) = tokio::join!(
+            check_youtube_live(&client, &player.game_name, &config.youtube_api_key),
+            check_twitch_live(&client, &player.game_name, false, &config.twitch_client_id, twitch_token.as_deref()),
+            check_kick_live(&client, &player.game_name, false),
+        );
+        if let Some((c, t, u)) = yt {
+            out.push(make("YouTube", c, t, u, "Heuristic", String::new()));
+        }
+        if let Some((c, t, u)) = tw {
+            out.push(make("Twitch", c, t, u, "Heuristic", String::new()));
+        }
+        if let Some((c, t, u)) = kick {
+            out.push(make("Kick", c, t, u, "Heuristic", String::new()));
+        }
     }
 
-    // Phase 2: concurrent heuristic fallback
-    let (yt, tw, kick) = tokio::join!(
-        check_youtube_live(&client, &player.game_name, &config.youtube_api_key),
-        check_twitch_live(&client, &player.game_name, false, &config.twitch_client_id, twitch_token.as_deref()),
-        check_kick_live(&client, &player.game_name, false),
-    );
-    let mut out = Vec::new();
-    if let Some((c, t, u)) = yt {
-        out.push(make("YouTube", c, t, u));
+    // Phase 3: Post-match in-game text chat stream plug ("im live on yt", dropped stream URL/handle)
+    if let Some(plug) = chat_plug {
+        let quote = short(&plug.raw_message, 140);
+        if let Some(existing) = out.iter_mut().find(|e| e.platform.eq_ignore_ascii_case(&plug.platform)) {
+            existing.chat_message = quote;
+        } else if let Some(raw_url) = plug.url {
+            let fallback_channel = plug.handle.clone().unwrap_or_else(|| player.game_name.clone());
+            let enriched = match plug.platform.as_str() {
+                "Twitch" => {
+                    let slug = plug.handle.clone().unwrap_or_else(|| last_path_segment(&raw_url));
+                    check_twitch_live(&client, &slug, true, &config.twitch_client_id, twitch_token.as_deref())
+                        .await
+                }
+                "Kick" => {
+                    let slug = plug.handle.clone().unwrap_or_else(|| last_path_segment(&raw_url));
+                    check_kick_live(&client, &slug, true).await
+                }
+                _ => {
+                    let lower_u = raw_url.to_ascii_lowercase();
+                    if lower_u.contains("/watch") || lower_u.contains("youtu.be/") || lower_u.contains("/live/") {
+                        None
+                    } else {
+                        check_youtube_channel_live(&client, &raw_url)
+                            .await
+                            .map(|(t, u)| (fallback_channel.clone(), t, u))
+                    }
+                }
+            };
+            let (channel, title, final_url) = match enriched {
+                Some((c, t, u)) => (c, t, u),
+                None => (
+                    fallback_channel,
+                    format!("Shared {} stream link in match chat", plug.platform),
+                    raw_url,
+                ),
+            };
+            out.push(make(&plug.platform, channel, title, final_url, "Chat", quote));
+        } else {
+            // Player said "im live on yt / twitch / kick" without pasting a direct link or handle.
+            let live_hit = if !ran_heuristics {
+                match plug.platform.as_str() {
+                    "Twitch" => check_twitch_live(
+                        &client,
+                        &player.game_name,
+                        false,
+                        &config.twitch_client_id,
+                        twitch_token.as_deref(),
+                    )
+                    .await,
+                    "Kick" => check_kick_live(&client, &player.game_name, false).await,
+                    _ => check_youtube_live(&client, &player.game_name, &config.youtube_api_key).await,
+                }
+            } else {
+                None
+            };
+
+            if let Some((c, t, u)) = live_hit {
+                out.push(make(&plug.platform, c, t, u, "Chat", quote));
+            } else {
+                let cleaned = clean_ign(&player.game_name);
+                let query_name = if cleaned.is_empty() { player.game_name.clone() } else { cleaned };
+                let search_url = match plug.platform.as_str() {
+                    "Twitch" => format!("https://www.twitch.tv/search?term={}", urlencode(&query_name)),
+                    "Kick" => format!("https://kick.com/search?query={}", urlencode(&query_name)),
+                    _ => format!(
+                        "https://www.youtube.com/results?search_query={}&sp=EgJAAQ%3D%3D",
+                        urlencode(&format!("{query_name} Valorant"))
+                    ),
+                };
+                out.push(make(
+                    &plug.platform,
+                    query_name,
+                    format!("Mentioned live on {} in match chat", plug.platform),
+                    search_url,
+                    "Chat",
+                    quote,
+                ));
+            }
+        }
     }
-    if let Some((c, t, u)) = tw {
-        out.push(make("Twitch", c, t, u));
-    }
-    if let Some((c, t, u)) = kick {
-        out.push(make("Kick", c, t, u));
-    }
+
     out
 }
 
@@ -1715,11 +2114,19 @@ async fn scan_last_match(
     );
 
     let (remote, _) = fetch_remote_directory(&public_client, &config.github_owner, &config.github_repo).await;
-    let local_dir = {
+    let (local_dir, mut match_chat) = {
         let mut s = lock(&state);
         s.remote_directory = remote.clone();
-        s.local_directory.clone()
+        (s.local_directory.clone(), s.chat_buffer.clone())
     };
+    if config.capture_in_game_chat {
+        if let Ok(fresh_msgs) = fetch_local_chat_messages(&local_client).await {
+            merge_chat_messages(&mut match_chat, fresh_msgs);
+        }
+    } else {
+        match_chat.clear();
+    }
+
     let directory = Arc::new(merge_directories(&local_dir, &remote));
     let twitch_token =
         get_twitch_app_token(&public_client, &config.twitch_client_id, &config.twitch_client_secret).await;
@@ -1736,6 +2143,30 @@ async fn scan_last_match(
             continue;
         }
         players_checked += 1;
+
+        let mut best_plug: Option<ChatStreamPlug> = None;
+        if config.capture_in_game_chat {
+            for msg in &match_chat {
+                let sender_matches = (!msg.puuid.is_empty() && msg.puuid == player_info.record.subject)
+                    || (!msg.game_name.is_empty()
+                        && msg.game_name.eq_ignore_ascii_case(&player_info.record.game_name)
+                        && (msg.game_tag.is_empty()
+                            || msg.game_tag.eq_ignore_ascii_case(&player_info.record.tag_line)));
+                if !sender_matches {
+                    continue;
+                }
+                if let Some(plug) = extract_chat_stream_plug(&msg.body) {
+                    let take = match &best_plug {
+                        None => true,
+                        Some(prev) => plug.priority >= prev.priority,
+                    };
+                    if take {
+                        best_plug = Some(plug);
+                    }
+                }
+            }
+        }
+
         let (client, cfg, dir, tok, mid, map_n, queue_n, sem) = (
             public_client.clone(),
             config.clone(),
@@ -1748,7 +2179,7 @@ async fn scan_last_match(
         );
         set.spawn(async move {
             let _permit = sem.acquire_owned().await.ok();
-            scan_player(client, cfg, dir, tok, mid, map_n, queue_n, player_info).await
+            scan_player(client, cfg, dir, tok, mid, map_n, queue_n, player_info, best_plug).await
         });
     }
 
@@ -1860,6 +2291,7 @@ async fn watch_log(
     let mut last_created = initial.and_then(|m| m.created().ok());
     let mut last_riot_status: Option<RiotStatus> = None;
     let mut last_probe: Option<Instant> = None;
+    let mut last_chat_poll: Option<Instant> = None;
 
     loop {
         let has_lockfile = read_riot_lockfile().is_ok();
@@ -1881,6 +2313,21 @@ async fn watch_log(
             last_riot_status = Some(next_status);
             lock(&state).riot_status = next_status;
             repaint(&ctx);
+        }
+
+        // Silently buffer in-game chat messages while in match so we still have them after
+        // Riot tears down the match chat room at MainMenu. Never notifies or displays during a match.
+        if in_match && has_lockfile && lock(&state).config.capture_in_game_chat {
+            let should_poll_chat = last_chat_poll
+                .map(|at| at.elapsed() >= Duration::from_secs(4))
+                .unwrap_or(true);
+            if should_poll_chat {
+                last_chat_poll = Some(Instant::now());
+                if let Ok(msgs) = fetch_local_chat_messages(&local_client).await {
+                    let mut s = lock(&state);
+                    merge_chat_messages(&mut s.chat_buffer, msgs);
+                }
+            }
         }
 
         let Ok(meta) = fs::metadata(&log_path) else {
@@ -1915,10 +2362,19 @@ async fn watch_log(
                         if line.contains("InGame") {
                             if !in_match {
                                 in_match = true;
+                                last_chat_poll = None;
+                                lock(&state).chat_buffer.clear();
                                 set_status(&state, &ctx, "In Match | Waiting for match end...");
                             }
                         } else if in_match && line.contains("MainMenu") {
                             in_match = false;
+                            // Capture any final "gg im live on yt" chat messages before Riot clears the room.
+                            if has_lockfile && lock(&state).config.capture_in_game_chat {
+                                if let Ok(msgs) = fetch_local_chat_messages(&local_client).await {
+                                    let mut s = lock(&state);
+                                    merge_chat_messages(&mut s.chat_buffer, msgs);
+                                }
+                            }
                             let tx = tx.clone();
                             tokio::spawn(async move {
                                 sleep(Duration::from_secs(4)).await; // let match history propagate
@@ -2046,6 +2502,80 @@ fn paint_warn_icon(ui: &mut egui::Ui, color: Color32) {
     p.circle_filled(egui::pos2(rect.center().x, rect.bottom() - 4.5), 1.0, color);
 }
 
+fn paint_gradient_strip(ui: &mut egui::Ui, height: f32) {
+    let width = ui.available_width().max(1.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
+    let painter = ui.painter();
+    let steps = 28usize;
+    let step_w = rect.width() / steps as f32;
+    for i in 0..steps {
+        let t = (i as f32 + 0.5) / steps as f32;
+        let x0 = rect.left() + i as f32 * step_w;
+        let x1 = (x0 + step_w + 0.6).min(rect.right());
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x0, rect.top()), egui::pos2(x1, rect.bottom())),
+            Rounding::ZERO,
+            pink_white_color(t),
+        );
+    }
+}
+
+fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, font_size: f32) -> egui::Response {
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let painter = ui.painter();
+    let r = 6.0f32.min(rect.height() * 0.5);
+
+    if !enabled {
+        painter.rect_filled(rect, Rounding::same(r), CARD_BORDER);
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(font_size),
+            TEXT_MUTED,
+        );
+        return response;
+    }
+
+    let hover_boost = if response.hovered() { 0.14 } else { 0.0 };
+    let steps = 32usize;
+    let step_w = rect.width() / steps as f32;
+    for i in 0..steps {
+        let x0 = rect.left() + i as f32 * step_w;
+        let x1 = (x0 + step_w + 0.6).min(rect.right());
+        let xm = (x0 + x1) * 0.5;
+        let edge_d = (xm - rect.left()).min(rect.right() - xm).max(0.0);
+        let inset = if edge_d < r {
+            r - (r * r - (r - edge_d).powi(2)).max(0.0).sqrt()
+        } else {
+            0.0
+        };
+        let t = ((i as f32 + 0.5) / steps as f32 + hover_boost).clamp(0.0, 1.0);
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x0, rect.top() + inset), egui::pos2(x1, rect.bottom() - inset)),
+            Rounding::ZERO,
+            pink_white_color(t),
+        );
+    }
+    painter.rect_stroke(
+        rect,
+        Rounding::same(r),
+        Stroke::new(1.0, ACCENT_PEARL.linear_multiply(if response.hovered() { 0.9 } else { 0.5 })),
+    );
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(font_size),
+        BG_DARK,
+    );
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
+}
+
 fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> {
     let mut apply_name: Option<String> = None;
     match state {
@@ -2096,14 +2626,14 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
         }
         CheckState::Err(msg) => {
             Frame::none()
-                .fill(ACCENT_RED.linear_multiply(0.12))
-                .stroke(Stroke::new(1.0, ACCENT_RED.linear_multiply(0.6)))
+                .fill(ERR_ROSE.linear_multiply(0.12))
+                .stroke(Stroke::new(1.0, ERR_ROSE.linear_multiply(0.6)))
                 .rounding(Rounding::same(5.0))
                 .inner_margin(Margin::symmetric(8.0, 6.0))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        paint_cross_icon(ui, ACCENT_RED);
-                        ui.label(RichText::new(msg).color(ACCENT_RED).size(12.0));
+                        paint_cross_icon(ui, ERR_ROSE);
+                        ui.label(RichText::new(msg).color(ERR_ROSE).size(12.0));
                     });
                 });
         }
@@ -2150,9 +2680,10 @@ impl StreamerApp {
         visuals.window_fill = CARD_BG;
         visuals.widgets.noninteractive.bg_fill = CARD_BG;
         visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(30, 44, 58);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(42, 60, 78);
-        visuals.selection.bg_fill = ACCENT_RED;
+        visuals.widgets.inactive.bg_fill = Color32::from_rgb(26, 35, 50);
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(38, 49, 70);
+        visuals.selection.bg_fill = ACCENT_PINK;
+        visuals.selection.stroke = Stroke::new(1.0, ACCENT_PEARL);
         cc.egui_ctx.set_visuals(visuals);
 
         let initial_cfg = lock(&state).config.clone();
@@ -2282,7 +2813,7 @@ impl StreamerApp {
 
 impl eframe::App for StreamerApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [15.0 / 255.0, 25.0 / 255.0, 35.0 / 255.0, 1.0]
+        [13.0 / 255.0, 17.0 / 255.0, 26.0 / 255.0, 1.0]
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -2354,6 +2885,14 @@ impl eframe::App for StreamerApp {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
 
+        // Top Pink-White Gradient Accent Strip
+        egui::TopBottomPanel::top("accent_strip")
+            .exact_height(3.0)
+            .frame(Frame::none().fill(HEADER_BG))
+            .show(ctx, |ui| {
+                paint_gradient_strip(ui, 3.0);
+            });
+
         // Header
         egui::TopBottomPanel::top("header")
             .frame(
@@ -2366,8 +2905,10 @@ impl eframe::App for StreamerApp {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("VALORANT").font(FontId::proportional(20.0)).strong().color(ACCENT_RED));
-                            ui.label(RichText::new("STREAMER RADAR").font(FontId::proportional(20.0)).strong().color(TEXT_PRIMARY));
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            ui.label(RichText::new("VALORANT").font(FontId::proportional(20.0)).strong().color(ACCENT_PINK));
+                            ui.label(RichText::new("STREAMER").font(FontId::proportional(20.0)).strong().color(ACCENT_BLUSH));
+                            ui.label(RichText::new("RADAR").font(FontId::proportional(20.0)).strong().color(ACCENT_PEARL));
                         });
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
@@ -2397,19 +2938,15 @@ impl eframe::App for StreamerApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label = if is_scanning { "Scanning..." } else { "Check Last Match" };
-                        let scan_btn = egui::Button::new(RichText::new(label).color(Color32::WHITE).strong().size(13.0))
-                            .fill(if is_scanning { CARD_BORDER } else { ACCENT_RED })
-                            .rounding(Rounding::same(6.0))
-                            .min_size(Vec2::new(138.0, 36.0));
-                        if ui.add_enabled(!is_scanning, scan_btn).clicked() {
+                        if gradient_button(ui, label, Vec2::new(142.0, 36.0), !is_scanning, 13.0).clicked() {
                             let _ = self.manual_scan_tx.send(ScanTrigger::Manual);
                         }
 
                         ui.add_space(8.0);
 
-                        let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(TEXT_PRIMARY).strong().size(13.0))
+                        let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(ACCENT_PEARL).strong().size(13.0))
                             .fill(BTN_SECONDARY)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.45)))
                             .rounding(Rounding::same(6.0))
                             .min_size(Vec2::new(125.0, 36.0));
                         if ui.add(add_btn).clicked() {
@@ -2430,10 +2967,10 @@ impl eframe::App for StreamerApp {
                             RichText::new(title)
                                 .size(12.5)
                                 .strong()
-                                .color(if selected { Color32::WHITE } else { TEXT_MUTED }),
+                                .color(if selected { ACCENT_PEARL } else { TEXT_MUTED }),
                         )
                         .fill(if selected { BTN_SECONDARY } else { Color32::TRANSPARENT })
-                        .stroke(Stroke::new(1.0, if selected { ACCENT_RED } else { Color32::TRANSPARENT }))
+                        .stroke(Stroke::new(1.0, if selected { ACCENT_PINK } else { Color32::TRANSPARENT }))
                         .rounding(Rounding::same(5.0))
                         .min_size(Vec2::new(96.0, 28.0));
                         if ui.add(btn).clicked() {
@@ -2448,7 +2985,7 @@ impl eframe::App for StreamerApp {
 
                     if let Some(msg) = &toast {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(msg).color(LIVE_GREEN).size(12.5));
+                            ui.label(RichText::new(msg).color(ACCENT_BLUSH).size(12.5));
                         });
                     }
                 });
@@ -2477,7 +3014,7 @@ impl eframe::App for StreamerApp {
                 .frame(
                     Frame::none()
                         .fill(CARD_BG)
-                        .stroke(Stroke::new(1.5, ACCENT_RED))
+                        .stroke(Stroke::new(1.5, ACCENT_PINK))
                         .rounding(Rounding::same(10.0))
                         .inner_margin(Margin::same(20.0)),
                 )
@@ -2574,20 +3111,14 @@ impl eframe::App for StreamerApp {
                     if let Some(err) = &self.modal_error {
                         ui.add_space(6.0);
                         ui.horizontal_wrapped(|ui| {
-                            paint_cross_icon(ui, ACCENT_RED);
-                            ui.label(RichText::new(err).color(ACCENT_RED).size(12.0));
+                            paint_cross_icon(ui, ERR_ROSE);
+                            ui.label(RichText::new(err).color(ERR_ROSE).size(12.0));
                         });
                     }
 
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        let submit_btn = egui::Button::new(
-                            RichText::new("Save & Submit to GitHub").color(Color32::WHITE).strong(),
-                        )
-                        .fill(ACCENT_RED)
-                        .rounding(Rounding::same(6.0))
-                        .min_size(Vec2::new(172.0, 34.0));
-                        submit_gh = ui.add(submit_btn).clicked();
+                        submit_gh = gradient_button(ui, "Save & Submit to GitHub", Vec2::new(178.0, 34.0), true, 12.5).clicked();
 
                         ui.add_space(6.0);
                         let local_btn = egui::Button::new(RichText::new("Save Local").color(TEXT_PRIMARY))
@@ -2654,10 +3185,10 @@ impl StreamerApp {
     ) {
         if let Some(m) = last_match {
             let mode_color = match m.queue_name.as_str() {
-                "Competitive" | "Premier" => ACCENT_RED,
+                "Competitive" | "Premier" => ACCENT_PINK,
                 "Deathmatch" | "Team Deathmatch" => ALLY_TEAL,
                 "Swiftplay" | "Spike Rush" | "Escalation" => ENEMY_AMBER,
-                _ => TEXT_PRIMARY,
+                _ => ACCENT_BLUSH,
             };
             Frame::none()
                 .fill(HEADER_BG)
@@ -2753,6 +3284,7 @@ impl StreamerApp {
                         || e.platform.to_lowercase().contains(&q)
                         || e.channel.to_lowercase().contains(&q)
                         || e.title.to_lowercase().contains(&q)
+                        || e.chat_message.to_lowercase().contains(&q)
                         || e.map_name.to_lowercase().contains(&q)
                         || e.agent_name.to_lowercase().contains(&q))
             })
@@ -2777,12 +3309,12 @@ impl StreamerApp {
                 let badge = match entry.platform.as_str() {
                     "Twitch" => TWITCH_PURPLE,
                     "Kick" => KICK_GREEN,
-                    _ => ACCENT_RED,
+                    _ => ACCENT_PINK,
                 };
 
                 Frame::none()
                     .fill(CARD_BG)
-                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                    .stroke(Stroke::new(1.0, if !entry.chat_message.is_empty() { ACCENT_PINK.linear_multiply(0.5) } else { CARD_BORDER }))
                     .rounding(Rounding::same(8.0))
                     .inner_margin(Margin::symmetric(16.0, 14.0))
                     .show(ui, |ui| {
@@ -2790,9 +3322,9 @@ impl StreamerApp {
                             ui.vertical(|ui| {
                                 ui.set_max_width((ui.available_width() - 220.0).max(160.0));
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(RichText::new(&entry.riot_id).font(FontId::proportional(16.0)).strong().color(Color32::WHITE));
+                                    ui.label(RichText::new(&entry.riot_id).font(FontId::proportional(16.0)).strong().color(ACCENT_PEARL));
                                     Frame::none()
-                                        .fill(badge.linear_multiply(0.2))
+                                        .fill(badge.linear_multiply(0.18))
                                         .stroke(Stroke::new(1.0, badge))
                                         .rounding(Rounding::same(4.0))
                                         .inner_margin(Margin::symmetric(6.0, 2.0))
@@ -2810,10 +3342,35 @@ impl StreamerApp {
                                                 ui.label(RichText::new(&entry.team_relation).size(11.0).strong().color(tc));
                                             });
                                     }
+                                    if !entry.chat_message.is_empty() {
+                                        Frame::none()
+                                            .fill(ACCENT_PINK.linear_multiply(0.16))
+                                            .stroke(Stroke::new(1.0, ACCENT_BLUSH))
+                                            .rounding(Rounding::same(4.0))
+                                            .inner_margin(Margin::symmetric(6.0, 2.0))
+                                            .show(ui, |ui| {
+                                                ui.label(RichText::new("In-Game Chat").size(10.5).strong().color(ACCENT_PEARL));
+                                            });
+                                    }
                                     ui.label(RichText::new(&entry.channel).font(FontId::proportional(13.5)).strong().color(badge));
                                 });
                                 ui.add_space(4.0);
                                 ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(13.0));
+                                if !entry.chat_message.is_empty() {
+                                    ui.add_space(5.0);
+                                    Frame::none()
+                                        .fill(HEADER_BG)
+                                        .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.4)))
+                                        .rounding(Rounding::same(5.0))
+                                        .inner_margin(Margin::symmetric(8.0, 4.0))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(format!("Chat: \"{}\"", entry.chat_message))
+                                                    .color(ACCENT_BLUSH)
+                                                    .size(11.5),
+                                            );
+                                        });
+                                }
                                 ui.add_space(6.0);
 
                                 let mut meta_parts: Vec<&str> = Vec::new();
@@ -2831,11 +3388,10 @@ impl StreamerApp {
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let watch = egui::Button::new(RichText::new("Watch Stream").color(Color32::WHITE).strong().size(12.5))
-                                    .fill(ACCENT_RED)
-                                    .rounding(Rounding::same(6.0))
-                                    .min_size(Vec2::new(112.0, 32.0));
-                                if ui.add(watch).on_hover_text(&entry.url).clicked() {
+                                if gradient_button(ui, "Watch Stream", Vec2::new(114.0, 32.0), true, 12.5)
+                                    .on_hover_text(&entry.url)
+                                    .clicked()
+                                {
                                     let _ = open::that(&entry.url);
                                 }
 
@@ -2933,7 +3489,7 @@ impl StreamerApp {
                 let badge = match d.platform.as_str() {
                     "Twitch" => TWITCH_PURPLE,
                     "Kick" => KICK_GREEN,
-                    _ => ACCENT_RED,
+                    _ => ACCENT_PINK,
                 };
                 Frame::none()
                     .fill(CARD_BG)
@@ -2944,7 +3500,7 @@ impl StreamerApp {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(&d.riot_id).strong().color(Color32::WHITE).size(14.5));
+                                    ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(14.5));
                                     ui.label(RichText::new(&d.platform).strong().color(badge).size(12.0));
                                     ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(13.0));
                                 });
@@ -2953,7 +3509,7 @@ impl StreamerApp {
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if self.dir_source_tab == DirectorySourceTab::Custom {
-                                    let del = egui::Button::new(RichText::new("Delete").color(ACCENT_RED).size(12.0))
+                                    let del = egui::Button::new(RichText::new("Delete").color(ERR_ROSE).size(12.0))
                                         .fill(Color32::TRANSPARENT)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
                                         .rounding(Rounding::same(5.0));
@@ -3071,10 +3627,10 @@ impl StreamerApp {
                                 lock(&self.state).yt_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestYouTubeKey(self.cfg_draft.youtube_api_key.clone()));
                             }
-                            let get_yt = egui::Button::new(RichText::new("Get YouTube Key").color(Color32::WHITE).strong().size(11.5))
-                                .fill(ACCENT_RED)
-                                .rounding(Rounding::same(4.0));
-                            if ui.add(get_yt).on_hover_text("Opens Google Cloud Console -> Credentials").clicked() {
+                            if gradient_button(ui, "Get YouTube Key", Vec2::new(118.0, 24.0), true, 11.5)
+                                .on_hover_text("Opens Google Cloud Console -> Credentials")
+                                .clicked()
+                            {
                                 let _ = open::that("https://console.cloud.google.com/apis/credentials");
                             }
                         });
@@ -3170,7 +3726,7 @@ impl StreamerApp {
                             .rounding(Rounding::same(6.0))
                             .inner_margin(Margin::same(12.0))
                             .show(ui, |ui| {
-                                ui.label(RichText::new("YouTube Data API v3 (Free - 10,000 units/day, no card needed)").strong().color(ACCENT_RED).size(12.0));
+                                ui.label(RichText::new("YouTube Data API v3 (Free - 10,000 units/day, no card needed)").strong().color(ACCENT_PINK).size(12.0));
                                 ui.label(RichText::new("1. Click 'Get YouTube Key' above to open Google Cloud Console.").color(TEXT_PRIMARY).size(11.5));
                                 ui.label(RichText::new("2. Create a new project (e.g. Valorant-Radar) from the top-left selector.").color(TEXT_PRIMARY).size(11.5));
                                 ui.label(RichText::new("3. Open APIs & Services -> Library, search 'YouTube Data API v3', click Enable.").color(TEXT_PRIMARY).size(11.5));
@@ -3199,8 +3755,12 @@ impl StreamerApp {
                 .rounding(Rounding::same(8.0))
                 .inner_margin(Margin::same(18.0))
                 .show(ui, |ui| {
-                    ui.label(RichText::new("Windows Integration").font(FontId::proportional(15.0)).strong().color(Color32::WHITE));
+                    ui.label(RichText::new("In-Game Chat & Windows Integration").font(FontId::proportional(15.0)).strong().color(ACCENT_PEARL));
                     ui.add_space(8.0);
+                    ui.checkbox(
+                        &mut self.cfg_draft.capture_in_game_chat,
+                        "Read post-match in-game text chat for stream links (e.g. 'live on yt', YouTube/Twitch/Kick plugs)",
+                    );
                     ui.checkbox(&mut self.cfg_draft.start_with_windows, "Start silently with Windows (HKCU Run)");
                     ui.checkbox(
                         &mut self.cfg_draft.use_custom_toast_app_id,
@@ -3210,16 +3770,12 @@ impl StreamerApp {
 
             if let Some(err) = &self.settings_error {
                 ui.add_space(8.0);
-                ui.label(RichText::new(err).color(ACCENT_RED).size(12.5));
+                ui.label(RichText::new(err).color(ERR_ROSE).size(12.5));
             }
 
             ui.add_space(14.0);
             ui.horizontal(|ui| {
-                let save = egui::Button::new(RichText::new("Save Settings").color(Color32::WHITE).strong().size(13.0))
-                    .fill(ACCENT_RED)
-                    .rounding(Rounding::same(6.0))
-                    .min_size(Vec2::new(136.0, 36.0));
-                if ui.add(save).clicked() {
+                if gradient_button(ui, "Save Settings", Vec2::new(136.0, 36.0), true, 13.0).clicked() {
                     self.save_settings();
                 }
                 ui.add_space(8.0);
@@ -3284,6 +3840,7 @@ fn main() -> Result<()> {
         toast: None,
         last_scanned_match: initial_last_match_id,
         last_match_summary: saved_last_match,
+        chat_buffer: Vec::new(),
         yt_key_check: CheckState::Idle,
         twitch_key_check: CheckState::Idle,
         streamer_verify: CheckState::Idle,

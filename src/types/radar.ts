@@ -14,6 +14,7 @@ export interface AppConfig {
   github_owner: string;
   github_repo: string;
   use_custom_toast_app_id: boolean;
+  capture_in_game_chat: boolean;
 }
 
 export interface DirectoryStreamer {
@@ -35,6 +36,8 @@ export interface StreamerEntry {
   map_name: string;
   agent_name: string;
   queue_name: string;
+  chat_message?: string;
+  source?: 'Directory' | 'Heuristic' | 'Chat';
 }
 
 export interface LastMatchSummary {
@@ -51,11 +54,16 @@ export interface LastMatchSummary {
 export type DesktopTab = 'history' | 'directory' | 'settings';
 export type StudioView = 'simulator' | 'lab';
 
+export interface SimChatLine {
+  riot_id: string;
+  body: string;
+}
+
 export interface SimMatchPlayer {
   riot_id: string;
   team_relation: 'Ally' | 'Enemy';
   agent_name: string;
-  detectionSource: 'directory' | 'heuristic' | 'none';
+  detectionSource: 'directory' | 'heuristic' | 'chat' | 'none';
   liveStream?: {
     platform: Platform;
     channel: string;
@@ -72,12 +80,13 @@ export interface SimMatchScenario {
   queue_name: string;
   match_id: string;
   players: SimMatchPlayer[];
+  chatLog?: SimChatLine[];
 }
 
 export interface LogLineEntry {
   id: string;
   time: string;
-  category: 'log' | 'shard' | 'riot' | 'scan' | 'hit';
+  category: 'log' | 'shard' | 'riot' | 'chat' | 'scan' | 'hit';
   message: string;
 }
 
@@ -97,4 +106,5 @@ export const DEFAULT_CONFIG: AppConfig = {
   github_owner: 'your-github-username',
   github_repo: 'valorant-streamers-db',
   use_custom_toast_app_id: true,
+  capture_in_game_chat: true,
 };

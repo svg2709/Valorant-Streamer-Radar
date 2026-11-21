@@ -5,40 +5,60 @@
   --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-obsidian: #0F1923;
-  --color-obsidian-deep: #0B131B;
-  --color-slate-card: #182430;
-  --color-slate-border: #2B3A48;
-  --color-slate-control: #21303F;
-  --color-crimson: #FF4655;
+  --color-obsidian: #0D111A;
+  --color-obsidian-deep: #090D14;
+  --color-slate-card: #141B27;
+  --color-slate-border: #273144;
+  --color-slate-control: #1D2636;
+  --color-pink-accent: #FF5CA8;
+  --color-pink-blush: #FFA6D2;
+  --color-pink-pearl: #FFF5FA;
   --color-twitch: #9146FF;
   --color-kick: #53FC18;
-  --color-alabaster: #ECE8E1;
-  --color-muted: #94A3B8;
+  --color-alabaster: #F3EFF4;
+  --color-muted: #98A2B8;
   --color-live: #22C55E;
+}
+
+@layer utilities {
+  .bg-pink-white-gradient {
+    background: linear-gradient(135deg, #FF5CA8 0%, #FFB0D9 58%, #FFF5FA 100%);
+  }
+  .bg-pink-white-gradient-hover:hover {
+    background: linear-gradient(135deg, #FF70B4 0%, #FFC2E2 58%, #FFFFFF 100%);
+  }
+  .text-pink-white-gradient {
+    background: linear-gradient(90deg, #FF5CA8 0%, #FFB0D9 55%, #FFF5FA 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-pink-white-strip {
+    background: linear-gradient(90deg, #FF4D94 0%, #FFA6D2 55%, #FFF5FA 100%);
+  }
 }
 
 @layer base {
   html,
   body {
     font-family: var(--font-sans);
-    background-color: #0B131B;
-    color: #ECE8E1;
+    background-color: #090D14;
+    color: #F3EFF4;
   }
 
-  /* Subtle dark scrollbar aligned with Obsidian palette */
+  /* Subtle dark scrollbar aligned with Obsidian & Pink-White palette */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
   ::-webkit-scrollbar-track {
-    background: #0B131B;
+    background: #090D14;
   }
   ::-webkit-scrollbar-thumb {
-    background: #2B3A48;
+    background: #273144;
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3B4E60;
+    background: #FF5CA8;
   }
 }

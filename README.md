@@ -1,6 +1,6 @@
 # Valorant Streamer Radar (`val-streamer-notifier` v0.5.0)
 
-This is 100% vibe coded
+***This is 100% vibe coded.***
 
 A lightweight, native Windows tray application written in pure Rust (`eframe/egui 0.29`, `tray-icon 0.19`, `tokio`, `tauri-winrt-notification`). It runs silently in the background (~5 MB idle RAM, 0% idle CPU when hidden) and, **strictly after a Valorant match ends**, checks whether any of the other 9 players were live streaming on **YouTube**, **Twitch**, or **Kick**.
 

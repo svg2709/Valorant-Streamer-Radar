@@ -110,9 +110,29 @@ fn build_multi_res_ico(sizes: &[u32]) -> Vec<u8> {
     ico
 }
 
+fn emit_build_metadata() {
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    let sha = std::env::var("GITHUB_SHA")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "--short=7", "HEAD"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+        })
+        .map(|s| s.trim().chars().take(7).collect::<String>())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "local".to_string());
+    println!("cargo:rustc-env=APP_BUILD_SHA={sha}");
+}
+
 #[cfg(windows)]
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    emit_build_metadata();
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
     let ico_path = out_dir.join("app.ico");
     std::fs::write(&ico_path, build_multi_res_ico(&[16, 32, 48, 64]))
@@ -128,4 +148,7 @@ fn main() {
 }
 
 #[cfg(not(windows))]
-fn main() {}
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    emit_build_metadata();
+}

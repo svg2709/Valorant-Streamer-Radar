@@ -18,6 +18,7 @@ open = "5"
 arboard = { version = "3", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 anyhow = "1"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 # notify-rust cannot do click actions on Windows (`.action()` / `wait_for_action` are XDG-only),

@@ -1,9 +1,16 @@
-node_modules/
-build/
+# Build outputs
+target/
 dist/
+build/
 coverage/
+
+# Dependencies
+node_modules/
+
+# Local & editor/platform artifacts
+.aistudio/
 .DS_Store
 *.log
+*.tmp
+*.update.exe
 .env*
-!.env.example
-target/

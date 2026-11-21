@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowUpCircle,
   Check,
   CheckCircle2,
   ChevronDown,
   Copy,
+  Download,
   Eye,
   EyeOff,
   ExternalLink,
@@ -130,6 +132,92 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   const [ytKeyStatus, setYtKeyStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
   const [twitchKeyStatus, setTwitchKeyStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  // App Updater state (queries real GitHub Releases for svg2709/ValStreamerRadar)
+  const [updateState, setUpdateState] = useState<
+    | { status: 'idle' }
+    | { status: 'checking' }
+    | { status: 'up_to_date'; message: string }
+    | {
+        status: 'available';
+        tagName: string;
+        releaseName: string;
+        downloadUrl: string;
+        htmlUrl: string;
+        sizeLabel: string;
+        publishedAt: string;
+        buildSha?: string;
+        shaVerified: boolean;
+      }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' });
+
+  const handleCheckForUpdates = async () => {
+    setUpdateState({ status: 'checking' });
+    try {
+      const res = await fetch(
+        'https://api.github.com/repos/svg2709/ValStreamerRadar/releases/latest',
+        { headers: { Accept: 'application/vnd.github+json' } }
+      );
+      if (res.status === 404) {
+        setUpdateState({
+          status: 'up_to_date',
+          message: 'No GitHub Release published yet (v0.5.0). Push to main to trigger the automated build.',
+        });
+        return;
+      }
+      if (res.status === 403) {
+        setUpdateState({
+          status: 'error',
+          message: 'GitHub API rate limit reached. Open Releases directly or try again shortly.',
+        });
+        return;
+      }
+      if (!res.ok) {
+        setUpdateState({
+          status: 'error',
+          message: `GitHub Releases check failed (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      const data = await res.json();
+      const assets: Array<{ name?: string; browser_download_url?: string; size?: number; digest?: string }> =
+        Array.isArray(data.assets) ? data.assets : [];
+      const exe = assets.find((a) => (a.name || '').toLowerCase().endsWith('.exe'));
+      const shaAsset = assets.find((a) => (a.name || '').toLowerCase().endsWith('.sha256'));
+      if (!exe?.browser_download_url) {
+        setUpdateState({
+          status: 'up_to_date',
+          message: `Latest release (${data.tag_name || 'latest'}) has no Windows .exe attached yet.`,
+        });
+        return;
+      }
+      const bytes = Number(exe.size || 0);
+      const sizeLabel =
+        bytes >= 1024 * 1024
+          ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+          : bytes >= 1024
+          ? `${Math.round(bytes / 1024)} KB`
+          : '';
+      const shaMatch = typeof data.body === 'string' ? data.body.match(/commit\s+`?([0-9a-f]{7,40})`?/i) : null;
+      setUpdateState({
+        status: 'available',
+        tagName: data.tag_name || 'latest',
+        releaseName: data.name || data.tag_name || 'Latest Windows Build',
+        downloadUrl: exe.browser_download_url,
+        htmlUrl: data.html_url || 'https://github.com/svg2709/ValStreamerRadar/releases',
+        sizeLabel,
+        publishedAt: typeof data.published_at === 'string' ? data.published_at.slice(0, 10) : '',
+        buildSha: shaMatch ? shaMatch[1].slice(0, 7) : undefined,
+        shaVerified: Boolean(shaAsset || exe.digest),
+      });
+    } catch {
+      setUpdateState({
+        status: 'error',
+        message: 'Could not reach GitHub API. Check your internet connection or open Releases.',
+      });
+    }
+  };
 
   useEffect(() => {
     setDraft(config);
@@ -384,17 +472,134 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
             })}
           </div>
 
-          {toastMessage && (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#FFA6D2]">
-              <Check className="h-3.5 w-3.5 text-[#FF5CA8]" />
-              {toastMessage}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {toastMessage && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#FFA6D2]">
+                <Check className="h-3.5 w-3.5 text-[#FF5CA8]" />
+                {toastMessage}
+              </span>
+            )}
+            <button
+              type="button"
+              disabled={updateState.status === 'checking'}
+              onClick={handleCheckForUpdates}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-[5px] border px-2.5 text-[11.5px] font-semibold transition-colors whitespace-nowrap ${
+                updateState.status === 'available'
+                  ? 'border-[#FF5CA8] bg-[#FF5CA8]/20 text-[#FFF5FA]'
+                  : 'border-[#273144] bg-[#1D2636] text-[#98A2B8] hover:border-[#FF5CA8]/60 hover:text-[#FFF5FA]'
+              } disabled:opacity-60`}
+            >
+              <RefreshCw
+                className={`h-3 w-3 ${updateState.status === 'checking' ? 'animate-spin text-[#FFA6D2]' : ''}`}
+              />
+              {updateState.status === 'checking'
+                ? 'Checking...'
+                : updateState.status === 'available'
+                ? 'Update Ready!'
+                : 'Check for Updates'}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Main Panel (#0D111A) */}
       <div className="min-h-[440px] max-h-[600px] overflow-y-auto px-6 py-4">
+        {/* Global Update Status Banner */}
+        {updateState.status === 'available' && (
+          <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#FF5CA8] bg-[#141B27] px-4 py-2.5">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-[10.5px] font-bold tracking-wider text-[#FF5CA8]">
+                  <ArrowUpCircle className="h-3.5 w-3.5" />
+                  UPDATE AVAILABLE
+                </span>
+                <span className="text-xs font-bold text-[#FFF5FA]">
+                  {updateState.releaseName}
+                </span>
+              </div>
+              <p className="mt-0.5 font-mono text-[11px] text-[#98A2B8]">
+                {[
+                  `Tag: ${updateState.tagName}`,
+                  updateState.buildSha ? `Build ${updateState.buildSha}` : '',
+                  updateState.sizeLabel,
+                  updateState.publishedAt,
+                  updateState.shaVerified ? 'SHA-256 verified' : '',
+                ]
+                  .filter(Boolean)
+                  .join('  |  ')}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={updateState.downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3 text-xs font-bold text-[#0D111A] whitespace-nowrap"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download &amp; Install
+              </a>
+              <a
+                href={updateState.htmlUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 items-center rounded-md border border-[#273144] bg-[#1D2636] px-2.5 text-[11.5px] font-medium text-[#F3EFF4] hover:border-[#FF5CA8]/50 whitespace-nowrap"
+              >
+                Releases
+              </a>
+              <button
+                type="button"
+                onClick={() => setUpdateState({ status: 'idle' })}
+                className="rounded p-1 text-[#98A2B8] hover:text-white"
+                title="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {updateState.status === 'up_to_date' && activeTab !== 'settings' && (
+          <div className="mb-3.5 flex items-center justify-between gap-3 rounded-lg border border-[#22C55E]/60 bg-[#141B27] px-3.5 py-2 text-xs text-[#22C55E]">
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              {updateState.message}
+            </span>
+            <button
+              type="button"
+              onClick={() => setUpdateState({ status: 'idle' })}
+              className="text-[11px] text-[#98A2B8] hover:text-white"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {updateState.status === 'error' && activeTab !== 'settings' && (
+          <div className="mb-3.5 flex items-center justify-between gap-3 rounded-lg border border-[#FF668A]/60 bg-[#141B27] px-3.5 py-2 text-xs text-[#FF668A]">
+            <span className="inline-flex items-center gap-1.5">
+              <XCircle className="h-3.5 w-3.5 shrink-0" />
+              {updateState.message}
+            </span>
+            <div className="flex items-center gap-2">
+              <a
+                href="https://github.com/svg2709/ValStreamerRadar/releases"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] font-semibold text-[#FFA6D2] hover:underline"
+              >
+                Releases
+              </a>
+              <button
+                type="button"
+                onClick={() => setUpdateState({ status: 'idle' })}
+                className="text-[11px] text-[#98A2B8] hover:text-white"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {/* TAB 1: HISTORY */}
         {activeTab === 'history' && (
           <div>
@@ -1144,6 +1349,72 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   </span>
                 </label>
               </div>
+            </section>
+
+            {/* App Updates & Version */}
+            <section className="rounded-lg border border-[#273144] bg-[#141B27] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#FFF5FA]">
+                    App Updates &amp; Version
+                  </h3>
+                  <p className="mt-0.5 font-mono text-[11.5px] text-[#98A2B8]">
+                    Installed: v0.5.0 &nbsp;|&nbsp; Source: svg2709/ValStreamerRadar
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={updateState.status === 'checking'}
+                    onClick={handleCheckForUpdates}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3.5 text-xs font-bold text-[#0D111A] transition-opacity disabled:opacity-60 whitespace-nowrap"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${updateState.status === 'checking' ? 'animate-spin' : ''}`}
+                    />
+                    {updateState.status === 'checking' ? 'Checking...' : 'Check for Updates'}
+                  </button>
+                  <a
+                    href="https://github.com/svg2709/ValStreamerRadar/releases"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#273144] bg-[#1D2636] px-3 text-xs font-medium text-[#F3EFF4] hover:border-[#FF5CA8]/50 whitespace-nowrap"
+                  >
+                    Open Releases
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+              </div>
+
+              {updateState.status === 'up_to_date' && (
+                <p className="mt-2.5 flex items-center gap-1.5 text-xs text-[#22C55E]">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  {updateState.message}
+                </p>
+              )}
+              {updateState.status === 'available' && (
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded border border-[#FF5CA8]/40 bg-[#090D14] px-3 py-2 text-xs">
+                  <span className="font-semibold text-[#FFA6D2]">
+                    New build ready: {updateState.releaseName}
+                    {updateState.sizeLabel ? ` (${updateState.sizeLabel})` : ''}
+                  </span>
+                  <a
+                    href={updateState.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded bg-pink-white-gradient px-3 py-1 text-[11.5px] font-bold text-[#0D111A]"
+                  >
+                    <Download className="h-3 w-3" />
+                    Download &amp; Install
+                  </a>
+                </div>
+              )}
+              {updateState.status === 'error' && (
+                <p className="mt-2.5 flex items-center gap-1.5 text-xs text-[#FF668A]">
+                  <XCircle className="h-3.5 w-3.5 shrink-0" />
+                  {updateState.message}
+                </p>
+              )}
             </section>
 
             {settingsError && (

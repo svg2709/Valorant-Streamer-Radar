@@ -9,6 +9,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -28,6 +29,11 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEv
 // ============================================================================
 // CONFIGURATION & THEME CONSTANTS
 // ============================================================================
+
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const APP_BUILD_SHA: &str = env!("APP_BUILD_SHA");
+const UPDATE_REPO_OWNER: &str = "svg2709";
+const UPDATE_REPO_NAME: &str = "ValStreamerRadar";
 
 const DEFAULT_GITHUB_OWNER: &str = "your-github-username";
 const DEFAULT_GITHUB_REPO: &str = "valorant-streamers-db";
@@ -410,10 +416,35 @@ enum CheckState {
     Err(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UpdateReleaseInfo {
+    tag_name: String,
+    release_name: String,
+    download_url: String,
+    html_url: String,
+    expected_sha256: Option<String>,
+    published_at: String,
+    size_bytes: u64,
+    remote_sha: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UpdateState {
+    Idle,
+    Checking,
+    UpToDate(String),
+    Available(UpdateReleaseInfo),
+    Downloading(String),
+    Installing(String),
+    Error(String),
+}
+
 enum BgTask {
     TestYouTubeKey(String),
     TestTwitchKeys { client_id: String, client_secret: String },
     VerifyStreamer { riot_id: String, platform: String, channel_name: String, channel_url: String },
+    CheckForUpdates,
+    InstallUpdate(UpdateReleaseInfo),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -447,6 +478,7 @@ struct AppState {
     yt_key_check: CheckState,
     twitch_key_check: CheckState,
     streamer_verify: CheckState,
+    update_state: UpdateState,
 }
 
 fn set_toast(state: &Arc<Mutex<AppState>>, msg: impl Into<String>) {
@@ -1488,6 +1520,399 @@ async fn verify_streamer_entry(
         }
         _ => CheckState::Err("Unsupported platform selected.".into()),
     }
+}
+
+// ============================================================================
+// SELF-UPDATER (GITHUB RELEASES + SHA-256 VERIFICATION)
+// ============================================================================
+
+static RELEASE_SHA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)commit\s+`?([0-9a-f]{7,40})`?").unwrap());
+static HEX_SHA256_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b([0-9a-f]{64})\b").unwrap());
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn sha256_bytes(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    bytes_to_hex(&hasher.finalize())
+}
+
+fn sha256_file(path: &Path) -> Option<String> {
+    let mut f = File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Some(bytes_to_hex(&hasher.finalize()))
+}
+
+fn is_allowed_github_url(url: &str) -> bool {
+    let Some(host) = host_of(url) else {
+        return false;
+    };
+    host == "github.com" || host.ends_with(".githubusercontent.com")
+}
+
+fn parse_semver(raw: &str) -> Option<(u64, u64, u64)> {
+    let s = raw.trim().trim_start_matches(['v', 'V']);
+    let core = s.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next()?.parse::<u64>().ok()?;
+    let patch = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+    Some((major, minor, patch))
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.0} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+async fn check_for_app_update(client: &Client) -> UpdateState {
+    let api_url = format!(
+        "https://api.github.com/repos/{UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}/releases/latest"
+    );
+    let resp = match client
+        .get(&api_url)
+        .header("User-Agent", format!("ValorantStreamerRadar/{APP_VERSION}"))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return UpdateState::Error(format!("Could not reach GitHub: {}", short(&e.to_string(), 85))),
+    };
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return UpdateState::UpToDate(format!(
+            "No published release found yet (running v{APP_VERSION}, build {APP_BUILD_SHA})."
+        ));
+    }
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return UpdateState::Error(
+            "GitHub API rate limit reached. Try again later or open the Releases page.".into(),
+        );
+    }
+    if !resp.status().is_success() {
+        return UpdateState::Error(format!(
+            "GitHub Releases check failed (HTTP {}).",
+            resp.status().as_u16()
+        ));
+    }
+
+    let v: Value = match resp.json().await {
+        Ok(j) => j,
+        Err(e) => return UpdateState::Error(format!("Invalid GitHub response: {}", short(&e.to_string(), 75))),
+    };
+
+    let tag_name = v["tag_name"].as_str().unwrap_or("latest").to_string();
+    let release_name = v["name"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(&tag_name)
+        .to_string();
+    let html_url = v["html_url"]
+        .as_str()
+        .filter(|u| is_allowed_github_url(u))
+        .map(String::from)
+        .unwrap_or_else(|| format!("https://github.com/{UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}/releases"));
+    let published_at = v["published_at"]
+        .as_str()
+        .unwrap_or("")
+        .get(..10)
+        .unwrap_or("")
+        .to_string();
+    let body = v["body"].as_str().unwrap_or("");
+    let remote_sha = RELEASE_SHA_RE
+        .captures(body)
+        .map(|c| c[1].chars().take(7).collect::<String>());
+
+    let assets = v["assets"].as_array().cloned().unwrap_or_default();
+    let exe_asset = assets.iter().find(|a| {
+        a["name"]
+            .as_str()
+            .map(|n| n.eq_ignore_ascii_case("val-streamer-notifier.exe") || n.to_ascii_lowercase().ends_with(".exe"))
+            .unwrap_or(false)
+    });
+
+    let Some(exe_asset) = exe_asset else {
+        return UpdateState::Error("Latest GitHub release has no Windows .exe asset yet.".into());
+    };
+
+    let download_url = exe_asset["browser_download_url"].as_str().unwrap_or("").to_string();
+    if !is_allowed_github_url(&download_url) {
+        return UpdateState::Error("Blocked untrusted release download URL.".into());
+    }
+    let size_bytes = exe_asset["size"].as_u64().unwrap_or(0);
+
+    // Try GitHub's native asset digest first, then fall back to the uploaded .sha256 file.
+    let mut expected_sha256: Option<String> = exe_asset["digest"]
+        .as_str()
+        .and_then(|d| HEX_SHA256_RE.captures(d))
+        .map(|c| c[1].to_ascii_lowercase());
+
+    if expected_sha256.is_none() {
+        if let Some(sha_asset) = assets.iter().find(|a| {
+            a["name"]
+                .as_str()
+                .map(|n| n.to_ascii_lowercase().ends_with(".sha256"))
+                .unwrap_or(false)
+        }) {
+            let sha_url = sha_asset["browser_download_url"].as_str().unwrap_or("");
+            if is_allowed_github_url(sha_url) {
+                if let Ok(r) = client
+                    .get(sha_url)
+                    .header("User-Agent", format!("ValorantStreamerRadar/{APP_VERSION}"))
+                    .send()
+                    .await
+                {
+                    if r.status().is_success() {
+                        if let Ok(txt) = r.text().await {
+                            expected_sha256 = HEX_SHA256_RE
+                                .captures(&txt)
+                                .map(|c| c[1].to_ascii_lowercase());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let current_exe_sha = env::current_exe().ok().and_then(|p| sha256_file(&p));
+
+    let semver_newer = match (parse_semver(APP_VERSION), parse_semver(&tag_name)) {
+        (Some(cur), Some(rem)) => rem > cur,
+        _ => false,
+    };
+    let semver_older_or_same = match (parse_semver(APP_VERSION), parse_semver(&tag_name)) {
+        (Some(cur), Some(rem)) => rem <= cur,
+        _ => false,
+    };
+
+    let has_update = if semver_newer {
+        true
+    } else if semver_older_or_same && tag_name != "latest" {
+        false
+    } else if let (Some(exp), Some(cur)) = (&expected_sha256, &current_exe_sha) {
+        !exp.eq_ignore_ascii_case(cur)
+    } else if let Some(rsha) = &remote_sha {
+        APP_BUILD_SHA != "local" && !rsha.eq_ignore_ascii_case(APP_BUILD_SHA)
+    } else {
+        false
+    };
+
+    if has_update {
+        UpdateState::Available(UpdateReleaseInfo {
+            tag_name,
+            release_name,
+            download_url,
+            html_url,
+            expected_sha256,
+            published_at,
+            size_bytes,
+            remote_sha,
+        })
+    } else {
+        let build_note = match &remote_sha {
+            Some(s) => format!("v{APP_VERSION} (build {s})"),
+            None => format!("v{APP_VERSION} ({APP_BUILD_SHA})"),
+        };
+        UpdateState::UpToDate(format!("You are up to date on {build_note}."))
+    }
+}
+
+#[cfg(windows)]
+fn spawn_windows_self_replace(staged_exe: &Path, current_exe: &Path) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let pid = std::process::id();
+    let esc = |p: &Path| p.to_string_lossy().replace('\'', "''");
+    let ps_script = format!(
+        "$p = {pid}; \
+         $src = '{}'; \
+         $dst = '{}'; \
+         for ($i = 0; $i -lt 40; $i++) {{ \
+           if (-not (Get-Process -Id $p -ErrorAction SilentlyContinue)) {{ break }} \
+           Start-Sleep -Milliseconds 250 \
+         }}; \
+         Start-Sleep -Milliseconds 300; \
+         Move-Item -LiteralPath $src -Destination $dst -Force; \
+         Start-Process -FilePath $dst",
+        esc(staged_exe),
+        esc(current_exe),
+    );
+    let utf16: Vec<u8> = ps_script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let encoded = STANDARD.encode(utf16);
+
+    std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-EncodedCommand",
+            &encoded,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .context("Failed to launch Windows updater helper")?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn spawn_windows_self_replace(_staged_exe: &Path, _current_exe: &Path) -> Result<()> {
+    Err(anyhow!("Automatic .exe replacement is supported on Windows only."))
+}
+
+async fn download_and_install_update(
+    info: UpdateReleaseInfo,
+    state: Arc<Mutex<AppState>>,
+    ctx: egui::Context,
+) {
+    if !is_allowed_github_url(&info.download_url) {
+        lock(&state).update_state = UpdateState::Error("Blocked untrusted download URL.".into());
+        repaint(&ctx);
+        return;
+    }
+
+    let size_hint = if info.size_bytes > 0 {
+        format!(" ({})", format_bytes(info.size_bytes))
+    } else {
+        String::new()
+    };
+    lock(&state).update_state = UpdateState::Downloading(format!(
+        "Downloading {}{}...",
+        info.release_name, size_hint
+    ));
+    repaint(&ctx);
+
+    let dl_client = match Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(120))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            lock(&state).update_state = UpdateState::Error(format!("HTTP client error: {e}"));
+            repaint(&ctx);
+            return;
+        }
+    };
+
+    let resp = match dl_client
+        .get(&info.download_url)
+        .header("User-Agent", format!("ValorantStreamerRadar/{APP_VERSION}"))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            lock(&state).update_state = UpdateState::Error(format!(
+                "Download failed (HTTP {}). Try 'Releases' to download manually.",
+                r.status().as_u16()
+            ));
+            repaint(&ctx);
+            return;
+        }
+        Err(e) => {
+            lock(&state).update_state = UpdateState::Error(format!(
+                "Download failed: {}",
+                short(&e.to_string(), 80)
+            ));
+            repaint(&ctx);
+            return;
+        }
+    };
+
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            lock(&state).update_state = UpdateState::Error(format!(
+                "Download interrupted: {}",
+                short(&e.to_string(), 80)
+            ));
+            repaint(&ctx);
+            return;
+        }
+    };
+
+    if bytes.len() < 512 * 1024 {
+        lock(&state).update_state = UpdateState::Error(
+            "Downloaded file is unexpectedly small. Aborting update for safety.".into(),
+        );
+        repaint(&ctx);
+        return;
+    }
+
+    if let Some(expected) = &info.expected_sha256 {
+        let actual = sha256_bytes(&bytes);
+        if !actual.eq_ignore_ascii_case(expected) {
+            lock(&state).update_state = UpdateState::Error(
+                "SHA-256 checksum mismatch! Update aborted for security.".into(),
+            );
+            repaint(&ctx);
+            return;
+        }
+    }
+
+    let current_exe = match env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            lock(&state).update_state = UpdateState::Error(format!("Cannot locate running exe: {e}"));
+            repaint(&ctx);
+            return;
+        }
+    };
+    let parent_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
+    let staged_exe = parent_dir.join("val-streamer-notifier.update.exe");
+
+    if let Err(e) = fs::write(&staged_exe, &bytes) {
+        log(format!("Update staging write failed ({}): {e}", staged_exe.display()));
+        lock(&state).update_state = UpdateState::Error(
+            "Cannot write to app folder (permission denied). Click 'Releases' to download manually.".into(),
+        );
+        repaint(&ctx);
+        return;
+    }
+
+    lock(&state).update_state = UpdateState::Installing(
+        "Update verified! Replacing executable and restarting...".into(),
+    );
+    repaint(&ctx);
+
+    if let Err(e) = spawn_windows_self_replace(&staged_exe, &current_exe) {
+        let _ = fs::remove_file(&staged_exe);
+        log(format!("Self-update launcher failed: {e:#}"));
+        lock(&state).update_state = UpdateState::Error(format!(
+            "Auto-install failed: {}. Download manually from Releases.",
+            short(&e.to_string(), 65)
+        ));
+        repaint(&ctx);
+        return;
+    }
+
+    quit_app(&ctx);
 }
 
 /// Directory-linked YouTube channel: check its `/live` endpoint directly.
@@ -2859,6 +3284,7 @@ impl eframe::App for StreamerApp {
             streamer_verify,
             yt_key_check,
             twitch_key_check,
+            update_state,
         ) = {
             let mut s = lock(&self.state);
             if matches!(&s.toast, Some((_, at)) if at.elapsed() > TOAST_TTL) {
@@ -2879,6 +3305,7 @@ impl eframe::App for StreamerApp {
                 s.streamer_verify.clone(),
                 s.yt_key_check.clone(),
                 s.twitch_key_check.clone(),
+                s.update_state.clone(),
             )
         };
         if toast.is_some() {
@@ -2983,11 +3410,42 @@ impl eframe::App for StreamerApp {
                         ui.add_space(4.0);
                     }
 
-                    if let Some(msg) = &toast {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(msg).color(ACCENT_BLUSH).size(12.5));
-                        });
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let upd_busy = matches!(
+                            update_state,
+                            UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
+                        );
+                        let upd_available = matches!(update_state, UpdateState::Available(_));
+                        let upd_label = match &update_state {
+                            UpdateState::Checking => "Checking...",
+                            UpdateState::Downloading(_) => "Downloading...",
+                            UpdateState::Installing(_) => "Restarting...",
+                            UpdateState::Available(_) => "Update Ready!",
+                            _ => "Check for Updates",
+                        };
+                        let upd_btn = egui::Button::new(
+                            RichText::new(upd_label)
+                                .size(11.5)
+                                .strong()
+                                .color(if upd_available { ACCENT_PEARL } else { TEXT_MUTED }),
+                        )
+                        .fill(if upd_available { ACCENT_PINK.linear_multiply(0.28) } else { BTN_SECONDARY })
+                        .stroke(Stroke::new(
+                            1.0,
+                            if upd_available { ACCENT_PINK } else { CARD_BORDER },
+                        ))
+                        .rounding(Rounding::same(5.0))
+                        .min_size(Vec2::new(118.0, 26.0));
+                        if ui.add_enabled(!upd_busy, upd_btn).clicked() {
+                            lock(&self.state).update_state = UpdateState::Checking;
+                            let _ = self.bg_tx.send(BgTask::CheckForUpdates);
+                        }
+
+                        if let Some(msg) = &toast {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new(msg).color(ACCENT_BLUSH).size(12.0));
+                        }
+                    });
                 });
             });
 
@@ -3168,15 +3626,150 @@ impl eframe::App for StreamerApp {
         // Main panel
         egui::CentralPanel::default()
             .frame(Frame::none().fill(BG_DARK).inner_margin(Margin::symmetric(22.0, 16.0)))
-            .show(ctx, |ui| match self.active_tab {
-                ActiveTab::History => self.render_history_tab(ui, &history, last_match_summary.as_ref()),
-                ActiveTab::Directory => self.render_directory_tab(ui, &local_dir, &remote_dir, is_syncing_dir),
-                ActiveTab::Settings => self.render_settings_tab(ui, &yt_key_check, &twitch_key_check),
+            .show(ctx, |ui| {
+                self.render_update_banner(ui, &update_state);
+                match self.active_tab {
+                    ActiveTab::History => self.render_history_tab(ui, &history, last_match_summary.as_ref()),
+                    ActiveTab::Directory => self.render_directory_tab(ui, &local_dir, &remote_dir, is_syncing_dir),
+                    ActiveTab::Settings => {
+                        self.render_settings_tab(ui, &yt_key_check, &twitch_key_check, &update_state)
+                    }
+                }
             });
     }
 }
 
 impl StreamerApp {
+    fn render_update_banner(&mut self, ui: &mut egui::Ui, update_state: &UpdateState) {
+        match update_state {
+            UpdateState::Available(info) => {
+                Frame::none()
+                    .fill(CARD_BG)
+                    .stroke(Stroke::new(1.2, ACCENT_PINK))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(Margin::symmetric(14.0, 10.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("UPDATE AVAILABLE")
+                                            .size(10.5)
+                                            .strong()
+                                            .color(ACCENT_PINK),
+                                    );
+                                    ui.label(
+                                        RichText::new(&info.release_name)
+                                            .size(13.0)
+                                            .strong()
+                                            .color(ACCENT_PEARL),
+                                    );
+                                });
+                                let mut meta = Vec::new();
+                                if !info.tag_name.is_empty() {
+                                    meta.push(format!("Tag: {}", info.tag_name));
+                                }
+                                if let Some(sha) = &info.remote_sha {
+                                    meta.push(format!("Build {sha}"));
+                                }
+                                if info.size_bytes > 0 {
+                                    meta.push(format_bytes(info.size_bytes));
+                                }
+                                if !info.published_at.is_empty() {
+                                    meta.push(info.published_at.clone());
+                                }
+                                if info.expected_sha256.is_some() {
+                                    meta.push("SHA-256 verified".to_string());
+                                }
+                                if !meta.is_empty() {
+                                    ui.label(RichText::new(meta.join("  |  ")).size(11.5).color(TEXT_MUTED));
+                                }
+                            });
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let dismiss = egui::Button::new(RichText::new("Dismiss").size(11.5).color(TEXT_MUTED))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .rounding(Rounding::same(5.0));
+                                if ui.add(dismiss).clicked() {
+                                    lock(&self.state).update_state = UpdateState::Idle;
+                                }
+                                ui.add_space(6.0);
+                                let rel_btn = egui::Button::new(RichText::new("Releases").size(11.5).color(TEXT_PRIMARY))
+                                    .fill(BTN_SECONDARY)
+                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .rounding(Rounding::same(5.0));
+                                if ui.add(rel_btn).clicked() {
+                                    let _ = open::that(&info.html_url);
+                                }
+                                ui.add_space(6.0);
+                                if gradient_button(ui, "Download & Install", Vec2::new(132.0, 28.0), true, 12.0).clicked() {
+                                    let _ = self.bg_tx.send(BgTask::InstallUpdate(info.clone()));
+                                }
+                            });
+                        });
+                    });
+                ui.add_space(10.0);
+            }
+            UpdateState::Downloading(msg) | UpdateState::Installing(msg) => {
+                Frame::none()
+                    .fill(CARD_BG)
+                    .stroke(Stroke::new(1.0, ACCENT_BLUSH))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(Margin::symmetric(14.0, 9.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(msg).size(12.5).strong().color(ACCENT_PEARL));
+                        });
+                    });
+                ui.add_space(10.0);
+            }
+            UpdateState::UpToDate(msg) if self.active_tab != ActiveTab::Settings => {
+                Frame::none()
+                    .fill(CARD_BG)
+                    .stroke(Stroke::new(1.0, LIVE_GREEN))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(Margin::symmetric(14.0, 8.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(msg).size(12.0).color(LIVE_GREEN));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("Dismiss").clicked() {
+                                    lock(&self.state).update_state = UpdateState::Idle;
+                                }
+                            });
+                        });
+                    });
+                ui.add_space(10.0);
+            }
+            UpdateState::Error(msg) if self.active_tab != ActiveTab::Settings => {
+                Frame::none()
+                    .fill(CARD_BG)
+                    .stroke(Stroke::new(1.0, ERR_ROSE))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(Margin::symmetric(14.0, 8.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(msg).size(12.0).color(ERR_ROSE));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("Dismiss").clicked() {
+                                    lock(&self.state).update_state = UpdateState::Idle;
+                                }
+                                if ui.small_button("Releases").clicked() {
+                                    let _ = open::that(format!(
+                                        "https://github.com/{UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}/releases"
+                                    ));
+                                }
+                            });
+                        });
+                    });
+                ui.add_space(10.0);
+            }
+            _ => {}
+        }
+    }
     fn render_history_tab(
         &mut self,
         ui: &mut egui::Ui,
@@ -3551,7 +4144,13 @@ impl StreamerApp {
         }
     }
 
-    fn render_settings_tab(&mut self, ui: &mut egui::Ui, yt_check: &CheckState, twitch_check: &CheckState) {
+    fn render_settings_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        yt_check: &CheckState,
+        twitch_check: &CheckState,
+        update_state: &UpdateState,
+    ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             Frame::none()
                 .fill(CARD_BG)
@@ -3768,6 +4367,91 @@ impl StreamerApp {
                     );
                 });
 
+            ui.add_space(12.0);
+
+            Frame::none()
+                .fill(CARD_BG)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(Margin::same(18.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("App Updates & Version")
+                                    .font(FontId::proportional(15.0))
+                                    .strong()
+                                    .color(ACCENT_PEARL),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Installed: v{APP_VERSION} (build {APP_BUILD_SHA})  |  Source: {UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}"
+                                ))
+                                .color(TEXT_MUTED)
+                                .size(12.0),
+                            );
+                        });
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let open_rel = egui::Button::new(RichText::new("Open Releases").color(TEXT_PRIMARY).size(12.0))
+                                .fill(BTN_SECONDARY)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(6.0))
+                                .min_size(Vec2::new(104.0, 32.0));
+                            if ui.add(open_rel).clicked() {
+                                let _ = open::that(format!(
+                                    "https://github.com/{UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}/releases"
+                                ));
+                            }
+                            ui.add_space(8.0);
+                            let busy = matches!(
+                                update_state,
+                                UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
+                            );
+                            let check_lbl = if matches!(update_state, UpdateState::Checking) {
+                                "Checking..."
+                            } else {
+                                "Check for Updates"
+                            };
+                            if gradient_button(ui, check_lbl, Vec2::new(136.0, 32.0), !busy, 12.0).clicked() {
+                                lock(&self.state).update_state = UpdateState::Checking;
+                                let _ = self.bg_tx.send(BgTask::CheckForUpdates);
+                            }
+                        });
+                    });
+
+                    match update_state {
+                        UpdateState::UpToDate(msg) => {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(msg).color(LIVE_GREEN).size(12.0));
+                        }
+                        UpdateState::Available(info) => {
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("New build ready: {}", info.release_name))
+                                        .color(ACCENT_BLUSH)
+                                        .strong()
+                                        .size(12.0),
+                                );
+                                ui.add_space(8.0);
+                                if gradient_button(ui, "Download & Install", Vec2::new(132.0, 26.0), true, 11.5).clicked() {
+                                    let _ = self.bg_tx.send(BgTask::InstallUpdate(info.clone()));
+                                }
+                            });
+                        }
+                        UpdateState::Downloading(msg) | UpdateState::Installing(msg) => {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(msg).color(ACCENT_PEARL).size(12.0));
+                        }
+                        UpdateState::Error(msg) => {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(msg).color(ERR_ROSE).size(12.0));
+                        }
+                        _ => {}
+                    }
+                });
+
             if let Some(err) = &self.settings_error {
                 ui.add_space(8.0);
                 ui.label(RichText::new(err).color(ERR_ROSE).size(12.5));
@@ -3844,14 +4528,21 @@ fn main() -> Result<()> {
         yt_key_check: CheckState::Idle,
         twitch_key_check: CheckState::Idle,
         streamer_verify: CheckState::Idle,
+        update_state: UpdateState::Idle,
     }));
 
     let tray_menu = Menu::new();
     let open_item = MenuItem::new("Open Streamer History", true, None);
     let scan_item = MenuItem::new("Check Last Match Now", true, None);
+    let update_item = MenuItem::new("Check for Updates", true, None);
     let quit_item = MenuItem::new("Quit", true, None);
-    let _ = tray_menu.append_items(&[&open_item, &scan_item, &quit_item]);
-    let (open_id, scan_id, quit_id) = (open_item.id().clone(), scan_item.id().clone(), quit_item.id().clone());
+    let _ = tray_menu.append_items(&[&open_item, &scan_item, &update_item, &quit_item]);
+    let (open_id, scan_id, update_id, quit_id) = (
+        open_item.id().clone(),
+        scan_item.id().clone(),
+        update_item.id().clone(),
+        quit_item.id().clone(),
+    );
 
     // Keep alive for the whole run; dropped (icon removed) when run_native returns.
     let _tray_icon = TrayIconBuilder::new()
@@ -3907,11 +4598,17 @@ fn main() -> Result<()> {
             }));
             let ctx_menu = ctx.clone();
             let tx_menu = scan_tx.clone();
+            let bg_menu = bg_tx.clone();
+            let st_menu = state.clone();
             MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
                 if event.id == open_id {
                     show_window(&ctx_menu);
                 } else if event.id == scan_id {
                     let _ = tx_menu.send(ScanTrigger::Manual);
+                } else if event.id == update_id {
+                    lock(&st_menu).update_state = UpdateState::Checking;
+                    let _ = bg_menu.send(BgTask::CheckForUpdates);
+                    show_window(&ctx_menu);
                 } else if event.id == quit_id {
                     quit_app(&ctx_menu);
                 }
@@ -3964,6 +4661,14 @@ fn main() -> Result<()> {
                                         let res = verify_streamer_entry(&client, &riot_id, &platform, &channel_name, &channel_url).await;
                                         lock(&st).streamer_verify = res;
                                         repaint(&cx);
+                                    }
+                                    BgTask::CheckForUpdates => {
+                                        let res = check_for_app_update(&client).await;
+                                        lock(&st).update_state = res;
+                                        repaint(&cx);
+                                    }
+                                    BgTask::InstallUpdate(info) => {
+                                        download_and_install_update(info, st, cx).await;
                                     }
                                 }
                             });

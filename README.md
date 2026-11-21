@@ -67,6 +67,7 @@
 - **Streamer Directory + Credential Verification:** Maintain your own `custom_streamers.json` list alongside a synced GitHub community directory, with a built-in **Verify Channel** button to check that a streamer's link and display name are valid before saving.
 - **Works Keyless Out of the Box (+ Optional API Keys):** Runs completely without API keys by default, with optional YouTube Data API v3 and Twitch Helix support—plus built-in step-by-step setup guides and quick-launch links right inside Settings.
 - **Multi-Region Shard Auto-Detection:** Automatically detects your Riot shard (`ap`, `na`, `eu`, `kr`) from `ShooterGame.log` with a manual override option in Settings.
+- **Built-In Self-Updater (`Check for Updates`):** Checks GitHub Releases directly from the header bar, Settings, or system tray menu, verifies the SHA-256 checksum, and swaps & restarts the `.exe` automatically on Windows.
 - **Lightweight Native Windows Tray App:** Written in pure Rust (`eframe/egui 0.29`, `tray-icon 0.19`, `tokio`, `tauri-winrt-notification`). Uses only **~50–60 MB RAM** and **~0% idle CPU (<1% active)** with zero in-game FPS impact and branded native Windows toast notifications.
 
 ---

@@ -133,7 +133,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   const [twitchKeyStatus, setTwitchKeyStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  // App Updater state (queries real GitHub Releases for svg2709/ValStreamerRadar)
+  // App Updater state (queries real GitHub Releases for svg2709/Valorant-Streamer-Radar)
   const [updateState, setUpdateState] = useState<
     | { status: 'idle' }
     | { status: 'checking' }
@@ -156,7 +156,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
     setUpdateState({ status: 'checking' });
     try {
       const res = await fetch(
-        'https://api.github.com/repos/svg2709/ValStreamerRadar/releases/latest',
+        'https://api.github.com/repos/svg2709/Valorant-Streamer-Radar/releases/latest',
         { headers: { Accept: 'application/vnd.github+json' } }
       );
       if (res.status === 404) {
@@ -205,7 +205,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
         tagName: data.tag_name || 'latest',
         releaseName: data.name || data.tag_name || 'Latest Windows Build',
         downloadUrl: exe.browser_download_url,
-        htmlUrl: data.html_url || 'https://github.com/svg2709/ValStreamerRadar/releases',
+        htmlUrl: data.html_url || 'https://github.com/svg2709/Valorant-Streamer-Radar/releases',
         sizeLabel,
         publishedAt: typeof data.published_at === 'string' ? data.published_at.slice(0, 10) : '',
         buildSha: shaMatch ? shaMatch[1].slice(0, 7) : undefined,
@@ -583,7 +583,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
             </span>
             <div className="flex items-center gap-2">
               <a
-                href="https://github.com/svg2709/ValStreamerRadar/releases"
+                href="https://github.com/svg2709/Valorant-Streamer-Radar/releases"
                 target="_blank"
                 rel="noreferrer"
                 className="text-[11px] font-semibold text-[#FFA6D2] hover:underline"
@@ -1068,7 +1068,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       setDraft({ ...draft, github_owner: e.target.value });
                       setSettingsError(null);
                     }}
-                    placeholder="your-github-username"
+                    placeholder="svg2709"
                     className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
                   />
                 </div>
@@ -1083,7 +1083,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       setDraft({ ...draft, github_repo: e.target.value });
                       setSettingsError(null);
                     }}
-                    placeholder="valorant-streamers-db"
+                    placeholder="Valorant-Streamer-Radar"
                     className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
                   />
                 </div>
@@ -1359,7 +1359,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     App Updates &amp; Version
                   </h3>
                   <p className="mt-0.5 font-mono text-[11.5px] text-[#98A2B8]">
-                    Installed: v1.0.0 &nbsp;|&nbsp; Source: svg2709/ValStreamerRadar
+                    Installed: v1.0.0 &nbsp;|&nbsp; Source: svg2709/Valorant-Streamer-Radar
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1375,7 +1375,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     {updateState.status === 'checking' ? 'Checking...' : 'Check for Updates'}
                   </button>
                   <a
-                    href="https://github.com/svg2709/ValStreamerRadar/releases"
+                    href="https://github.com/svg2709/Valorant-Streamer-Radar/releases"
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#273144] bg-[#1D2636] px-3 text-xs font-medium text-[#F3EFF4] hover:border-[#FF5CA8]/50 whitespace-nowrap"

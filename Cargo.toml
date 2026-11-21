@@ -1,8 +1,12 @@
 [package]
-name = "val-streamer-notifier"
+name = "valorant-streamer-radar"
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.80" # std::sync::LazyLock
+
+[[bin]]
+name = "ValorantStreamerRadar"
+path = "src/main.rs"
 
 [dependencies]
 # Trimmed feature sets keep RAM / binary size down (no accesskit, no wgpu, no image decoding).
@@ -27,7 +31,7 @@ tauri-winrt-notification = "0.7"
 winreg = "0.52"
 
 [target.'cfg(windows)'.build-dependencies]
-# Embeds the dark obsidian & pink-to-white gradient "V" multi-resolution icon into val-streamer-notifier.exe.
+# Embeds the dark obsidian & pink-to-white gradient "V" multi-resolution icon into ValorantStreamerRadar.exe.
 winres = "0.1"
 
 [profile.release]

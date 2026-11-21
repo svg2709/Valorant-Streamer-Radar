@@ -97,7 +97,7 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
             </h3>
             <p className="mt-1 text-xs leading-relaxed text-[#98A2B8]">
               Step through the user-space lifecycle of{' '}
-              <span className="font-mono text-[#F3EFF4]">val-streamer-notifier</span>:
+              <span className="font-mono text-[#F3EFF4]">ValorantStreamerRadar</span>:
               lockfile detection, silent in-game chat buffering via{' '}
               <span className="font-mono text-[#FFA6D2]">/chat/v6/messages</span>,{' '}
               <span className="font-mono text-[#F3EFF4]">InGame &rarr; MainMenu</span>{' '}

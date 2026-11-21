@@ -33,10 +33,10 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEv
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APP_BUILD_SHA: &str = env!("APP_BUILD_SHA");
 const UPDATE_REPO_OWNER: &str = "svg2709";
-const UPDATE_REPO_NAME: &str = "ValStreamerRadar";
+const UPDATE_REPO_NAME: &str = "Valorant-Streamer-Radar";
 
-const DEFAULT_GITHUB_OWNER: &str = "your-github-username";
-const DEFAULT_GITHUB_REPO: &str = "valorant-streamers-db";
+const DEFAULT_GITHUB_OWNER: &str = "svg2709";
+const DEFAULT_GITHUB_REPO: &str = "Valorant-Streamer-Radar";
 const DEFAULT_SHARD_OVERRIDE: &str = "auto";
 const CUSTOM_TOAST_APP_ID: &str = "ValorantStreamerRadar";
 
@@ -1651,7 +1651,7 @@ async fn check_for_app_update(client: &Client) -> UpdateState {
     let exe_asset = assets.iter().find(|a| {
         a["name"]
             .as_str()
-            .map(|n| n.eq_ignore_ascii_case("val-streamer-notifier.exe") || n.to_ascii_lowercase().ends_with(".exe"))
+            .map(|n| n.eq_ignore_ascii_case("ValorantStreamerRadar.exe") || n.to_ascii_lowercase().ends_with(".exe"))
             .unwrap_or(false)
     });
 
@@ -1885,7 +1885,7 @@ async fn download_and_install_update(
         }
     };
     let parent_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
-    let staged_exe = parent_dir.join("val-streamer-notifier.update.exe");
+    let staged_exe = parent_dir.join("ValorantStreamerRadar.update.exe");
 
     if let Err(e) = fs::write(&staged_exe, &bytes) {
         log(format!("Update staging write failed ({}): {e}", staged_exe.display()));

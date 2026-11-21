@@ -103,8 +103,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   twitch_client_secret: '',
   start_with_windows: true,
   shard_override: 'auto',
-  github_owner: 'your-github-username',
-  github_repo: 'valorant-streamers-db',
+  github_owner: 'svg2709',
+  github_repo: 'Valorant-Streamer-Radar',
   use_custom_toast_app_id: true,
   capture_in_game_chat: true,
 };

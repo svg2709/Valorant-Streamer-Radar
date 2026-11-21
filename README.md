@@ -7,12 +7,16 @@
 **Find out if anyone in your last Valorant lobby was streaming live on YouTube, Twitch, or Kick — automatically, silently, and strictly after the match ends.**
 
 <p align="center">
-  <a href="https://github.com/svg2709/ValStreamerRadar/releases/latest/download/val-streamer-notifier.exe"><img src="https://img.shields.io/badge/Download%20Windows%20(.exe)-Latest%20Build-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar for Windows (.exe)" /></a>
+  <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.0.0%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.0.0 for Windows" />
+  </a>
   &nbsp;
-  <a href="https://github.com/svg2709/ValStreamerRadar/releases"><img src="https://img.shields.io/badge/Releases%20Tab-All%20Downloads-ffa6d2?style=for-the-badge&logo=github&logoColor=white&labelColor=141b27" alt="View All Releases" /></a>
+  <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest/download/ValorantStreamerRadar.exe">
+    <img src="https://img.shields.io/badge/Direct%20Download-ValorantStreamerRadar.exe-ffa6d2?style=for-the-badge&labelColor=141b27" alt="Direct Download ValorantStreamerRadar.exe" />
+  </a>
 </p>
 
-<sub>Direct <code>.exe</code> link requires at least one completed <a href="https://github.com/svg2709/ValStreamerRadar/actions">GitHub Actions</a> build (ensure <b>Settings &rarr; Actions &rarr; General &rarr; Workflow permissions</b> is set to <b>Read and write permissions</b>).</sub>
+<sub>Looking for older builds or CI artifacts? Open the <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases">Releases</a> or <a href="https://github.com/svg2709/Valorant-Streamer-Radar/actions">Actions</a> tab.</sub>
 
 <br /><br />
 
@@ -73,19 +77,19 @@
 ## Download & Installation
 
 ### Option 1: Direct Download (Recommended)
-1. Click the **[Download for Windows (.exe)](https://github.com/svg2709/ValStreamerRadar/releases/latest/download/val-streamer-notifier.exe)** button above (or open the **[Releases](https://github.com/svg2709/ValStreamerRadar/releases)** tab on the right side of this repo).
-2. Run `val-streamer-notifier.exe` on Windows 10/11 while Valorant is installed.
+1. Click the **[Download for Windows](https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest)** button above (or grab **`ValorantStreamerRadar.exe`** directly from the **[Releases](https://github.com/svg2709/Valorant-Streamer-Radar/releases)** tab).
+2. Run `ValorantStreamerRadar.exe` on Windows 10/11 while Valorant is installed.
    *(If Windows SmartScreen shows a prompt for an unsigned open-source `.exe`, click **More info -> Run anyway**.)*
 
 ### Option 2: Build Locally on Windows (Rust 1.80+)
 ```powershell
-git clone https://github.com/svg2709/ValStreamerRadar.git
-cd ValStreamerRadar
+git clone https://github.com/svg2709/Valorant-Streamer-Radar.git
+cd Valorant-Streamer-Radar
 cargo build --release
 ```
 Your executable will be generated at:
 ```text
-target\release\val-streamer-notifier.exe
+target\release\ValorantStreamerRadar.exe
 ```
 
 ---
@@ -102,7 +106,7 @@ target\release\val-streamer-notifier.exe
 ## Project Structure
 
 ```text
-ValStreamerRadar/
+Valorant-Streamer-Radar/
 ├── .github/workflows/
 │   └── build-windows.yml        # Automated Windows x64 build & GitHub Releases publisher
 ├── docs/
@@ -143,8 +147,8 @@ See [`examples/config.example.json`](examples/config.example.json). The app crea
   "twitch_client_secret": "",
   "start_with_windows": true,
   "shard_override": "auto",
-  "github_owner": "your-github-username",
-  "github_repo": "valorant-streamers-db",
+  "github_owner": "svg2709",
+  "github_repo": "Valorant-Streamer-Radar",
   "use_custom_toast_app_id": true,
   "capture_in_game_chat": true
 }

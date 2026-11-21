@@ -2,10 +2,10 @@ name: Build Windows Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -25,13 +25,7 @@ jobs:
       - name: Cache Cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting and compile release binary
-        run: cargo build --release --locked
-        continue-on-error: true
-        id: build_locked
-
-      - name: Build release binary (generate Cargo.lock if absent)
-        if: steps.build_locked.outcome == 'failure'
+      - name: Build Windows release executable
         run: cargo build --release
 
       - name: Upload Windows executable artifact

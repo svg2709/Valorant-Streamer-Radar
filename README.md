@@ -18,6 +18,18 @@
 
 <br /><br />
 
+![RAM Usage](https://img.shields.io/badge/RAM%20Usage-50--60%20MB-ff5ca8?style=for-the-badge&labelColor=141b27)
+&nbsp;
+![CPU Usage](https://img.shields.io/badge/CPU%20Usage-~0%25%20Idle%20%7C%20%3C1%25%20Active-10b981?style=for-the-badge&labelColor=141b27)
+
+<br /><br />
+
+| Memory Footprint | CPU Usage | In-Game FPS Impact |
+| :---: | :---: | :---: |
+| **~50–60 MB RAM** | **~0% Idle / <1% Active** | **Zero** *(Post-Match Scan Only)* |
+
+<br />
+
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
 ![Version](https://img.shields.io/badge/Version-v0.5.0-fff5fa?style=flat-square&labelColor=141b27)
@@ -55,7 +67,7 @@
 - **Streamer Directory + Credential Verification:** Maintain your own `custom_streamers.json` list alongside a synced GitHub community directory, with a built-in **Verify Channel** button to check that a streamer's link and display name are valid before saving.
 - **Works Keyless Out of the Box (+ Optional API Keys):** Runs completely without API keys by default, with optional YouTube Data API v3 and Twitch Helix support—plus built-in step-by-step setup guides and quick-launch links right inside Settings.
 - **Multi-Region Shard Auto-Detection:** Automatically detects your Riot shard (`ap`, `na`, `eu`, `kr`) from `ShooterGame.log` with a manual override option in Settings.
-- **Ultra-Lightweight Native Windows Tray App:** Written in pure Rust (`eframe/egui 0.29`, `tray-icon 0.19`, `tokio`, `tauri-winrt-notification`). Uses ~5 MB idle RAM and ~0% idle CPU while minimized to the system tray, with branded native Windows toast notifications.
+- **Lightweight Native Windows Tray App:** Written in pure Rust (`eframe/egui 0.29`, `tray-icon 0.19`, `tokio`, `tauri-winrt-notification`). Uses only **~50–60 MB RAM** and **~0% idle CPU (<1% active)** with zero in-game FPS impact and branded native Windows toast notifications.
 
 ---
 

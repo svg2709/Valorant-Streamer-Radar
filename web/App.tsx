@@ -582,7 +582,7 @@ export default function App() {
           </div>
 
           <div className="mt-6 hidden border-t border-[#273144] px-2 pt-3 text-[11px] text-[#64748B] lg:block">
-            <p className="font-mono">v1.0.0 · Post-Match Only</p>
+            <p className="font-mono">v1.0.1 · Post-Match Only</p>
           </div>
         </div>
       </aside>

@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.0.0%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.0.0 for Windows" />
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.0.1%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.0.1 for Windows" />
   </a>
   &nbsp;
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest/download/ValorantStreamerRadar.exe">
@@ -34,7 +34,7 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v1.0.0-fff5fa?style=flat-square&labelColor=141b27)
+![Version](https://img.shields.io/badge/Version-v1.0.1-fff5fa?style=flat-square&labelColor=141b27)
 ![Mode](https://img.shields.io/badge/Scan%20Mode-Post--Match%20Only-10b981?style=flat-square)
 
 <br />

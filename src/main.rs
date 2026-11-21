@@ -1704,14 +1704,14 @@ async fn check_for_app_update(client: &Client) -> UpdateState {
         (Some(cur), Some(rem)) => rem > cur,
         _ => false,
     };
-    let semver_older_or_same = match (parse_semver(APP_VERSION), parse_semver(&tag_name)) {
-        (Some(cur), Some(rem)) => rem <= cur,
+    let semver_older = match (parse_semver(APP_VERSION), parse_semver(&tag_name)) {
+        (Some(cur), Some(rem)) => rem < cur,
         _ => false,
     };
 
     let has_update = if semver_newer {
         true
-    } else if semver_older_or_same && tag_name != "latest" {
+    } else if semver_older {
         false
     } else if let (Some(exp), Some(cur)) = (&expected_sha256, &current_exe_sha) {
         !exp.eq_ignore_ascii_case(cur)

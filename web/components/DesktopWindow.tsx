@@ -162,7 +162,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
       if (res.status === 404) {
         setUpdateState({
           status: 'up_to_date',
-          message: 'No GitHub Release published yet (v0.5.0). Push to main to trigger the automated build.',
+          message: 'No GitHub Release published yet (v1.0.0). Push to main to trigger the automated build.',
         });
         return;
       }
@@ -1359,7 +1359,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     App Updates &amp; Version
                   </h3>
                   <p className="mt-0.5 font-mono text-[11.5px] text-[#98A2B8]">
-                    Installed: v0.5.0 &nbsp;|&nbsp; Source: svg2709/ValStreamerRadar
+                    Installed: v1.0.0 &nbsp;|&nbsp; Source: svg2709/ValStreamerRadar
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

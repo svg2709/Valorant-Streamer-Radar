@@ -28,6 +28,9 @@ jobs:
       - name: Cache Cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Run Rust unit tests
+        run: cargo test --locked || cargo test
+
       - name: Build Windows release executable
         run: cargo build --release
 
@@ -62,16 +65,33 @@ jobs:
           TITLE="Valorant Streamer Radar ${TAG}"
           SHORT_SHA="${GITHUB_SHA:0:7}"
 
-          cat > release-notes.md <<EOF
-          Windows x64 release of **Valorant Streamer Radar ${TAG}** (commit \`${SHORT_SHA}\`).
+          # Extract the matching version section from CHANGELOG.md as the authoritative release notes
+          CHANGELOG_NOTES=$(awk -v ver="${VER}" '
+            BEGIN { in_sec = 0 }
+            /^## \[/ {
+              if (in_sec) exit
+              if (index($0, "## [" ver "]") == 1) { in_sec = 1; next }
+            }
+            in_sec { print }
+          ' CHANGELOG.md || true)
 
+          {
+            echo "Windows x64 release of **Valorant Streamer Radar ${TAG}** (commit \`${SHORT_SHA}\`)."
+            echo ""
+            if [[ -n "${CHANGELOG_NOTES}" ]]; then
+              echo "### What's Changed in ${TAG}"
+              echo "${CHANGELOG_NOTES}"
+              echo ""
+            fi
+            cat <<EOF
           ### Quick Install
           1. Download **\`ValorantStreamerRadar.exe\`** below.
           2. Run it on Windows 10/11 while Valorant is installed (if Windows SmartScreen prompts for an unsigned open-source \`.exe\`, click **More info -> Run anyway**).
-          3. Runs silently in the system tray (~50-60 MB RAM, ~0% idle CPU) and scans strictly after each match ends.
+          3. Runs silently in the system tray and scans strictly after each match ends (not a stream-sniping tool).
 
-          > **Disclaimer:** Use at your own risk. See the [README](https://github.com/${GITHUB_REPOSITORY}#is-this-bannable) for safety details.
+          > **Disclaimer:** Use at your own risk. Detection is not 100% accurate. See the [README](https://github.com/${GITHUB_REPOSITORY}#detection-limitations) for details.
           EOF
+          } > release-notes.md
 
           if gh release view "${TAG}" >/dev/null 2>&1; then
             gh release edit "${TAG}" --title "${TITLE}" --notes-file release-notes.md --latest

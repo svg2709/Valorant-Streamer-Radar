@@ -1,4 +1,18 @@
-import { AppConfig, DirectoryStreamer, Platform, ShardCode } from '../types/radar';
+import {
+  AppConfig,
+  COMMUNITY_REPO_NAME,
+  COMMUNITY_REPO_OWNER,
+  ConfidenceTier,
+  DateRangeFilter,
+  DirectoryStreamer,
+  Platform,
+  SERVER_REGIONS,
+  ServerRegionCode,
+  ServerRegionInfo,
+  StatusFilter,
+  StreamerEntry,
+  getServerRegionInfo,
+} from '../types/radar';
 
 const SUFFIX_RE = /(?:[\s._-]+(?:yt|youtube|live|ttv|tv|gaming|plays|op)|(?:yt|ttv))$/i;
 
@@ -26,6 +40,48 @@ export function canonicalPlatform(p: string): Platform | null {
     default:
       return null;
   }
+}
+
+export function compareSemver(a: string, b: string): number {
+  const parse = (v: string) =>
+    v
+      .trim()
+      .replace(/^v/i, '')
+      .split('-')[0]
+      .split('.')
+      .map((n) => parseInt(n, 10) || 0);
+  const pa = parse(a);
+  const pb = parse(b);
+  const len = Math.max(pa.length, pb.length, 3);
+  for (let i = 0; i < len; i++) {
+    const va = pa[i] ?? 0;
+    const vb = pb[i] ?? 0;
+    if (va > vb) return 1;
+    if (va < vb) return -1;
+  }
+  return 0;
+}
+
+export function slugifyStreamerId(riotId: string, platform: Platform): string {
+  const slug = riotId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug || 'streamer'}-${platform.toLowerCase()}`;
+}
+
+export function parseAliasesCsv(raw: string, primaryRiotId: string): string[] {
+  const primaryLower = primaryRiotId.trim().toLowerCase();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(',')) {
+    const trimmed = part.trim();
+    const low = trimmed.toLowerCase();
+    if (!trimmed || low === primaryLower || seen.has(low)) continue;
+    seen.add(low);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 export function hostOf(url: string): string | null {
@@ -56,11 +112,6 @@ export function hostAllowed(platform: Platform, host: string): boolean {
     default:
       return false;
   }
-}
-
-export function validGithubSegment(s: string): boolean {
-  const t = s.trim();
-  return t.length > 0 && t.length <= 100 && /^[A-Za-z0-9._-]+$/.test(t);
 }
 
 export function validateSubmission(
@@ -97,27 +148,131 @@ export function validateSubmission(
   return null;
 }
 
-export function buildGithubIssueUrl(
-  owner: string,
-  repo: string,
-  entry: DirectoryStreamer
-): string {
+export function buildGithubIssueUrl(entry: DirectoryStreamer): string {
   const title = `Add Streamer: ${entry.riot_id}`;
-  const jsonPayload = JSON.stringify(entry, null, 2);
-  const body = `### New Streamer Submission\n\n\`\`\`json\n${jsonPayload}\n\`\`\``;
-  return `https://github.com/${encodeURIComponent(owner.trim())}/${encodeURIComponent(
-    repo.trim()
-  )}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+  const cleanPayload: Record<string, unknown> = {
+    id: entry.id || slugifyStreamerId(entry.riot_id, entry.platform),
+    display_name: entry.display_name || entry.channel_name,
+    riot_id: entry.riot_id,
+    aliases: entry.aliases ?? [],
+    platform: entry.platform,
+    channel_name: entry.channel_name,
+    channel_url: entry.channel_url,
+    verified: false,
+    source: 'community-submission',
+  };
+  if (entry.server_region?.trim()) {
+    cleanPayload.server_region = entry.server_region.trim();
+  }
+  const jsonPayload = JSON.stringify(cleanPayload, null, 2);
+  const body = `### New Streamer Submission\n\nMaintainers review and verify submissions before merging into the central \`streamers.json\` database.\n\n\`\`\`json\n${jsonPayload}\n\`\`\``;
+  return `https://github.com/${COMMUNITY_REPO_OWNER}/${COMMUNITY_REPO_NAME}/issues/new?labels=streamer-database&title=${encodeURIComponent(
+    title
+  )}&body=${encodeURIComponent(body)}`;
 }
 
-export function resolveEffectiveShard(
+export function resolveEffectiveRegion(
   config: AppConfig,
-  detectedShard: ShardCode
-): ShardCode {
-  if (config.shard_override !== 'auto') {
-    return config.shard_override;
+  detectedRegion: ServerRegionCode
+): ServerRegionInfo {
+  if (config.server_override !== 'auto') {
+    const found = SERVER_REGIONS.find((r) => r.code === config.server_override);
+    if (found) return found;
   }
-  return detectedShard;
+  return getServerRegionInfo(detectedRegion);
+}
+
+export function resolveEntryTier(entry: StreamerEntry): ConfidenceTier {
+  if (entry.confidence_tier) return entry.confidence_tier;
+  if (entry.source === 'Directory' || entry.source === 'Chat') return 'Confirmed';
+  if ((entry.confidence ?? 0) >= 85) return 'Confirmed';
+  if ((entry.confidence ?? 0) >= 65) return 'Probable';
+  return 'Unverified';
+}
+
+export interface HistoryFilters {
+  searchQuery: string;
+  teamFilter: 'All' | 'Ally' | 'Enemy';
+  matchTypeFilter: string;
+  serverFilter: string;
+  dateRangeFilter: DateRangeFilter;
+  statusFilter: StatusFilter;
+}
+
+export function matchesHistoryFilters(
+  entry: StreamerEntry,
+  filters: HistoryFilters,
+  nowMs: number = Date.now()
+): boolean {
+  if (
+    filters.teamFilter !== 'All' &&
+    entry.team_relation.toLowerCase() !== filters.teamFilter.toLowerCase()
+  ) {
+    return false;
+  }
+
+  if (
+    filters.matchTypeFilter !== 'All' &&
+    entry.queue_name.toLowerCase() !== filters.matchTypeFilter.toLowerCase()
+  ) {
+    return false;
+  }
+
+  if (filters.serverFilter !== 'All') {
+    const entryServer = (entry.server_region || '').trim().toLowerCase();
+    if (entryServer !== filters.serverFilter.trim().toLowerCase()) {
+      return false;
+    }
+  }
+
+  if (filters.statusFilter !== 'all') {
+    if (filters.statusFilter === 'Chat') {
+      if (entry.source !== 'Chat' && !entry.chat_message) return false;
+    } else if (resolveEntryTier(entry) !== filters.statusFilter) {
+      return false;
+    }
+  }
+
+  if (filters.dateRangeFilter !== 'all') {
+    const parsedMs = entry.detected_at_iso ? Date.parse(entry.detected_at_iso) : NaN;
+    if (!Number.isNaN(parsedMs)) {
+      const ageMs = nowMs - parsedMs;
+      if (filters.dateRangeFilter === 'today') {
+        const entryDate = new Date(parsedMs);
+        const nowDate = new Date(nowMs);
+        const sameDay =
+          entryDate.getFullYear() === nowDate.getFullYear() &&
+          entryDate.getMonth() === nowDate.getMonth() &&
+          entryDate.getDate() === nowDate.getDate();
+        if (!sameDay) return false;
+      } else if (filters.dateRangeFilter === '7d' && ageMs > 7 * 86_400_000) {
+        return false;
+      } else if (filters.dateRangeFilter === '30d' && ageMs > 30 * 86_400_000) {
+        return false;
+      }
+    }
+  }
+
+  const q = filters.searchQuery.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    entry.riot_id.toLowerCase().includes(q) ||
+    entry.platform.toLowerCase().includes(q) ||
+    entry.channel.toLowerCase().includes(q) ||
+    entry.title.toLowerCase().includes(q) ||
+    (entry.chat_message?.toLowerCase().includes(q) ?? false) ||
+    (entry.server_region?.toLowerCase().includes(q) ?? false) ||
+    (entry.match_reason?.toLowerCase().includes(q) ?? false) ||
+    entry.map_name.toLowerCase().includes(q) ||
+    entry.agent_name.toLowerCase().includes(q) ||
+    entry.queue_name.toLowerCase().includes(q)
+  );
+}
+
+export function formatViewers(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M watching`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K watching`;
+  return `${count} watching`;
 }
 
 export function formatRadarTimestamp(date: Date = new Date()): string {

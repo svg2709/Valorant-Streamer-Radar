@@ -7,19 +7,27 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { DirectoryStreamer, Platform } from '../types/radar';
+import {
+  DirectoryStreamer,
+  Platform,
+  RecommendedStreamer,
+  SERVER_REGIONS,
+  ServerRegionCode,
+} from '../types/radar';
 import {
   buildGithubIssueUrl,
   hostAllowed,
   hostOf,
+  parseAliasesCsv,
+  slugifyStreamerId,
   validateSubmission,
 } from '../utils/validation';
 
 interface StreamerModalProps {
   isOpen: boolean;
   editingEntry: DirectoryStreamer | null;
-  githubOwner: string;
-  githubRepo: string;
+  prefillRecommendation?: RecommendedStreamer | null;
+  defaultServerRegion: ServerRegionCode;
   onClose: () => void;
   onSave: (
     entry: DirectoryStreamer,
@@ -48,15 +56,17 @@ function normalizeAlnum(s: string): string {
 export const StreamerModal: React.FC<StreamerModalProps> = ({
   isOpen,
   editingEntry,
-  githubOwner,
-  githubRepo,
+  prefillRecommendation,
+  defaultServerRegion,
   onClose,
   onSave,
 }) => {
   const [riotId, setRiotId] = useState('');
+  const [aliasesInput, setAliasesInput] = useState('');
   const [platform, setPlatform] = useState<Platform>('YouTube');
   const [channelName, setChannelName] = useState('');
   const [channelUrl, setChannelUrl] = useState('');
+  const [serverRegion, setServerRegion] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [submittedIssueUrl, setSubmittedIssueUrl] = useState<string | null>(null);
@@ -65,20 +75,31 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
     if (isOpen) {
       if (editingEntry) {
         setRiotId(editingEntry.riot_id);
+        setAliasesInput((editingEntry.aliases ?? []).join(', '));
         setPlatform(editingEntry.platform);
         setChannelName(editingEntry.channel_name);
         setChannelUrl(editingEntry.channel_url);
+        setServerRegion(editingEntry.server_region ?? '');
+      } else if (prefillRecommendation) {
+        setRiotId('');
+        setAliasesInput('');
+        setPlatform(prefillRecommendation.platform);
+        setChannelName(prefillRecommendation.channel);
+        setChannelUrl(prefillRecommendation.url);
+        setServerRegion(prefillRecommendation.server_region);
       } else {
         setRiotId('');
+        setAliasesInput('');
         setPlatform('YouTube');
         setChannelName('');
         setChannelUrl('');
+        setServerRegion(defaultServerRegion);
       }
       setError(null);
       setVerifyResult(null);
       setSubmittedIssueUrl(null);
     }
-  }, [isOpen, editingEntry]);
+  }, [isOpen, editingEntry, prefillRecommendation, defaultServerRegion]);
 
   if (!isOpen) return null;
 
@@ -92,7 +113,6 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
     const curl = channelUrl.trim();
     setError(null);
 
-    // 1. Riot ID check
     const hashIdx = rid.indexOf('#');
     if (hashIdx === -1) {
       setVerifyResult({
@@ -117,7 +137,6 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
       return;
     }
 
-    // 2. Host & platform match check
     const host = hostOf(curl);
     if (!host) {
       setVerifyResult({
@@ -143,7 +162,6 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
       return;
     }
 
-    // 3. Handle & display name cross-check
     const handle = extractHandleFromUrl(curl);
     if (!handle || handle.length < 3 || handle.includes('.')) {
       setVerifyResult({
@@ -172,12 +190,12 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
     if (roughMatch) {
       setVerifyResult({
         kind: 'ok',
-        msg: `Verified! Riot ID format, ${platform} link, and channel name "${cname}" align. (The Windows app also performs a live channel lookup.)`,
+        msg: `Verified! Riot ID format, ${platform} link, and channel name "${cname}" align.`,
       });
     } else {
       setVerifyResult({
         kind: 'warn',
-        msg: `Riot ID & ${platform} URL are valid, but URL handle is "${handle}" while display name is "${cname}". Click Open Link to double-check.`,
+        msg: `Riot ID & ${platform} URL are valid, but URL handle is "${handle}" while display name is "${cname}".`,
         suggestedName: handle,
       });
     }
@@ -194,15 +212,24 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
       return;
     }
 
+    const aliases = parseAliasesCsv(aliasesInput, rid);
     const entry: DirectoryStreamer = {
+      id: editingEntry?.id || slugifyStreamerId(rid, platform),
+      display_name: cname,
       riot_id: rid,
+      aliases,
       platform,
+      channel_id: extractHandleFromUrl(curl) || undefined,
       channel_name: cname,
       channel_url: curl,
+      server_region: serverRegion || undefined,
+      verified: editingEntry?.verified ?? false,
+      submitted_at: editingEntry?.submitted_at ?? new Date().toISOString(),
+      source: openGithub ? 'community-submission' : 'local-custom',
     };
 
     if (openGithub) {
-      const issueUrl = buildGithubIssueUrl(githubOwner, githubRepo, entry);
+      const issueUrl = buildGithubIssueUrl(entry);
       setSubmittedIssueUrl(issueUrl);
       onSave(entry, true, editingEntry);
       return;
@@ -219,9 +246,9 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
       aria-modal="true"
       aria-labelledby="streamer-modal-title"
     >
-      <div className="w-full max-w-[460px] overflow-hidden rounded-[10px] border-[1.5px] border-[#FF5CA8] bg-[#141B27] text-[#F3EFF4] shadow-2xl">
+      <div className="w-full max-w-[490px] overflow-hidden rounded-[10px] border-[1.5px] border-[#FF5CA8] bg-[#141B27] text-[#F3EFF4] shadow-2xl">
         <div className="h-[3px] w-full bg-pink-white-strip" />
-        <div className="p-5">
+        <div className="max-h-[90vh] overflow-y-auto p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2
@@ -230,10 +257,10 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
               >
                 {editingEntry
                   ? 'Edit Custom Streamer Entry'
-                  : 'Register Streamer to Directory'}
+                  : 'Submit Streamer to Community Database'}
               </h2>
               <p className="mt-0.5 text-xs text-[#98A2B8]">
-                Link a Valorant Riot ID to a verified stream channel
+                Submissions are reviewed before becoming verified in the shared streamer database
               </p>
             </div>
             <button
@@ -250,15 +277,11 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
             <div className="mt-4 space-y-4">
               <div className="rounded-md border border-[#22C55E]/40 bg-[#0D111A] p-3.5 text-xs text-[#F3EFF4]">
                 <p className="font-semibold text-[#22C55E]">
-                  Saved locally to custom_streamers.json
+                  Saved locally &amp; ready for moderated review
                 </p>
                 <p className="mt-1.5 text-[#98A2B8]">
-                  In the native Windows app, your browser automatically opens the
-                  pre-filled GitHub Issue below for{' '}
-                  <span className="font-mono text-[#F3EFF4]">
-                    {githubOwner}/{githubRepo}
-                  </span>
-                  .
+                  In the Windows app, your browser opens the pre-filled submission form automatically.
+                  User submissions are never treated as verified until a maintainer reviews and approves them.
                 </p>
                 <a
                   href={submittedIssueUrl}
@@ -266,7 +289,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                   rel="noopener noreferrer"
                   className="mt-3 inline-flex items-center gap-1.5 rounded bg-pink-white-gradient bg-pink-white-gradient-hover px-3 py-1.5 text-xs font-bold text-[#0D111A]"
                 >
-                  Open Pre-filled GitHub Issue
+                  Open Submission Form
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               </div>
@@ -284,7 +307,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
             <div className="mt-4 space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
-                  Riot ID (IGN#TAG)
+                  Primary Riot ID (IGN#TAG)
                 </label>
                 <input
                   type="text"
@@ -295,6 +318,20 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                     setVerifyResult(null);
                   }}
                   placeholder="e.g. RohanYT#IND"
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                  Known Aliases / Alt Riot IDs{' '}
+                  <span className="font-normal text-[#98A2B8]">(Optional, comma-separated)</span>
+                </label>
+                <input
+                  type="text"
+                  value={aliasesInput}
+                  onChange={(e) => setAliasesInput(e.target.value)}
+                  placeholder="e.g. RohanAlt#MUM, RohanLive#IND"
                   className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
                 />
               </div>
@@ -327,9 +364,30 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                  Primary Valorant Server{' '}
+                  <span className="font-normal text-[#98A2B8]">
+                    (Prevents cross-server false positives)
+                  </span>
+                </label>
+                <select
+                  value={serverRegion}
+                  onChange={(e) => setServerRegion(e.target.value)}
+                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
+                >
+                  <option value="">Unknown / Unverified Server</option>
+                  {SERVER_REGIONS.map((reg) => (
+                    <option key={reg.code} value={reg.code}>
+                      {reg.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
                   Channel Display Name{' '}
                   <span className="font-normal text-[#98A2B8]">
-                    (or leave blank &amp; click Verify to auto-fill)
+                    (or leave blank &amp; click Verify)
                   </span>
                 </label>
                 <input
@@ -368,7 +426,6 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 />
               </div>
 
-              {/* Verify Link & Name Action Row */}
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
                 <button
                   type="button"
@@ -460,7 +517,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                   onClick={() => handleAction(true)}
                   className="rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-4 py-2 text-xs font-bold text-[#0D111A] whitespace-nowrap"
                 >
-                  Save &amp; Submit to GitHub
+                  Save &amp; Submit for Review
                 </button>
                 <button
                   type="button"

@@ -9,12 +9,13 @@ import {
   Radio,
   RotateCcw,
   Square,
+  Users,
 } from 'lucide-react';
 import {
   LogLineEntry,
-  SHARD_LABELS,
-  ShardCode,
+  ServerRegionInfo,
   SimMatchScenario,
+  getServerRegionInfo,
 } from '../types/radar';
 import { extractChatStreamPlug } from '../utils/validation';
 import { RadarIcon } from './RadarIcon';
@@ -27,7 +28,8 @@ interface MatchTrayLabProps {
   inMatch: boolean;
   isScanning: boolean;
   windowVisible: boolean;
-  effectiveShard: ShardCode;
+  skipPartyMembers: boolean;
+  effectiveRegion: ServerRegionInfo;
   logs: LogLineEntry[];
   onToggleValorant: () => void;
   onSimulateEnterMatch: () => void;
@@ -41,7 +43,7 @@ interface MatchTrayLabProps {
 
 const CATEGORY_COLORS: Record<LogLineEntry['category'], string> = {
   log: '#98A2B8',
-  shard: '#38BDF8',
+  server: '#38BDF8',
   riot: '#A770FF',
   chat: '#FFA6D2',
   scan: '#F3EFF4',
@@ -63,7 +65,8 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
   inMatch,
   isScanning,
   windowVisible,
-  effectiveShard,
+  skipPartyMembers,
+  effectiveRegion,
   logs,
   onToggleValorant,
   onSimulateEnterMatch,
@@ -81,6 +84,11 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
   const selectedScenario =
     scenarios.find((s) => s.id === selectedScenarioId) ?? scenarios[0];
 
+  const partyCount = selectedScenario.players.filter((p) => p.isPartyMember).length;
+  const scannableCount = skipPartyMembers
+    ? selectedScenario.players.length - partyCount
+    : selectedScenario.players.length;
+
   const extractedChatPlug = useMemo(
     () => extractChatStreamPlug(sampleChat, sampleSender),
     [sampleChat, sampleSender]
@@ -93,25 +101,26 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
         <div className="space-y-4 xl:col-span-7">
           <div className="rounded-lg border border-[#273144] bg-[#141B27] p-5">
             <h3 className="text-sm font-semibold text-[#FFF5FA]">
-              Post-Match Detection &amp; In-Game Chat Pipeline Simulator
+              Post-Match Server-Aware Detection Simulator
             </h3>
             <p className="mt-1 text-xs leading-relaxed text-[#98A2B8]">
-              Step through the user-space lifecycle of{' '}
+              Step through the post-match lifecycle of{' '}
               <span className="font-mono text-[#F3EFF4]">ValorantStreamerRadar</span>:
-              lockfile detection, silent in-game chat buffering via{' '}
-              <span className="font-mono text-[#FFA6D2]">/chat/v6/messages</span>,{' '}
-              <span className="font-mono text-[#F3EFF4]">InGame &rarr; MainMenu</span>{' '}
-              transition, concurrent 9-player scan, and WinRT toast notification.
+              exact server detection (Mumbai, Tokyo, Manila, Austin), party-member
+              skipping from Riot&apos;s <span className="font-mono text-[#F3EFF4]">partyId</span>,
+              confidence-tiered matching (Confirmed / Probable / Unverified), cross-server
+              false-positive rejection, and post-match chat stream plug extraction.
             </p>
 
             {/* Scenario picker */}
             <div className="mt-4">
               <label className="mb-1.5 block text-xs font-medium text-[#F3EFF4]">
-                Simulated Match Scenario
+                Simulated Match Server &amp; Scenario
               </label>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {scenarios.map((sc) => {
                   const active = sc.id === selectedScenario.id;
+                  const reg = getServerRegionInfo(sc.serverRegion);
                   return (
                     <button
                       key={sc.id}
@@ -125,7 +134,7 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                       }`}
                     >
                       <p className="font-mono text-[11px] font-semibold uppercase text-[#FFA6D2]">
-                        {SHARD_LABELS[sc.shard]}
+                        {reg.label}
                       </p>
                       <p className="mt-0.5 text-xs font-medium text-[#FFF5FA]">
                         {sc.map_name} · {sc.queue_name}
@@ -187,12 +196,12 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
             <div className="flex items-center gap-2">
               <MessageSquareQuote className="h-4 w-4 text-[#FF5CA8]" />
               <h4 className="text-xs font-semibold text-[#FFF5FA]">
-                Live In-Game Text Chat Stream Link Extractor
+                Post-Match Text Chat Stream Link Extractor
               </h4>
             </div>
             <p className="mt-1 text-xs text-[#98A2B8]">
               Test how <span className="font-mono text-[#F3EFF4]">extract_chat_stream_plug()</span> parses
-              in-game chat plugs like &ldquo;im live on yt&rdquo;, handles, and stream URLs.
+              post-match chat plugs like &ldquo;im live on yt&rdquo;, handles, and stream URLs.
             </p>
 
             <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
@@ -270,14 +279,21 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
 
           {/* Scenario Roster Preview */}
           <div className="rounded-lg border border-[#273144] bg-[#141B27] p-5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-xs font-semibold text-[#FFF5FA]">
                 Post-Match Lobby Roster ({selectedScenario.map_name} ·{' '}
                 {selectedScenario.queue_name})
               </h4>
-              <span className="font-mono text-[11px] text-[#98A2B8]">
-                9 other players · Semaphore(4)
-              </span>
+              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] tabular-nums">
+                <span className="text-[#2DD4BF]">
+                  {getServerRegionInfo(selectedScenario.serverRegion).shortLabel} Server
+                </span>
+                <span className="text-[#273144]">|</span>
+                <span className="text-[#98A2B8]">
+                  {scannableCount} scanned
+                  {skipPartyMembers && partyCount > 0 ? ` · ${partyCount} party skipped` : ''}
+                </span>
+              </div>
             </div>
 
             {selectedScenario.chatLog && selectedScenario.chatLog.length > 0 && (
@@ -303,13 +319,23 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                     <th className="py-2 pr-3 font-medium">Riot ID</th>
                     <th className="py-2 pr-3 font-medium">Team</th>
                     <th className="py-2 pr-3 font-medium">Agent</th>
-                    <th className="py-2 font-medium">Expected Detection</th>
+                    <th className="py-2 font-medium">Expected Pipeline Outcome</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#273144]/60">
                   {selectedScenario.players.map((p) => (
                     <tr key={p.riot_id} className="hover:bg-[#0D111A]/50">
-                      <td className="py-2 pr-3 font-mono text-[#F3EFF4]">{p.riot_id}</td>
+                      <td className="py-2 pr-3 font-mono text-[#F3EFF4]">
+                        <div className="flex items-center gap-1.5">
+                          <span>{p.riot_id}</span>
+                          {p.isPartyMember && (
+                            <span className="inline-flex items-center gap-0.5 rounded border border-[#38BDF8]/40 bg-[#38BDF8]/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-[#38BDF8]">
+                              <Users className="h-2.5 w-2.5" />
+                              Party
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td
                         className="py-2 pr-3 font-medium"
                         style={{
@@ -320,9 +346,23 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
                       </td>
                       <td className="py-2 pr-3 text-[#98A2B8]">{p.agent_name}</td>
                       <td className="py-2 font-mono text-[11px]">
-                        {p.liveStream ? (
-                          <span className="text-[#22C55E]">
-                            LIVE ({p.liveStream.platform} · {p.detectionSource})
+                        {p.isPartyMember && skipPartyMembers ? (
+                          <span className="text-[#38BDF8]">
+                            SKIPPED (Party member · 0 external API calls)
+                          </span>
+                        ) : p.liveStream ? (
+                          <span
+                            style={{
+                              color:
+                                p.liveStream.confidenceTier === 'Confirmed'
+                                  ? '#22C55E'
+                                  : p.liveStream.confidenceTier === 'Probable'
+                                  ? '#FB923C'
+                                  : '#98A2B8',
+                            }}
+                          >
+                            {p.liveStream.confidenceTier.toUpperCase()} ({p.liveStream.platform} ·{' '}
+                            {p.liveStream.confidence}%)
                           </span>
                         ) : p.detectionSource === 'chat' ? (
                           <span className="text-[#FFA6D2]">
@@ -395,9 +435,9 @@ export const MatchTrayLab: React.FC<MatchTrayLabProps> = ({
               {/* Simulated Windows 11 Taskbar Corner */}
               <div className="flex items-center justify-between rounded-md border border-[#273144] bg-[#070A10] px-4 py-2.5">
                 <div className="text-[11px] text-[#98A2B8]">
-                  Active Shard:{' '}
-                  <span className="font-mono text-[#F3EFF4]">
-                    {SHARD_LABELS[effectiveShard]}
+                  Active Server:{' '}
+                  <span className="font-mono text-[#2DD4BF]">
+                    {effectiveRegion.shortLabel}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

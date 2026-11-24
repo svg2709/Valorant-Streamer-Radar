@@ -6,6 +6,7 @@ import {
   Settings,
 } from 'lucide-react';
 import {
+  APP_VERSION,
   AppConfig,
   DEFAULT_CONFIG,
   DesktopTab,
@@ -13,10 +14,12 @@ import {
   LastMatchSummary,
   LogLineEntry,
   Platform,
-  SHARD_LABELS,
-  ShardCode,
+  RecommendedStreamer,
+  ServerRegionCode,
+  ServerRegionOverride,
   StreamerEntry,
   StudioView,
+  getServerRegionInfo,
 } from './types/radar';
 import {
   INITIAL_COMMUNITY_DIRECTORY,
@@ -27,7 +30,8 @@ import {
 import {
   extractChatStreamPlug,
   formatRadarTimestamp,
-  resolveEffectiveShard,
+  resolveEffectiveRegion,
+  resolveEntryTier,
 } from './utils/validation';
 import { RadarIcon } from './components/RadarIcon';
 import { DesktopWindow } from './components/DesktopWindow';
@@ -36,10 +40,10 @@ import { MatchTrayLab } from './components/MatchTrayLab';
 import { WinRtToast } from './components/WinRtToast';
 
 const STORAGE_KEYS = {
-  config: 'vsr_v050_config',
-  history: 'vsr_v050_history',
-  customDir: 'vsr_v050_custom_dir',
-  lastMatch: 'vsr_v050_last_match',
+  config: 'vsr_v120_config',
+  history: 'vsr_v120_history',
+  customDir: 'vsr_v120_custom_dir',
+  lastMatch: 'vsr_v120_last_match',
 };
 
 function loadStored<T>(key: string, fallback: T): T {
@@ -50,6 +54,29 @@ function loadStored<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function loadConfigWithMigration(): AppConfig {
+  const current = loadStored<Partial<AppConfig> & { shard_override?: ServerRegionOverride }>(
+    STORAGE_KEYS.config,
+    {}
+  );
+  if (Object.keys(current).length > 0) {
+    return {
+      ...DEFAULT_CONFIG,
+      ...current,
+      server_override: current.server_override ?? current.shard_override ?? DEFAULT_CONFIG.server_override,
+    };
+  }
+  const legacy = loadStored<Partial<AppConfig> & { shard_override?: ServerRegionOverride }>(
+    'vsr_v110_config',
+    {}
+  );
+  return {
+    ...DEFAULT_CONFIG,
+    ...legacy,
+    server_override: legacy.server_override ?? legacy.shard_override ?? DEFAULT_CONFIG.server_override,
+  };
 }
 
 function nowHms(): string {
@@ -64,10 +91,7 @@ export default function App() {
   const [desktopTab, setDesktopTab] = useState<DesktopTab>('history');
   const [windowVisible, setWindowVisible] = useState<boolean>(true);
 
-  const [config, setConfig] = useState<AppConfig>(() => ({
-    ...DEFAULT_CONFIG,
-    ...loadStored<Partial<AppConfig>>(STORAGE_KEYS.config, DEFAULT_CONFIG),
-  }));
+  const [config, setConfig] = useState<AppConfig>(loadConfigWithMigration);
   const [history, setHistory] = useState<StreamerEntry[]>(() =>
     loadStored(STORAGE_KEYS.history, INITIAL_HISTORY)
   );
@@ -83,7 +107,7 @@ export default function App() {
   const [inMatch, setInMatch] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isSyncingDirectory, setIsSyncingDirectory] = useState<boolean>(false);
-  const [detectedShard, setDetectedShard] = useState<ShardCode>('ap');
+  const [detectedRegion, setDetectedRegion] = useState<ServerRegionCode>('ap-mumbai');
   const [status, setStatus] = useState<string>('Idle | Monitoring ShooterGame.log');
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>(SIM_SCENARIOS[0].id);
   const [lastScannedMatch, setLastScannedMatch] = useState<LastMatchSummary | null>(() =>
@@ -92,16 +116,18 @@ export default function App() {
       queue_name: INITIAL_HISTORY[0]?.queue_name ?? 'Competitive',
       map_name: INITIAL_HISTORY[0]?.map_name ?? 'Ascent',
       my_agent: 'Omen',
-      players_checked: 9,
+      players_checked: 7,
+      party_skipped: 2,
       streamers_found: INITIAL_HISTORY.filter((h) => h.match_id === INITIAL_HISTORY[0]?.match_id).length,
       scanned_at: INITIAL_HISTORY[0]?.timestamp ?? formatRadarTimestamp(new Date()),
-      shard: SHARD_LABELS.ap,
+      server_name: getServerRegionInfo('ap-mumbai').label,
     })
   );
 
   // Modals & Toasts
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [editingEntry, setEditingEntry] = useState<DirectoryStreamer | null>(null);
+  const [prefillRec, setPrefillRec] = useState<RecommendedStreamer | null>(null);
   const [inlineToast, setInlineToast] = useState<string | null>(null);
   const [winRtToastEntry, setWinRtToastEntry] = useState<StreamerEntry | null>(null);
   const [logs, setLogs] = useState<LogLineEntry[]>([
@@ -114,8 +140,8 @@ export default function App() {
     {
       id: 'boot-2',
       time: nowHms(),
-      category: 'shard',
-      message: 'Initial ShooterGame.log scan detected shard https://pd.ap.a.pvp.net (AP / Mumbai).',
+      category: 'server',
+      message: 'ShooterGame.log server detected: aresriot.aws-ap-south-1-mumbai-1 -> AP / Mumbai (India).',
     },
   ]);
 
@@ -187,7 +213,7 @@ export default function App() {
     winRtTimerRef.current = window.setTimeout(() => setWinRtToastEntry(null), 8000);
   }, []);
 
-  const effectiveShard = resolveEffectiveShard(config, detectedShard);
+  const effectiveRegion = resolveEffectiveRegion(config, detectedRegion);
 
   const runSimulatedScan = useCallback(
     (trigger: 'Manual' | 'PostMatch') => {
@@ -201,13 +227,16 @@ export default function App() {
 
       const scenario =
         SIM_SCENARIOS.find((s) => s.id === selectedScenarioId) ?? SIM_SCENARIOS[0];
-      const shardForScan = resolveEffectiveShard(config, scenario.shard);
+      const regionForScan = resolveEffectiveRegion(config, scenario.serverRegion);
+
+      const scannablePlayers = config.skip_party_members
+        ? scenario.players.filter((p) => !p.isPartyMember)
+        : scenario.players;
+      const partySkipped = scenario.players.length - scannablePlayers.length;
 
       setIsScanning(true);
-      setDetectedShard(scenario.shard);
-      setStatus(
-        `Syncing directory & scanning last match (${SHARD_LABELS[shardForScan]})...`
-      );
+      setDetectedRegion(scenario.serverRegion);
+      setStatus(`Syncing database & scanning last match (${regionForScan.label})...`);
 
       pushLog(
         'riot',
@@ -216,16 +245,22 @@ export default function App() {
 
       const t1 = window.setTimeout(() => {
         pushLog(
-          'riot',
-          `GET https://pd.${shardForScan}.a.pvp.net/match-history/v1/history/{puuid} -> MatchID ${scenario.match_id}`
+          'server',
+          `Match server resolved: ${regionForScan.podExample} -> ${regionForScan.label} (endpoint pd.${regionForScan.apiRegion}.a.pvp.net)`
         );
       }, 450);
 
       const t2 = window.setTimeout(() => {
         pushLog(
           'scan',
-          `Match details: ${scenario.map_name} (${scenario.queue_name}) · 9 players resolved via name-service/v2`
+          `Match details: ${scenario.map_name} (${scenario.queue_name}) · ${scenario.players.length} other players · Server filter: ${regionForScan.shortLabel}`
         );
+        if (partySkipped > 0) {
+          pushLog(
+            'scan',
+            `PARTY GUARD: Read partyId from match-details (0 extra Riot API calls) -> skipped ${partySkipped} party member(s), saving ~${partySkipped * 3} external API lookups`
+          );
+        }
         if (config.capture_in_game_chat && scenario.chatLog?.length) {
           pushLog(
             'chat',
@@ -234,12 +269,14 @@ export default function App() {
         }
         pushLog(
           'scan',
-          `Merged ${customDirectory.length} custom + ${communityDirectory.length} community directory entries (${config.github_owner}/${config.github_repo})`
+          `Synced ${customDirectory.length} custom + ${communityDirectory.length} community streamers.json entries`
         );
       }, 950);
 
       const t3 = window.setTimeout(() => {
-        const timestamp = formatRadarTimestamp(new Date());
+        const now = new Date();
+        const timestamp = formatRadarTimestamp(now);
+        const isoNow = now.toISOString();
         const uniqueMatchId = `${scenario.match_id}-${Date.now().toString().slice(-4)}`;
         const foundEntries: StreamerEntry[] = [];
 
@@ -250,7 +287,11 @@ export default function App() {
           }
         }
 
-        for (const p of scenario.players) {
+        for (const p of scannablePlayers) {
+          if (p.rejectedCrossRegion) {
+            pushLog('scan', `SERVER GUARD [${p.riot_id}]: ${p.rejectedCrossRegion}`);
+          }
+
           const chatBody = chatByPlayer.get(p.riot_id.toLowerCase());
           const chatPlug = chatBody ? extractChatStreamPlug(chatBody, p.riot_id) : null;
 
@@ -263,6 +304,7 @@ export default function App() {
               title: p.liveStream.title,
               url: p.liveStream.url,
               timestamp,
+              detected_at_iso: isoNow,
               team_relation: p.team_relation,
               map_name: scenario.map_name,
               agent_name: p.agent_name,
@@ -272,11 +314,17 @@ export default function App() {
                   ? chatPlug.rawMessage
                   : undefined,
               source: p.detectionSource === 'directory' ? 'Directory' : 'Heuristic',
+              confidence: p.liveStream.confidence,
+              confidence_tier: p.liveStream.confidenceTier,
+              server_match_status: p.liveStream.serverMatchStatus,
+              match_reason: p.liveStream.match_reason,
+              server_region: regionForScan.shortLabel,
+              candidates: p.liveStream.candidates,
             };
             foundEntries.push(entry);
             pushLog(
-              'hit',
-              `LIVE HIT [${p.liveStream.platform}] ${p.riot_id} (${p.team_relation}, ${p.agent_name}) via ${p.detectionSource} -> ${p.liveStream.url}`
+              p.liveStream.confidenceTier === 'Unverified' ? 'scan' : 'hit',
+              `${p.liveStream.confidenceTier.toUpperCase()} [${p.liveStream.platform} · ${p.liveStream.confidence}%] ${p.riot_id} (${p.liveStream.serverMatchStatus}) -> ${p.liveStream.url}`
             );
           }
 
@@ -295,12 +343,18 @@ export default function App() {
                   : `Shared ${chatPlug.platform} stream link in match chat`,
               url: chatPlug.url,
               timestamp,
+              detected_at_iso: isoNow,
               team_relation: p.team_relation,
               map_name: scenario.map_name,
               agent_name: p.agent_name,
               queue_name: scenario.queue_name,
               chat_message: chatPlug.rawMessage,
               source: 'Chat',
+              confidence: 92,
+              confidence_tier: 'Confirmed',
+              server_match_status: `Self-reported in ${regionForScan.shortLabel} match chat`,
+              match_reason: 'Extracted from post-match in-game chat',
+              server_region: regionForScan.shortLabel,
             };
             foundEntries.push(chatEntry);
             pushLog(
@@ -310,33 +364,43 @@ export default function App() {
           }
         }
 
-        const playersChecked = scenario.players.length;
+        const playersChecked = scannablePlayers.length;
         setLastScannedMatch({
           match_id: uniqueMatchId,
           queue_name: scenario.queue_name,
           map_name: scenario.map_name,
           my_agent: 'Jett',
           players_checked: playersChecked,
+          party_skipped: partySkipped,
           streamers_found: foundEntries.length,
           scanned_at: timestamp,
-          shard: SHARD_LABELS[shardForScan],
+          server_name: regionForScan.label,
         });
 
         if (foundEntries.length > 0) {
           setHistory((prev) => [...foundEntries, ...prev].slice(0, 300));
+          const notifiable = foundEntries.find(
+            (e) => resolveEntryTier(e) !== 'Unverified'
+          );
           setStatus(
-            `Found ${foundEntries.length} live stream(s) in ${scenario.queue_name} on ${scenario.map_name}!`
+            `Found ${foundEntries.length} stream match(es) in ${scenario.queue_name} on ${scenario.map_name} (${regionForScan.shortLabel})!`
           );
-          showWinRtToast(foundEntries[0]);
-          showInlineToast(
-            `Found ${foundEntries.length} live stream(s) in ${scenario.queue_name} (${scenario.map_name}) — first URL copied!`
-          );
-          if (navigator.clipboard?.writeText) {
-            navigator.clipboard.writeText(foundEntries[0].url).catch(() => {});
+          if (notifiable) {
+            showWinRtToast(notifiable);
+            showInlineToast(
+              `Found ${foundEntries.length} match(es) on ${regionForScan.shortLabel}${partySkipped > 0 ? ` (${partySkipped} party skipped)` : ''} — top URL copied!`
+            );
+            if (navigator.clipboard?.writeText) {
+              navigator.clipboard.writeText(notifiable.url).catch(() => {});
+            }
+          } else {
+            showInlineToast(
+              `Recorded ${foundEntries.length} unverified match(es) — no desktop toast fired`
+            );
           }
         } else {
           setStatus(
-            `Scanned ${scenario.queue_name} on ${scenario.map_name} (${playersChecked} players) | No live streamers found`
+            `Scanned ${scenario.queue_name} on ${scenario.map_name} (${playersChecked} scanned, ${partySkipped} party skipped, ${regionForScan.shortLabel}) | No live streamers found`
           );
         }
 
@@ -361,15 +425,13 @@ export default function App() {
   const handleSimulateEnterMatch = () => {
     const scenario =
       SIM_SCENARIOS.find((s) => s.id === selectedScenarioId) ?? SIM_SCENARIOS[0];
+    const reg = getServerRegionInfo(scenario.serverRegion);
     setInMatch(true);
-    setDetectedShard(scenario.shard);
-    setStatus('In Match • Waiting for match end...');
-    pushLog(
-      'shard',
-      `ShooterGame.log: Request URL https://pd.${scenario.shard}.a.pvp.net/core-game/v1/matches`
-    );
+    setDetectedRegion(scenario.serverRegion);
+    setStatus(`In Match (${reg.shortLabel}) • Waiting for match end...`);
+    pushLog('server', `ShooterGame.log: Game server ${reg.podExample} -> ${reg.label}`);
     pushLog('log', 'ShooterGame.log: Reconcile state transitioned -> InGame');
-    showInlineToast(`Entered simulated ${scenario.map_name} match (${SHARD_LABELS[scenario.shard]})`);
+    showInlineToast(`Entered simulated ${scenario.map_name} match (${reg.label})`);
   };
 
   const handleSimulateEndMatch = () => {
@@ -408,7 +470,7 @@ export default function App() {
     });
     showInlineToast(
       openGithub
-        ? `Saved ${entry.riot_id} locally & prepared GitHub Issue!`
+        ? `Saved ${entry.riot_id} locally & prepared moderated submission!`
         : `Saved ${entry.riot_id} to custom_streamers.json`
     );
     pushLog(
@@ -429,16 +491,11 @@ export default function App() {
 
   const handleSyncDirectory = () => {
     setIsSyncingDirectory(true);
-    pushLog(
-      'log',
-      `Fetching https://raw.githubusercontent.com/${config.github_owner}/${config.github_repo}/main/streamers.json`
-    );
+    pushLog('log', 'Syncing community streamers.json database...');
     window.setTimeout(() => {
       setCommunityDirectory(INITIAL_COMMUNITY_DIRECTORY);
       setIsSyncingDirectory(false);
-      showInlineToast(
-        `Synced directory cache for ${config.github_owner}/${config.github_repo}`
-      );
+      showInlineToast('Synced central streamers.json database!');
       pushLog('log', 'Updated directory_cache.json with validated entries.');
     }, 650);
   };
@@ -460,24 +517,36 @@ export default function App() {
     showInlineToast('Settings saved to config.json!');
     pushLog(
       'log',
-      `Saved config.json (shard=${nextConfig.shard_override}, repo=${nextConfig.github_owner}/${nextConfig.github_repo}, autostart=${nextConfig.start_with_windows}, customToastAppId=${nextConfig.use_custom_toast_app_id})`
+      `Saved config.json (server=${nextConfig.server_override}, skip_party=${nextConfig.skip_party_members}, recommendations=${nextConfig.enable_recommendations}, autostart=${nextConfig.start_with_windows})`
     );
   };
 
+  const handleToggleRecommendationsImmediate = (enabled: boolean) => {
+    setConfig((prev) => ({ ...prev, enable_recommendations: enabled }));
+    showInlineToast(
+      enabled
+        ? 'Live Streamer Recommendations enabled'
+        : 'Live Streamer Recommendations turned OFF (saves bandwidth)'
+    );
+    pushLog('log', `Live Streamer Recommendations toggled ${enabled ? 'ON' : 'OFF'}`);
+  };
+
   const handlePreviewToast = () => {
-    const sample = history[0] ?? {
-      match_id: 'preview-toast',
-      riot_id: 'RohanYT#IND',
-      platform: 'YouTube',
-      channel: 'Rohan Gaming',
-      title: 'ROAD TO IMMORTAL 3 MUMBAI SERVER | LIVE RANKED GRIND',
-      url: 'https://www.youtube.com/watch?v=val_rohan_live_01',
-      timestamp: formatRadarTimestamp(new Date()),
-      team_relation: 'Enemy',
-      map_name: 'Ascent',
-      agent_name: 'Jett',
-      queue_name: 'Competitive',
-    };
+    const sample =
+      history.find((h) => resolveEntryTier(h) !== 'Unverified') ?? {
+        match_id: 'preview-toast',
+        riot_id: 'RohanYT#IND',
+        platform: 'YouTube' as Platform,
+        channel: 'Rohan Gaming',
+        title: 'ROAD TO IMMORTAL 3 MUMBAI SERVER | LIVE RANKED GRIND',
+        url: 'https://www.youtube.com/watch?v=val_rohan_live_01',
+        timestamp: formatRadarTimestamp(new Date()),
+        team_relation: 'Enemy' as const,
+        map_name: 'Ascent',
+        agent_name: 'Jett',
+        queue_name: 'Competitive',
+        confidence_tier: 'Confirmed' as const,
+      };
     showWinRtToast(sample);
   };
 
@@ -539,29 +608,27 @@ export default function App() {
               </p>
               <dl className="mt-2.5 space-y-2 text-xs">
                 <div>
-                  <dt className="text-[11px] text-[#64748B]">Directory Repo</dt>
-                  <dd className="truncate font-mono text-[11px] text-[#F3EFF4]">
-                    {config.github_owner}/{config.github_repo}
+                  <dt className="text-[11px] text-[#64748B]">Active Server</dt>
+                  <dd className="font-mono text-[11px] text-[#2DD4BF]">
+                    {effectiveRegion.label}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] text-[#64748B]">Effective Shard</dt>
+                  <dt className="text-[11px] text-[#64748B]">Party Member Skip</dt>
+                  <dd className="font-mono text-[11px] text-[#38BDF8]">
+                    {config.skip_party_members ? 'ON (Saves API Calls)' : 'OFF'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] text-[#64748B]">Recommendations</dt>
                   <dd className="font-mono text-[11px] text-[#F3EFF4]">
-                    {SHARD_LABELS[effectiveShard]}
+                    {config.enable_recommendations ? 'ON (Discover)' : 'OFF (Bandwidth Saver)'}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-[11px] text-[#64748B]">In-Game Chat Reader</dt>
                   <dd className="font-mono text-[11px] text-[#FFA6D2]">
-                    {config.capture_in_game_chat ? 'Enabled (Post-Match)' : 'Disabled'}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-[11px] text-[#64748B]">Toast Branding</dt>
-                  <dd className="font-mono text-[11px] text-[#F3EFF4]">
-                    {config.use_custom_toast_app_id
-                      ? 'Valorant Streamer Radar'
-                      : 'Windows PowerShell'}
+                    {config.capture_in_game_chat ? 'ON (Post-Match)' : 'OFF'}
                   </dd>
                 </div>
               </dl>
@@ -582,7 +649,8 @@ export default function App() {
           </div>
 
           <div className="mt-6 hidden border-t border-[#273144] px-2 pt-3 text-[11px] text-[#64748B] lg:block">
-            <p className="font-mono">v1.0.1 · Post-Match Only</p>
+            <p className="font-mono">v{APP_VERSION} · Post-Match Only</p>
+            <p className="mt-0.5 text-[10px] text-[#64748B]">Not a stream sniping tool</p>
           </div>
         </div>
       </aside>
@@ -618,7 +686,7 @@ export default function App() {
               isScanning={isScanning}
               isSyncingDirectory={isSyncingDirectory}
               valorantRunning={valorantRunning}
-              detectedShard={detectedShard}
+              detectedRegion={detectedRegion}
               config={config}
               history={history}
               lastScannedMatch={lastScannedMatch}
@@ -627,7 +695,13 @@ export default function App() {
               toastMessage={inlineToast}
               onTriggerManualScan={() => runSimulatedScan('Manual')}
               onOpenAddModal={(entry) => {
+                setPrefillRec(null);
                 setEditingEntry(entry ?? null);
+                setModalOpen(true);
+              }}
+              onOpenAddFromRecommendation={(rec) => {
+                setEditingEntry(null);
+                setPrefillRec(rec);
                 setModalOpen(true);
               }}
               onDeleteCustomEntry={handleDeleteCustomEntry}
@@ -639,9 +713,10 @@ export default function App() {
               onCopyLink={handleCopyLink}
               onWatchStream={handleWatchStream}
               onSaveConfig={handleSaveConfig}
+              onToggleRecommendationsImmediate={handleToggleRecommendationsImmediate}
               onHideToTray={() => {
                 setWindowVisible(false);
-                pushLog('log', 'Window close intercepted -> hidden to system tray (0% idle CPU).');
+                pushLog('log', 'Window close intercepted -> hidden to system tray.');
               }}
               onRestoreFromTray={() => setWindowVisible(true)}
             />
@@ -656,7 +731,8 @@ export default function App() {
               inMatch={inMatch}
               isScanning={isScanning}
               windowVisible={windowVisible}
-              effectiveShard={effectiveShard}
+              skipPartyMembers={config.skip_party_members}
+              effectiveRegion={effectiveRegion}
               logs={logs}
               onToggleValorant={() => {
                 setValorantRunning((prev) => {
@@ -694,11 +770,12 @@ export default function App() {
       <StreamerModal
         isOpen={modalOpen}
         editingEntry={editingEntry}
-        githubOwner={config.github_owner}
-        githubRepo={config.github_repo}
+        prefillRecommendation={prefillRec}
+        defaultServerRegion={effectiveRegion.code}
         onClose={() => {
           setModalOpen(false);
           setEditingEntry(null);
+          setPrefillRec(null);
         }}
         onSave={handleSaveStreamer}
       />

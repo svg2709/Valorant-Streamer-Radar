@@ -35,14 +35,15 @@ const APP_BUILD_SHA: &str = env!("APP_BUILD_SHA");
 const UPDATE_REPO_OWNER: &str = "svg2709";
 const UPDATE_REPO_NAME: &str = "Valorant-Streamer-Radar";
 
-const DEFAULT_GITHUB_OWNER: &str = "svg2709";
-const DEFAULT_GITHUB_REPO: &str = "Valorant-Streamer-Radar";
-const DEFAULT_SHARD_OVERRIDE: &str = "auto";
+const COMMUNITY_REPO_OWNER: &str = "svg2709";
+const COMMUNITY_REPO_NAME: &str = "Valorant-Streamer-Radar";
+const DEFAULT_SERVER_OVERRIDE: &str = "auto";
 const CUSTOM_TOAST_APP_ID: &str = "ValorantStreamerRadar";
 
 const SINGLE_INSTANCE_PORT: u16 = 47831;
 const MAX_HISTORY: usize = 300;
 const TOAST_TTL: Duration = Duration::from_secs(4);
+const RECOMMENDATIONS_CACHE_TTL: Duration = Duration::from_secs(300);
 
 const BG_DARK: Color32 = Color32::from_rgb(13, 17, 26);
 const HEADER_BG: Color32 = Color32::from_rgb(9, 13, 20);
@@ -291,32 +292,24 @@ struct AppConfig {
     twitch_client_secret: String,
     #[serde(default = "default_true")]
     start_with_windows: bool,
-    #[serde(default = "default_shard_override")]
-    shard_override: String,
-    #[serde(default = "default_github_owner")]
-    github_owner: String,
-    #[serde(default = "default_github_repo")]
-    github_repo: String,
+    #[serde(default = "default_server_override", alias = "shard_override")]
+    server_override: String,
     #[serde(default = "default_true")]
     use_custom_toast_app_id: bool,
     #[serde(default = "default_true")]
     capture_in_game_chat: bool,
+    #[serde(default = "default_true")]
+    skip_party_members: bool,
+    #[serde(default)]
+    enable_recommendations: bool,
 }
 
 fn default_true() -> bool {
     true
 }
 
-fn default_shard_override() -> String {
-    DEFAULT_SHARD_OVERRIDE.to_string()
-}
-
-fn default_github_owner() -> String {
-    DEFAULT_GITHUB_OWNER.to_string()
-}
-
-fn default_github_repo() -> String {
-    DEFAULT_GITHUB_REPO.to_string()
+fn default_server_override() -> String {
+    DEFAULT_SERVER_OVERRIDE.to_string()
 }
 
 impl Default for AppConfig {
@@ -326,21 +319,72 @@ impl Default for AppConfig {
             twitch_client_id: String::new(),
             twitch_client_secret: String::new(),
             start_with_windows: true,
-            shard_override: default_shard_override(),
-            github_owner: default_github_owner(),
-            github_repo: default_github_repo(),
+            server_override: default_server_override(),
             use_custom_toast_app_id: true,
             capture_in_game_chat: true,
+            skip_party_members: true,
+            enable_recommendations: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DirectoryStreamer {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    display_name: String,
     riot_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    aliases: Vec<String>,
     platform: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    channel_id: String,
     channel_name: String,
     channel_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    server_region: String,
+    #[serde(default)]
+    verified: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    submitted_at: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    source: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfidenceTier {
+    Confirmed,
+    Probable,
+    Unverified,
+}
+
+impl ConfidenceTier {
+    fn as_str(self) -> &'static str {
+        match self {
+            ConfidenceTier::Confirmed => "Confirmed",
+            ConfidenceTier::Probable => "Probable",
+            ConfidenceTier::Unverified => "Unverified",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LikelyStreamerCandidate {
+    platform: String,
+    channel: String,
+    title: String,
+    url: String,
+    #[serde(default)]
+    confidence: u8,
+    #[serde(default)]
+    confidence_tier: String,
+    #[serde(default)]
+    region_hint: String,
+    #[serde(default)]
+    server_match_status: String,
+    #[serde(default)]
+    match_reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,6 +398,8 @@ struct StreamerEntry {
     url: String,
     timestamp: String,
     #[serde(default)]
+    detected_at_iso: String,
+    #[serde(default)]
     team_relation: String,
     #[serde(default)]
     map_name: String,
@@ -365,6 +411,36 @@ struct StreamerEntry {
     chat_message: String,
     #[serde(default)]
     source: String,
+    #[serde(default)]
+    confidence: u8,
+    #[serde(default)]
+    confidence_tier: String,
+    #[serde(default)]
+    server_match_status: String,
+    #[serde(default)]
+    match_reason: String,
+    #[serde(default)]
+    server_region: String,
+    #[serde(default)]
+    candidates: Vec<LikelyStreamerCandidate>,
+}
+
+#[derive(Debug, Clone)]
+struct RecommendedStreamer {
+    platform: String,
+    channel: String,
+    title: String,
+    url: String,
+    viewers: Option<u64>,
+    region_label: String,
+}
+
+#[derive(Debug, Clone)]
+enum RecommendationsState {
+    Idle,
+    Loading,
+    Loaded(Vec<RecommendedStreamer>, String),
+    Error(String),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -420,6 +496,7 @@ enum CheckState {
 struct UpdateReleaseInfo {
     tag_name: String,
     release_name: String,
+    changelog: String,
     download_url: String,
     html_url: String,
     expected_sha256: Option<String>,
@@ -443,8 +520,15 @@ enum BgTask {
     TestYouTubeKey(String),
     TestTwitchKeys { client_id: String, client_secret: String },
     VerifyStreamer { riot_id: String, platform: String, channel_name: String, channel_url: String },
-    CheckForUpdates,
+    CheckForUpdates { silent: bool },
     InstallUpdate(UpdateReleaseInfo),
+    FetchRecommendations {
+        server_region: String,
+        youtube_api_key: String,
+        twitch_client_id: String,
+        twitch_client_secret: String,
+        force: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -455,10 +539,12 @@ struct LastMatchSummary {
     #[serde(default)]
     my_agent: String,
     players_checked: usize,
+    #[serde(default)]
+    party_skipped: usize,
     streamers_found: usize,
     scanned_at: String,
-    #[serde(default)]
-    shard: String,
+    #[serde(default, alias = "shard")]
+    server_name: String,
 }
 
 struct AppState {
@@ -466,7 +552,8 @@ struct AppState {
     is_scanning: bool,
     is_syncing_directory: bool,
     riot_status: RiotStatus,
-    detected_shard: String,
+    detected_api_region: String,
+    detected_server: String,
     config: AppConfig,
     history: Vec<StreamerEntry>,
     local_directory: Vec<DirectoryStreamer>,
@@ -479,6 +566,9 @@ struct AppState {
     twitch_key_check: CheckState,
     streamer_verify: CheckState,
     update_state: UpdateState,
+    notified_update_key: Option<String>,
+    recommendations: RecommendationsState,
+    recommendations_cache: Option<(String, Instant, Vec<RecommendedStreamer>, String)>,
 }
 
 fn set_toast(state: &Arc<Mutex<AppState>>, msg: impl Into<String>) {
@@ -490,7 +580,360 @@ fn set_status(state: &Arc<Mutex<AppState>>, ctx: &egui::Context, msg: impl Into<
     repaint(ctx);
 }
 
-fn canonical_shard(s: &str) -> Option<&'static str> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeoZone {
+    India,
+    Sea,
+    Japan,
+    Korea,
+    Oce,
+    Na,
+    Latam,
+    Brazil,
+    Eu,
+    MiddleEast,
+    SouthAfrica,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ServerRegionInfo {
+    code: &'static str,
+    api_region: &'static str,
+    label: &'static str,
+    short_label: &'static str,
+    yt_region_code: &'static str,
+    accept_lang: &'static str,
+    search_region_term: &'static str,
+    twitch_lang: &'static str,
+    zone: GeoZone,
+}
+
+const SERVER_REGIONS: &[ServerRegionInfo] = &[
+    ServerRegionInfo {
+        code: "ap-mumbai",
+        api_region: "ap",
+        label: "AP / Mumbai (India)",
+        short_label: "Mumbai",
+        yt_region_code: "IN",
+        accept_lang: "en-IN,hi;q=0.9,en;q=0.8",
+        search_region_term: "India Mumbai",
+        twitch_lang: "hi",
+        zone: GeoZone::India,
+    },
+    ServerRegionInfo {
+        code: "ap-singapore",
+        api_region: "ap",
+        label: "AP / Singapore (SEA)",
+        short_label: "Singapore",
+        yt_region_code: "SG",
+        accept_lang: "en-SG,en;q=0.9",
+        search_region_term: "Singapore SEA",
+        twitch_lang: "en",
+        zone: GeoZone::Sea,
+    },
+    ServerRegionInfo {
+        code: "ap-tokyo",
+        api_region: "ap",
+        label: "AP / Tokyo (Japan)",
+        short_label: "Japan",
+        yt_region_code: "JP",
+        accept_lang: "ja-JP,ja;q=0.9,en;q=0.7",
+        search_region_term: "Japan Tokyo",
+        twitch_lang: "ja",
+        zone: GeoZone::Japan,
+    },
+    ServerRegionInfo {
+        code: "ap-manila",
+        api_region: "ap",
+        label: "AP / Manila (Philippines)",
+        short_label: "Manila",
+        yt_region_code: "PH",
+        accept_lang: "en-PH,tl;q=0.9,en;q=0.8",
+        search_region_term: "Philippines Manila",
+        twitch_lang: "tl",
+        zone: GeoZone::Sea,
+    },
+    ServerRegionInfo {
+        code: "ap-hongkong",
+        api_region: "ap",
+        label: "AP / Hong Kong",
+        short_label: "Hong Kong",
+        yt_region_code: "HK",
+        accept_lang: "zh-HK,en-HK;q=0.9,en;q=0.8",
+        search_region_term: "Hong Kong",
+        twitch_lang: "zh",
+        zone: GeoZone::Sea,
+    },
+    ServerRegionInfo {
+        code: "ap-sydney",
+        api_region: "ap",
+        label: "AP / Sydney (OCE)",
+        short_label: "Sydney",
+        yt_region_code: "AU",
+        accept_lang: "en-AU,en;q=0.9",
+        search_region_term: "OCE Australia",
+        twitch_lang: "en",
+        zone: GeoZone::Oce,
+    },
+    ServerRegionInfo {
+        code: "kr-seoul",
+        api_region: "kr",
+        label: "KR / Seoul (Korea)",
+        short_label: "Seoul",
+        yt_region_code: "KR",
+        accept_lang: "ko-KR,ko;q=0.9,en;q=0.7",
+        search_region_term: "Korea KR",
+        twitch_lang: "ko",
+        zone: GeoZone::Korea,
+    },
+    ServerRegionInfo {
+        code: "na-austin",
+        api_region: "na",
+        label: "NA / Austin & Dallas (Texas)",
+        short_label: "Austin / TX",
+        yt_region_code: "US",
+        accept_lang: "en-US,en;q=0.9",
+        search_region_term: "NA Texas",
+        twitch_lang: "en",
+        zone: GeoZone::Na,
+    },
+    ServerRegionInfo {
+        code: "na-us-east",
+        api_region: "na",
+        label: "NA / US East (Virginia / Georgia / Illinois)",
+        short_label: "US East",
+        yt_region_code: "US",
+        accept_lang: "en-US,en;q=0.9",
+        search_region_term: "NA East",
+        twitch_lang: "en",
+        zone: GeoZone::Na,
+    },
+    ServerRegionInfo {
+        code: "na-us-west",
+        api_region: "na",
+        label: "NA / US West (California / Oregon)",
+        short_label: "US West",
+        yt_region_code: "US",
+        accept_lang: "en-US,en;q=0.9",
+        search_region_term: "NA West",
+        twitch_lang: "en",
+        zone: GeoZone::Na,
+    },
+    ServerRegionInfo {
+        code: "latam-mexico",
+        api_region: "na",
+        label: "LATAM / Mexico, Bogota & Santiago",
+        short_label: "LATAM",
+        yt_region_code: "MX",
+        accept_lang: "es-MX,es;q=0.9,en;q=0.7",
+        search_region_term: "LATAM",
+        twitch_lang: "es",
+        zone: GeoZone::Latam,
+    },
+    ServerRegionInfo {
+        code: "br-saopaulo",
+        api_region: "na",
+        label: "BR / Sao Paulo (Brazil)",
+        short_label: "Brazil",
+        yt_region_code: "BR",
+        accept_lang: "pt-BR,pt;q=0.9,en;q=0.7",
+        search_region_term: "Brasil",
+        twitch_lang: "pt",
+        zone: GeoZone::Brazil,
+    },
+    ServerRegionInfo {
+        code: "eu-london",
+        api_region: "eu",
+        label: "EU / London (UK)",
+        short_label: "London",
+        yt_region_code: "GB",
+        accept_lang: "en-GB,en;q=0.9",
+        search_region_term: "EU UK",
+        twitch_lang: "en",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-frankfurt",
+        api_region: "eu",
+        label: "EU / Frankfurt (Germany / Central)",
+        short_label: "Frankfurt",
+        yt_region_code: "DE",
+        accept_lang: "de-DE,en;q=0.8",
+        search_region_term: "EU Frankfurt",
+        twitch_lang: "de",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-paris",
+        api_region: "eu",
+        label: "EU / Paris (France)",
+        short_label: "Paris",
+        yt_region_code: "FR",
+        accept_lang: "fr-FR,en;q=0.8",
+        search_region_term: "France EU",
+        twitch_lang: "fr",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-stockholm",
+        api_region: "eu",
+        label: "EU / Stockholm (Nordics)",
+        short_label: "Stockholm",
+        yt_region_code: "SE",
+        accept_lang: "sv-SE,en;q=0.9",
+        search_region_term: "EU Nordics",
+        twitch_lang: "en",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-warsaw",
+        api_region: "eu",
+        label: "EU / Warsaw (Poland)",
+        short_label: "Warsaw",
+        yt_region_code: "PL",
+        accept_lang: "pl-PL,en;q=0.8",
+        search_region_term: "Poland EU",
+        twitch_lang: "pl",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-madrid",
+        api_region: "eu",
+        label: "EU / Madrid (Spain)",
+        short_label: "Madrid",
+        yt_region_code: "ES",
+        accept_lang: "es-ES,en;q=0.8",
+        search_region_term: "Spain EU",
+        twitch_lang: "es",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-istanbul",
+        api_region: "eu",
+        label: "EU / Istanbul (Turkey)",
+        short_label: "Istanbul",
+        yt_region_code: "TR",
+        accept_lang: "tr-TR,en;q=0.8",
+        search_region_term: "Turkey TR",
+        twitch_lang: "tr",
+        zone: GeoZone::Eu,
+    },
+    ServerRegionInfo {
+        code: "eu-bahrain",
+        api_region: "eu",
+        label: "EU / Bahrain (Middle East)",
+        short_label: "Bahrain",
+        yt_region_code: "AE",
+        accept_lang: "ar-AE,en;q=0.9",
+        search_region_term: "Middle East Bahrain",
+        twitch_lang: "ar",
+        zone: GeoZone::MiddleEast,
+    },
+    ServerRegionInfo {
+        code: "eu-capetown",
+        api_region: "eu",
+        label: "EU / Cape Town (South Africa)",
+        short_label: "Cape Town",
+        yt_region_code: "ZA",
+        accept_lang: "en-ZA,en;q=0.9",
+        search_region_term: "South Africa",
+        twitch_lang: "en",
+        zone: GeoZone::SouthAfrica,
+    },
+];
+
+fn server_region_by_code(code: &str) -> Option<&'static ServerRegionInfo> {
+    let norm = code.trim().to_ascii_lowercase();
+    if let Some(info) = SERVER_REGIONS.iter().find(|r| r.code == norm) {
+        return Some(info);
+    }
+    match norm.as_str() {
+        "ap" | "mumbai" | "india" => SERVER_REGIONS.iter().find(|r| r.code == "ap-mumbai"),
+        "singapore" | "sg" => SERVER_REGIONS.iter().find(|r| r.code == "ap-singapore"),
+        "tokyo" | "japan" | "jp" => SERVER_REGIONS.iter().find(|r| r.code == "ap-tokyo"),
+        "manila" | "philippines" | "ph" => SERVER_REGIONS.iter().find(|r| r.code == "ap-manila"),
+        "hongkong" | "hong kong" | "hk" => SERVER_REGIONS.iter().find(|r| r.code == "ap-hongkong"),
+        "sydney" | "oce" => SERVER_REGIONS.iter().find(|r| r.code == "ap-sydney"),
+        "kr" | "seoul" | "korea" => SERVER_REGIONS.iter().find(|r| r.code == "kr-seoul"),
+        "na" | "austin" | "texas" | "dallas" => SERVER_REGIONS.iter().find(|r| r.code == "na-austin"),
+        "us-east" | "virginia" => SERVER_REGIONS.iter().find(|r| r.code == "na-us-east"),
+        "us-west" | "california" | "oregon" => SERVER_REGIONS.iter().find(|r| r.code == "na-us-west"),
+        "latam" | "mexico" => SERVER_REGIONS.iter().find(|r| r.code == "latam-mexico"),
+        "br" | "brazil" | "saopaulo" => SERVER_REGIONS.iter().find(|r| r.code == "br-saopaulo"),
+        "eu" | "frankfurt" => SERVER_REGIONS.iter().find(|r| r.code == "eu-frankfurt"),
+        "london" | "uk" => SERVER_REGIONS.iter().find(|r| r.code == "eu-london"),
+        "paris" => SERVER_REGIONS.iter().find(|r| r.code == "eu-paris"),
+        "stockholm" => SERVER_REGIONS.iter().find(|r| r.code == "eu-stockholm"),
+        "warsaw" => SERVER_REGIONS.iter().find(|r| r.code == "eu-warsaw"),
+        "madrid" => SERVER_REGIONS.iter().find(|r| r.code == "eu-madrid"),
+        "istanbul" => SERVER_REGIONS.iter().find(|r| r.code == "eu-istanbul"),
+        "bahrain" => SERVER_REGIONS.iter().find(|r| r.code == "eu-bahrain"),
+        "capetown" | "cape town" => SERVER_REGIONS.iter().find(|r| r.code == "eu-capetown"),
+        _ => None,
+    }
+}
+
+fn parse_game_pod_to_server(pod: &str) -> Option<&'static str> {
+    let p = pod.to_ascii_lowercase();
+    if p.contains("mumbai") || p.contains("ap-south-1") || p.contains("bom") {
+        Some("ap-mumbai")
+    } else if p.contains("manila") || p.contains("mnl") {
+        Some("ap-manila")
+    } else if p.contains("tokyo") || p.contains("ap-northeast-1") || p.contains("tyo") || p.contains("japan") {
+        Some("ap-tokyo")
+    } else if p.contains("singapore") || p.contains("ap-southeast-1") || p.contains("sgp") {
+        Some("ap-singapore")
+    } else if p.contains("hongkong") || p.contains("hong-kong") || p.contains("ap-east-1") || p.contains("hkg") {
+        Some("ap-hongkong")
+    } else if p.contains("sydney") || p.contains("ap-southeast-2") || p.contains("syd") {
+        Some("ap-sydney")
+    } else if p.contains("seoul") || p.contains("ap-northeast-2") || p.contains("icn") {
+        Some("kr-seoul")
+    } else if p.contains("austin") || p.contains("texas") || p.contains("dallas") || p.contains("dfw") {
+        Some("na-austin")
+    } else if p.contains("ashburn")
+        || p.contains("virginia")
+        || p.contains("atlanta")
+        || p.contains("georgia")
+        || p.contains("chicago")
+        || p.contains("illinois")
+        || p.contains("miami")
+        || p.contains("us-east")
+    {
+        Some("na-us-east")
+    } else if p.contains("california") || p.contains("sanjose") || p.contains("oregon") || p.contains("us-west") {
+        Some("na-us-west")
+    } else if p.contains("saopaulo") || p.contains("sa-east-1") || p.contains("gru") {
+        Some("br-saopaulo")
+    } else if p.contains("mexico") || p.contains("bogota") || p.contains("santiago") {
+        Some("latam-mexico")
+    } else if p.contains("london") || p.contains("eu-west-2") {
+        Some("eu-london")
+    } else if p.contains("frankfurt") || p.contains("eu-central-1") {
+        Some("eu-frankfurt")
+    } else if p.contains("paris") || p.contains("eu-west-3") {
+        Some("eu-paris")
+    } else if p.contains("stockholm") || p.contains("eu-north-1") {
+        Some("eu-stockholm")
+    } else if p.contains("warsaw") {
+        Some("eu-warsaw")
+    } else if p.contains("madrid") || p.contains("eu-south-2") {
+        Some("eu-madrid")
+    } else if p.contains("istanbul") {
+        Some("eu-istanbul")
+    } else if p.contains("bahrain") || p.contains("me-south-1") || p.contains("dubai") {
+        Some("eu-bahrain")
+    } else if p.contains("capetown") || p.contains("af-south-1") {
+        Some("eu-capetown")
+    } else {
+        None
+    }
+}
+
+fn canonical_api_region(s: &str) -> Option<&'static str> {
+    if let Some(reg) = server_region_by_code(s) {
+        return Some(reg.api_region);
+    }
     match s.trim().to_ascii_lowercase().as_str() {
         "ap" => Some("ap"),
         "na" | "latam" | "br" => Some("na"),
@@ -500,20 +943,420 @@ fn canonical_shard(s: &str) -> Option<&'static str> {
     }
 }
 
-fn shard_label(shard: &str) -> &'static str {
-    match shard {
-        "ap" => "AP / Mumbai",
-        "na" => "NA / Americas",
-        "eu" => "EU / Europe",
-        "kr" => "KR / Korea",
-        _ => "AP / Mumbai",
+fn effective_server_region(
+    config: &AppConfig,
+    detected_server: &str,
+    detected_api_region: &str,
+) -> &'static ServerRegionInfo {
+    if !config.server_override.eq_ignore_ascii_case("auto") {
+        if let Some(info) = server_region_by_code(&config.server_override) {
+            return info;
+        }
+    }
+    server_region_by_code(detected_server)
+        .or_else(|| server_region_by_code(detected_api_region))
+        .unwrap_or(&SERVER_REGIONS[0])
+}
+
+fn geo_zone_label(zone: GeoZone) -> &'static str {
+    match zone {
+        GeoZone::India => "India / Mumbai",
+        GeoZone::Sea => "SEA / Manila / Singapore",
+        GeoZone::Japan => "Japan / Tokyo",
+        GeoZone::Korea => "Korea / Seoul",
+        GeoZone::Oce => "OCE / Sydney",
+        GeoZone::Na => "North America",
+        GeoZone::Latam => "LATAM",
+        GeoZone::Brazil => "Brazil",
+        GeoZone::Eu => "Europe",
+        GeoZone::MiddleEast => "Middle East",
+        GeoZone::SouthAfrica => "South Africa",
     }
 }
 
-fn effective_shard(config: &AppConfig, detected: &str) -> &'static str {
-    canonical_shard(&config.shard_override)
-        .or_else(|| canonical_shard(detected))
-        .unwrap_or("ap")
+fn zones_compatible(expected: GeoZone, detected: GeoZone) -> bool {
+    if expected == detected {
+        return true;
+    }
+    matches!(
+        (expected, detected),
+        (GeoZone::India, GeoZone::Sea)
+            | (GeoZone::Sea, GeoZone::India)
+            | (GeoZone::Sea, GeoZone::Japan)
+            | (GeoZone::Japan, GeoZone::Sea)
+            | (GeoZone::Japan, GeoZone::Korea)
+            | (GeoZone::Korea, GeoZone::Japan)
+            | (GeoZone::Sea, GeoZone::Oce)
+            | (GeoZone::Oce, GeoZone::Sea)
+            | (GeoZone::Na, GeoZone::Latam)
+            | (GeoZone::Latam, GeoZone::Na)
+            | (GeoZone::Latam, GeoZone::Brazil)
+            | (GeoZone::Brazil, GeoZone::Latam)
+            | (GeoZone::Eu, GeoZone::MiddleEast)
+            | (GeoZone::MiddleEast, GeoZone::Eu)
+    )
+}
+
+fn has_ascii_word(haystack_lower: &str, needle: &str) -> bool {
+    let bytes = haystack_lower.as_bytes();
+    let nlen = needle.len();
+    if nlen == 0 || bytes.len() < nlen {
+        return false;
+    }
+    let mut idx = 0usize;
+    while let Some(pos) = haystack_lower[idx..].find(needle) {
+        let start = idx + pos;
+        let end = start + nlen;
+        let left_ok = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+        let right_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        if left_ok && right_ok {
+            return true;
+        }
+        idx = start + 1;
+    }
+    false
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegionEvidence {
+    /// Explicit Valorant in-game server reference (highest authority).
+    InGameServer(GeoZone),
+    /// Explicit streaming region/country tag (secondary authority).
+    StreamingRegion(GeoZone),
+    /// Unambiguous non-English broadcast language cue (lowest authority; never assumed to equal server alone).
+    LanguageHint(GeoZone),
+    /// No verifiable region signal found.
+    Unknown,
+}
+
+impl RegionEvidence {
+    fn zone(self) -> Option<GeoZone> {
+        match self {
+            RegionEvidence::InGameServer(z)
+            | RegionEvidence::StreamingRegion(z)
+            | RegionEvidence::LanguageHint(z) => Some(z),
+            RegionEvidence::Unknown => None,
+        }
+    }
+}
+
+/// Distinguishes actual in-game server cues from streaming region tags and language hints.
+fn classify_region_evidence(text: &str, lang_code: Option<&str>) -> RegionEvidence {
+    let lower = text.to_ascii_lowercase();
+
+    // 1. Highest priority: explicit in-game Valorant server cues
+    const IN_GAME_SERVER_MAP: &[(&[&str], GeoZone)] = &[
+        (&["mumbai server", "mumbai lobby", "ind server", "india server"], GeoZone::India),
+        (&["tokyo server", "tokyo lobby", "jp server", "japan server"], GeoZone::Japan),
+        (&["manila server", "singapore server", "sg server", "hk server", "hong kong server", "sea server"], GeoZone::Sea),
+        (&["seoul server", "kr server", "korea server"], GeoZone::Korea),
+        (&["sydney server", "oce server", "oce ranked"], GeoZone::Oce),
+        (
+            &[
+                "austin server", "texas server", "dallas server", "na east", "na west", "na central",
+                "na server", "na ranked", "na radiant", "na immortal", "na ascendant", "us east", "us west",
+                "illinois server", "virginia server", "georgia server", "oregon server", "california server",
+            ],
+            GeoZone::Na,
+        ),
+        (&["br server", "sao paulo server"], GeoZone::Brazil),
+        (&["latam server", "mexico server", "bogota server", "santiago server"], GeoZone::Latam),
+        (&["bahrain server", "dubai server", "mena server"], GeoZone::MiddleEast),
+        (&["cape town server"], GeoZone::SouthAfrica),
+        (
+            &[
+                "frankfurt server", "london server", "paris server", "stockholm server",
+                "warsaw server", "madrid server", "istanbul server", "eu server", "eu ranked", "emea ranked",
+            ],
+            GeoZone::Eu,
+        ),
+    ];
+    for (keys, zone) in IN_GAME_SERVER_MAP {
+        if keys.iter().any(|k| has_ascii_word(&lower, k)) {
+            return RegionEvidence::InGameServer(*zone);
+        }
+    }
+
+    // 2. Secondary priority: explicit regional / broadcast location cues
+    const INDIA_KEYS: &[&str] = &["mumbai", "india", "indian", "hindi", "hinglish", "ist", "delhi", "hyderabad"];
+    if INDIA_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[in]") || lower.contains("(in)") {
+        return RegionEvidence::StreamingRegion(GeoZone::India);
+    }
+    const JAPAN_KEYS: &[&str] = &["tokyo", "japan", "japanese", "jpn", "jst", "nihon"];
+    if JAPAN_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[jp]") || lower.contains("(jp)") {
+        return RegionEvidence::StreamingRegion(GeoZone::Japan);
+    }
+    const SEA_KEYS: &[&str] = &[
+        "manila", "philippines", "pinoy", "tagalog", "filipino", "singapore", "hong kong",
+        "indonesia", "indo", "malaysia", "vietnam", "thailand", "pht",
+    ];
+    if SEA_KEYS.iter().any(|k| has_ascii_word(&lower, k))
+        || lower.contains("[ph]")
+        || lower.contains("[sg]")
+        || lower.contains("[sea]")
+    {
+        return RegionEvidence::StreamingRegion(GeoZone::Sea);
+    }
+    const KOREA_KEYS: &[&str] = &["seoul", "korea", "korean", "kst"];
+    if KOREA_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[kr]") || lower.contains("(kr)") {
+        return RegionEvidence::StreamingRegion(GeoZone::Korea);
+    }
+    const OCE_KEYS: &[&str] = &["sydney", "australia", "aussie", "new zealand"];
+    if OCE_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[oce]") {
+        return RegionEvidence::StreamingRegion(GeoZone::Oce);
+    }
+    const NA_KEYS: &[&str] = &[
+        "usa", "america", "american", "texas", "austin", "dallas", "chicago", "illinois",
+        "virginia", "georgia", "california", "oregon", "new york", "canada", "toronto",
+        "est", "pst", "cst", "mst", "vct americas",
+    ];
+    if NA_KEYS.iter().any(|k| has_ascii_word(&lower, k))
+        || lower.contains("[na]")
+        || lower.contains("(na)")
+        || lower.contains("[us]")
+    {
+        return RegionEvidence::StreamingRegion(GeoZone::Na);
+    }
+    const BR_KEYS: &[&str] = &["brasil", "brazil", "sao paulo", "portugues", "brt"];
+    if BR_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[br]") {
+        return RegionEvidence::StreamingRegion(GeoZone::Brazil);
+    }
+    const LATAM_KEYS: &[&str] = &["latam", "mexico", "bogota", "santiago", "argentina", "chile", "colombia", "peru"];
+    if LATAM_KEYS.iter().any(|k| has_ascii_word(&lower, k)) {
+        return RegionEvidence::StreamingRegion(GeoZone::Latam);
+    }
+    const ME_KEYS: &[&str] = &["bahrain", "dubai", "mena", "saudi", "uae", "middle east"];
+    if ME_KEYS.iter().any(|k| has_ascii_word(&lower, k)) {
+        return RegionEvidence::StreamingRegion(GeoZone::MiddleEast);
+    }
+    const ZA_KEYS: &[&str] = &["cape town", "south africa"];
+    if ZA_KEYS.iter().any(|k| has_ascii_word(&lower, k)) {
+        return RegionEvidence::StreamingRegion(GeoZone::SouthAfrica);
+    }
+    const EU_KEYS: &[&str] = &[
+        "eu", "euw", "emea", "europe", "frankfurt", "london", "paris", "stockholm", "warsaw",
+        "madrid", "istanbul", "turkey", "turkish", "germany", "german", "france", "french",
+        "poland", "polish", "spain", "uk", "british", "cet", "cest", "bst",
+    ];
+    if EU_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[eu]") || lower.contains("(eu)") {
+        return RegionEvidence::StreamingRegion(GeoZone::Eu);
+    }
+
+    // 3. Lowest priority: unambiguous non-Latin script or broadcast language code (English is never assumed)
+    for ch in text.chars() {
+        match ch {
+            '\u{0900}'..='\u{097F}'
+            | '\u{0980}'..='\u{09FF}'
+            | '\u{0B80}'..='\u{0BFF}'
+            | '\u{0C00}'..='\u{0C7F}'
+            | '\u{0D00}'..='\u{0D7F}' => return RegionEvidence::LanguageHint(GeoZone::India),
+            '\u{3040}'..='\u{30FF}' => return RegionEvidence::LanguageHint(GeoZone::Japan),
+            '\u{AC00}'..='\u{D7AF}' => return RegionEvidence::LanguageHint(GeoZone::Korea),
+            '\u{0E00}'..='\u{0E7F}' => return RegionEvidence::LanguageHint(GeoZone::Sea),
+            '\u{0600}'..='\u{06FF}' => return RegionEvidence::LanguageHint(GeoZone::MiddleEast),
+            '\u{0400}'..='\u{04FF}' => return RegionEvidence::LanguageHint(GeoZone::Eu),
+            _ => {}
+        }
+    }
+    if let Some(lang) = lang_code {
+        match lang.trim().to_ascii_lowercase().as_str() {
+            "hi" | "ta" | "te" | "ml" | "bn" | "mr" | "pa" => return RegionEvidence::LanguageHint(GeoZone::India),
+            "ja" => return RegionEvidence::LanguageHint(GeoZone::Japan),
+            "ko" => return RegionEvidence::LanguageHint(GeoZone::Korea),
+            "tl" | "fil" | "th" | "vi" | "id" | "ms" => return RegionEvidence::LanguageHint(GeoZone::Sea),
+            "pt" => return RegionEvidence::LanguageHint(GeoZone::Brazil),
+            "ar" => return RegionEvidence::LanguageHint(GeoZone::MiddleEast),
+            "de" | "fr" | "pl" | "ru" | "tr" | "it" | "sv" | "nl" | "uk" | "cs" | "ro" | "hu" => {
+                return RegionEvidence::LanguageHint(GeoZone::Eu)
+            }
+            _ => {}
+        }
+    }
+
+    RegionEvidence::Unknown
+}
+
+fn detect_text_geo_zone(text: &str, lang_code: Option<&str>) -> Option<GeoZone> {
+    classify_region_evidence(text, lang_code).zone()
+}
+
+fn is_generic_ign(norm: &str) -> bool {
+    const GENERIC: &[&str] = &[
+        "valorant", "player", "gamer", "gaming", "stream", "streamer", "live", "official", "real",
+        "jett", "reyna", "omen", "sova", "sage", "clove", "iso", "raze", "viper", "cypher", "chamber",
+        "phoenix", "neon", "yoru", "skye", "fade", "gekko", "deadlock", "breach", "harbor", "astra",
+        "killjoy", "brimstone", "kayo", "vyse", "tejo", "waylay", "shadow", "ghost", "king", "queen",
+        "alpha", "omega", "dark", "angel", "demon", "ninja", "sniper", "clutch", "radiant", "immortal",
+        "diamond", "gold", "silver", "iron", "bronze", "vandal", "phantom", "operator", "sheriff",
+        "ace", "smurf", "carry", "toxic", "chill", "vibe", "zero", "hero", "nova", "apex", "echo",
+    ];
+    GENERIC.contains(&norm)
+}
+
+fn looks_like_valorant_stream(title: &str, channel: &str) -> bool {
+    let combined = format!("{title} {channel}").to_ascii_lowercase();
+    const VAL_HINTS: &[&str] = &[
+        "valorant", "valo", "vct", "radiant", "immortal", "ascendant", "premier", "ranked", "comp",
+        "ascent", "bind", "haven", "split", "icebox", "breeze", "fracture", "pearl", "lotus", "sunset",
+        "abyss", "corrode", "jett", "reyna", "clove", "omen", "sova", "cypher", "chamber", "raze",
+    ];
+    VAL_HINTS.iter().any(|k| has_ascii_word(&combined, k))
+}
+
+/// Multi-signal heuristic scorer. Never promotes heuristic matches to `Confirmed` (which requires
+/// verified database match + compatible server, or direct match-chat link). Rejects incompatible
+/// regions (e.g., NA/US streamer while user is playing on Mumbai server) and marks unknown regions
+/// strictly as `Unverified`.
+fn score_heuristic_candidate(
+    platform: &str,
+    cleaned_ign: &str,
+    channel: &str,
+    title: &str,
+    url: &str,
+    lang_code: Option<&str>,
+    game_confirmed: bool,
+    region: &ServerRegionInfo,
+) -> Option<LikelyStreamerCandidate> {
+    let ign_norm = normalize(cleaned_ign);
+    let chan_norm = normalize(channel);
+    if ign_norm.chars().count() < 4 || chan_norm.is_empty() || is_generic_ign(&ign_norm) {
+        return None;
+    }
+
+    if !game_confirmed && !looks_like_valorant_stream(title, channel) {
+        return None;
+    }
+
+    // 1. Username-to-channel signal (similar usernames alone cannot confirm a match)
+    let is_exact_name = chan_norm == ign_norm;
+    let (mut score, name_reason): (i32, &str) = if is_exact_name {
+        (46, "Exact channel handle")
+    } else if chan_norm.starts_with(&ign_norm) || chan_norm.ends_with(&ign_norm) {
+        let ratio = (ign_norm.len() * 100) / chan_norm.len().max(1);
+        if ratio < 55 {
+            return None;
+        }
+        (36, "Close handle match")
+    } else if chan_norm.contains(&ign_norm) {
+        let ratio = (ign_norm.len() * 100) / chan_norm.len().max(1);
+        if ign_norm.len() < 5 || ratio < 55 {
+            return None;
+        }
+        (28, "Channel contains IGN")
+    } else if ign_norm.contains(&chan_norm) && chan_norm.len() >= 5 {
+        let ratio = (chan_norm.len() * 100) / ign_norm.len().max(1);
+        if ratio < 60 {
+            return None;
+        }
+        (28, "IGN matches channel")
+    } else {
+        return None;
+    };
+
+    // 2. Game category signal
+    if game_confirmed {
+        score += 14;
+    } else if has_ascii_word(&title.to_ascii_lowercase(), "valorant") {
+        score += 8;
+    }
+
+    // 3. Server-priority region compatibility (InGameServer > StreamingRegion > LanguageHint > Unknown)
+    let combined_text = format!("{title} {channel}");
+    let evidence = classify_region_evidence(&combined_text, lang_code);
+    let (tier, region_hint, server_status, region_note) = match evidence {
+        RegionEvidence::InGameServer(dz) if dz == region.zone => {
+            score += 28;
+            (
+                if score >= 74 { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
+                geo_zone_label(dz).to_string(),
+                "In-Game Server Match".to_string(),
+                format!("Explicit {} server cue", region.short_label),
+            )
+        }
+        RegionEvidence::InGameServer(dz) if zones_compatible(region.zone, dz) => {
+            score += 18;
+            (
+                if score >= 74 { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
+                geo_zone_label(dz).to_string(),
+                "Compatible Nearby Server".to_string(),
+                format!("Nearby server ({})", geo_zone_label(dz)),
+            )
+        }
+        RegionEvidence::StreamingRegion(dz) if dz == region.zone => {
+            score += 20;
+            (
+                if score >= 72 && is_exact_name { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
+                geo_zone_label(dz).to_string(),
+                "Streaming Region Match".to_string(),
+                format!("Streaming region matches {}", region.short_label),
+            )
+        }
+        RegionEvidence::StreamingRegion(dz) if zones_compatible(region.zone, dz) => {
+            score += 12;
+            (
+                if score >= 72 && is_exact_name { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
+                geo_zone_label(dz).to_string(),
+                "Compatible Streaming Region".to_string(),
+                format!("Compatible region ({})", geo_zone_label(dz)),
+            )
+        }
+        RegionEvidence::LanguageHint(dz) if dz == region.zone || zones_compatible(region.zone, dz) => {
+            // Language alone is never treated as proof of in-game server; cap below Probable unless exact + confirmed game
+            score += 8;
+            (
+                ConfidenceTier::Unverified,
+                format!("{} (Language hint only)", geo_zone_label(dz)),
+                "Server Unverified (Language Hint)".to_string(),
+                "Broadcast language matches region (server unverified)".to_string(),
+            )
+        }
+        RegionEvidence::InGameServer(_conflict)
+        | RegionEvidence::StreamingRegion(_conflict)
+        | RegionEvidence::LanguageHint(_conflict) => {
+            // Incompatible continent/server (e.g., NA/US streamer while playing on Mumbai) -> reject
+            return None;
+        }
+        RegionEvidence::Unknown => {
+            // Unknown server/region: NEVER confirm; only surface as Unverified if exact handle + confirmed VALORANT
+            if !is_exact_name || !game_confirmed {
+                return None;
+            }
+            score = score.min(58);
+            (
+                ConfidenceTier::Unverified,
+                "Server Unknown".to_string(),
+                "Server Unverified".to_string(),
+                "Streamer server could not be verified".to_string(),
+            )
+        }
+    };
+
+    let final_conf = match tier {
+        ConfidenceTier::Probable => score.clamp(68, 88) as u8,
+        ConfidenceTier::Unverified => score.clamp(42, 62) as u8,
+        ConfidenceTier::Confirmed => score.clamp(90, 100) as u8,
+    };
+    if final_conf < 48 {
+        return None;
+    }
+
+    let match_reason = if game_confirmed {
+        format!("{name_reason} + VALORANT live + {region_note}")
+    } else {
+        format!("{name_reason} + {region_note}")
+    };
+
+    Some(LikelyStreamerCandidate {
+        platform: platform.to_string(),
+        channel: channel.to_string(),
+        title: title.to_string(),
+        url: url.to_string(),
+        confidence: final_conf,
+        confidence_tier: tier.as_str().to_string(),
+        region_hint,
+        server_match_status: server_status,
+        match_reason,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -551,6 +1394,7 @@ struct MatchContext {
     map_name: String,
     queue_name: String,
     my_agent: String,
+    server_region: Option<String>,
     players: Vec<MatchPlayerInfo>,
 }
 
@@ -559,6 +1403,33 @@ struct MatchPlayerInfo {
     record: RiotNameRecord,
     team_relation: String,
     agent_name: String,
+    party_id: String,
+    is_party_member: bool,
+}
+
+/// Excludes self, blank names, duplicates, and (when enabled) party members before external scans.
+fn filter_scannable_players(
+    players: Vec<MatchPlayerInfo>,
+    my_puuid: &str,
+    skip_party_members: bool,
+) -> (Vec<MatchPlayerInfo>, usize) {
+    let mut seen = HashSet::new();
+    let mut scannable = Vec::new();
+    let mut party_skipped = 0usize;
+    for player_info in players {
+        if player_info.record.subject == my_puuid
+            || player_info.record.game_name.trim().is_empty()
+            || !seen.insert(player_info.record.subject.clone())
+        {
+            continue;
+        }
+        if skip_party_members && player_info.is_party_member {
+            party_skipped += 1;
+            continue;
+        }
+        scannable.push(player_info);
+    }
+    (scannable, party_skipped)
 }
 
 struct RiotAuth {
@@ -608,6 +1479,33 @@ fn last_path_segment(url: &str) -> String {
     strip_query(url).trim_end_matches('/').rsplit('/').next().unwrap_or("").to_string()
 }
 
+fn parse_aliases_csv(raw: &str, primary_riot_id: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    seen.insert(primary_riot_id.trim().to_ascii_lowercase());
+    let mut out = Vec::new();
+    for part in raw.split(',') {
+        let a = part.trim();
+        if a.is_empty() || a.chars().count() > 24 || !a.contains('#') {
+            continue;
+        }
+        if seen.insert(a.to_ascii_lowercase()) {
+            out.push(a.to_string());
+        }
+    }
+    out
+}
+
+/// Checks exact Riot ID or verified alias in the community/local streamer database.
+fn directory_entry_matches_player(entry: &DirectoryStreamer, riot_id: &str) -> Option<&'static str> {
+    if entry.riot_id.eq_ignore_ascii_case(riot_id) {
+        return Some("Exact Riot ID in streamer database");
+    }
+    if entry.aliases.iter().any(|a| a.eq_ignore_ascii_case(riot_id)) {
+        return Some("Known streamer alias in database");
+    }
+    None
+}
+
 /// Returns a cleaned entry only if platform + URL host are consistent and safe.
 fn sanitize_directory_entry(d: &DirectoryStreamer) -> Option<DirectoryStreamer> {
     let platform = canonical_platform(&d.platform)?;
@@ -615,11 +1513,59 @@ fn sanitize_directory_entry(d: &DirectoryStreamer) -> Option<DirectoryStreamer> 
     if !host_allowed(platform, &host_of(url)?) || !d.riot_id.contains('#') {
         return None;
     }
+    let riot_id = d.riot_id.trim().to_string();
+    let cname = short(
+        if !d.channel_name.trim().is_empty() {
+            d.channel_name.trim()
+        } else {
+            d.display_name.trim()
+        },
+        64,
+    );
+    if cname.is_empty() {
+        return None;
+    }
+    let display_name = if d.display_name.trim().is_empty() {
+        cname.clone()
+    } else {
+        short(d.display_name.trim(), 64)
+    };
+    let mut seen_aliases = HashSet::new();
+    seen_aliases.insert(riot_id.to_ascii_lowercase());
+    let mut aliases = Vec::new();
+    for a in &d.aliases {
+        let trimmed = a.trim();
+        if !trimmed.is_empty()
+            && trimmed.contains('#')
+            && trimmed.chars().count() <= 24
+            && seen_aliases.insert(trimmed.to_ascii_lowercase())
+        {
+            aliases.push(trimmed.to_string());
+        }
+    }
+    let channel_id = if d.channel_id.trim().is_empty() {
+        last_path_segment(url)
+    } else {
+        d.channel_id.trim().to_string()
+    };
+    let id = if d.id.trim().is_empty() {
+        format!("{}-{}", normalize(&cname), platform.to_ascii_lowercase())
+    } else {
+        d.id.trim().to_string()
+    };
     Some(DirectoryStreamer {
-        riot_id: d.riot_id.trim().to_string(),
+        id,
+        display_name,
+        riot_id,
+        aliases,
         platform: platform.to_string(),
-        channel_name: short(d.channel_name.trim(), 64),
+        channel_id,
+        channel_name: cname,
         channel_url: url.to_string(),
+        server_region: d.server_region.trim().to_ascii_lowercase(),
+        verified: d.verified,
+        submitted_at: d.submitted_at.trim().to_string(),
+        source: d.source.trim().to_string(),
     })
 }
 
@@ -1120,25 +2066,25 @@ async fn riot_authenticate(local: &Client, public: &Client) -> Result<RiotAuth> 
     Ok(RiotAuth { access_token: ent.access_token, token: ent.token, subject: ent.subject, version })
 }
 
-async fn latest_match_id(public: &Client, auth: &RiotAuth, shard: &str) -> Result<String> {
+async fn latest_match_id(public: &Client, auth: &RiotAuth, api_region: &str) -> Result<String> {
     let url = format!(
-        "https://pd.{shard}.a.pvp.net/match-history/v1/history/{}?startIndex=0&endIndex=1",
+        "https://pd.{api_region}.a.pvp.net/match-history/v1/history/{}?startIndex=0&endIndex=1",
         auth.subject
     );
     let v = riot_json(riot_headers(public.get(url), auth)).await?;
     v["History"][0]["MatchID"]
         .as_str()
         .map(String::from)
-        .ok_or_else(|| anyhow!("No recent match found on {shard} shard"))
+        .ok_or_else(|| anyhow!("No recent match found on {api_region} server region"))
 }
 
 async fn fetch_match_context(
     public: &Client,
     auth: &RiotAuth,
-    shard: &str,
+    api_region: &str,
     match_id: &str,
 ) -> Result<MatchContext> {
-    let url = format!("https://pd.{shard}.a.pvp.net/match-details/v1/matches/{match_id}");
+    let url = format!("https://pd.{api_region}.a.pvp.net/match-details/v1/matches/{match_id}");
     let details = riot_json(riot_headers(public.get(url), auth)).await?;
 
     let map_name = map_name_from_id(details["matchInfo"]["mapId"].as_str().unwrap_or(""));
@@ -1146,15 +2092,21 @@ async fn fetch_match_context(
         details["matchInfo"]["queueID"].as_str().unwrap_or(""),
         details["matchInfo"]["gameMode"].as_str().unwrap_or(""),
     );
+    let server_region = details["matchInfo"]["gamePodId"]
+        .as_str()
+        .and_then(parse_game_pod_to_server)
+        .map(String::from);
 
-    let mut player_meta: HashMap<String, (String, String)> = HashMap::new();
+    // Extract team, agent, and partyId directly from match-details (zero extra Riot API calls).
+    let mut player_meta: HashMap<String, (String, String, String)> = HashMap::new();
     let mut puuids: Vec<String> = Vec::new();
     if let Some(arr) = details["players"].as_array() {
         for p in arr {
             if let Some(subj) = p["subject"].as_str() {
                 let team = p["teamId"].as_str().unwrap_or("").to_string();
                 let agent = agent_name_from_id(p["characterId"].as_str().unwrap_or(""));
-                player_meta.insert(subj.to_string(), (team, agent));
+                let party_id = p["partyId"].as_str().unwrap_or("").trim().to_string();
+                player_meta.insert(subj.to_string(), (team, agent, party_id));
                 puuids.push(subj.to_string());
             }
         }
@@ -1163,10 +2115,10 @@ async fn fetch_match_context(
         return Err(anyhow!("Match details contained no players yet"));
     }
 
-    let (my_team, my_agent) = player_meta.get(&auth.subject).cloned().unwrap_or_default();
+    let (my_team, my_agent, my_party_id) = player_meta.get(&auth.subject).cloned().unwrap_or_default();
 
     let names_val = riot_json(riot_headers(
-        public.put(format!("https://pd.{shard}.a.pvp.net/name-service/v2/players")).json(&puuids),
+        public.put(format!("https://pd.{api_region}.a.pvp.net/name-service/v2/players")).json(&puuids),
         auth,
     ))
     .await?;
@@ -1176,13 +2128,21 @@ async fn fetch_match_context(
     let players = records
         .into_iter()
         .map(|rec| {
-            let (team, agent) = player_meta.get(&rec.subject).cloned().unwrap_or_default();
+            let (team, agent, party_id) = player_meta.get(&rec.subject).cloned().unwrap_or_default();
             let team_relation = if !my_team.is_empty() && !team.is_empty() && team != "Neutral" {
                 if team == my_team { "Ally".to_string() } else { "Enemy".to_string() }
             } else {
                 String::new()
             };
-            MatchPlayerInfo { record: rec, team_relation, agent_name: agent }
+            let is_party_member =
+                !my_party_id.is_empty() && !party_id.is_empty() && party_id == my_party_id && rec.subject != auth.subject;
+            MatchPlayerInfo {
+                record: rec,
+                team_relation,
+                agent_name: agent,
+                party_id,
+                is_party_member,
+            }
         })
         .collect();
 
@@ -1191,6 +2151,7 @@ async fn fetch_match_context(
         map_name,
         queue_name,
         my_agent,
+        server_region,
         players,
     })
 }
@@ -1200,14 +2161,14 @@ async fn fetch_match_context(
 async fn fetch_match_and_names(
     local: &Client,
     public: &Client,
-    shard: &str,
+    api_region: &str,
     previous: Option<&str>,
     wait_for_new: bool,
 ) -> Result<(String, MatchContext)> {
     let auth = riot_authenticate(local, public).await?;
     let attempts = if wait_for_new { 6 } else { 2 };
     let match_id = retry(attempts, Duration::from_secs(3), || async {
-        let id = latest_match_id(public, &auth, shard).await?;
+        let id = latest_match_id(public, &auth, api_region).await?;
         if wait_for_new && Some(id.as_str()) == previous {
             return Err(anyhow!("Match history has not updated yet"));
         }
@@ -1215,7 +2176,7 @@ async fn fetch_match_and_names(
     })
     .await?;
     let ctx = retry(3, Duration::from_secs(3), || {
-        fetch_match_context(public, &auth, shard, &match_id)
+        fetch_match_context(public, &auth, api_region, &match_id)
     })
     .await?;
     Ok((auth.subject, ctx))
@@ -1256,16 +2217,32 @@ fn decode_entities(s: &str) -> String {
         .replace("&gt;", ">")
 }
 
-async fn http_get_text_status(client: &Client, url: &str) -> Result<(reqwest::StatusCode, String)> {
+async fn http_get_text_status_lang(
+    client: &Client,
+    url: &str,
+    accept_lang: &str,
+) -> Result<(reqwest::StatusCode, String)> {
     let resp = client
         .get(url)
         .header("User-Agent", BROWSER_UA)
-        .header("Accept-Language", "en-IN,en;q=0.9")
+        .header("Accept-Language", accept_lang)
         .send()
         .await?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     Ok((status, body))
+}
+
+async fn http_get_text_status(client: &Client, url: &str) -> Result<(reqwest::StatusCode, String)> {
+    http_get_text_status_lang(client, url, "en-US,en;q=0.9").await
+}
+
+async fn http_get_text_with_lang(client: &Client, url: &str, accept_lang: &str) -> Option<String> {
+    let (status, body) = http_get_text_status_lang(client, url, accept_lang).await.ok()?;
+    if !status.is_success() {
+        return None;
+    }
+    Some(body)
 }
 
 async fn http_get_text(client: &Client, url: &str) -> Option<String> {
@@ -1588,6 +2565,50 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+fn has_newer_release(
+    current_ver: &str,
+    remote_tag: &str,
+    expected_sha256: Option<&str>,
+    current_exe_sha: Option<&str>,
+    remote_sha: Option<&str>,
+    current_build_sha: &str,
+) -> bool {
+    let semver_newer = match (parse_semver(current_ver), parse_semver(remote_tag)) {
+        (Some(cur), Some(rem)) => rem > cur,
+        _ => false,
+    };
+    let semver_older = match (parse_semver(current_ver), parse_semver(remote_tag)) {
+        (Some(cur), Some(rem)) => rem < cur,
+        _ => false,
+    };
+
+    if semver_newer {
+        true
+    } else if semver_older {
+        false
+    } else if let (Some(exp), Some(cur)) = (expected_sha256, current_exe_sha) {
+        !exp.eq_ignore_ascii_case(cur)
+    } else if let Some(rsha) = remote_sha {
+        current_build_sha != "local" && !rsha.eq_ignore_ascii_case(current_build_sha)
+    } else {
+        false
+    }
+}
+
+fn clean_release_changelog(raw_body: &str) -> String {
+    let lines: Vec<String> = raw_body
+        .lines()
+        .map(|l| l.trim_end().to_string())
+        .filter(|l| !l.trim().is_empty())
+        .take(40)
+        .collect();
+    if lines.is_empty() {
+        "No release notes published for this build.".to_string()
+    } else {
+        lines.join("\n")
+    }
+}
+
 async fn check_for_app_update(client: &Client) -> UpdateState {
     let api_url = format!(
         "https://api.github.com/repos/{UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}/releases/latest"
@@ -1604,11 +2625,11 @@ async fn check_for_app_update(client: &Client) -> UpdateState {
     };
 
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return UpdateState::UpToDate(format!(
-            "No published release found yet (running v{APP_VERSION}, build {APP_BUILD_SHA})."
-        ));
+        return UpdateState::Error(
+            "No published GitHub release is available yet. Could not verify update status.".into(),
+        );
     }
-    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+    if resp.status() == reqwest::StatusCode::FORBIDDEN || resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return UpdateState::Error(
             "GitHub API rate limit reached. Try again later or open the Releases page.".into(),
         );
@@ -1643,6 +2664,7 @@ async fn check_for_app_update(client: &Client) -> UpdateState {
         .unwrap_or("")
         .to_string();
     let body = v["body"].as_str().unwrap_or("");
+    let changelog = clean_release_changelog(body);
     let remote_sha = RELEASE_SHA_RE
         .captures(body)
         .map(|c| c[1].chars().take(7).collect::<String>());
@@ -1699,32 +2721,20 @@ async fn check_for_app_update(client: &Client) -> UpdateState {
     }
 
     let current_exe_sha = env::current_exe().ok().and_then(|p| sha256_file(&p));
-
-    let semver_newer = match (parse_semver(APP_VERSION), parse_semver(&tag_name)) {
-        (Some(cur), Some(rem)) => rem > cur,
-        _ => false,
-    };
-    let semver_older = match (parse_semver(APP_VERSION), parse_semver(&tag_name)) {
-        (Some(cur), Some(rem)) => rem < cur,
-        _ => false,
-    };
-
-    let has_update = if semver_newer {
-        true
-    } else if semver_older {
-        false
-    } else if let (Some(exp), Some(cur)) = (&expected_sha256, &current_exe_sha) {
-        !exp.eq_ignore_ascii_case(cur)
-    } else if let Some(rsha) = &remote_sha {
-        APP_BUILD_SHA != "local" && !rsha.eq_ignore_ascii_case(APP_BUILD_SHA)
-    } else {
-        false
-    };
+    let has_update = has_newer_release(
+        APP_VERSION,
+        &tag_name,
+        expected_sha256.as_deref(),
+        current_exe_sha.as_deref(),
+        remote_sha.as_deref(),
+        APP_BUILD_SHA,
+    );
 
     if has_update {
         UpdateState::Available(UpdateReleaseInfo {
             tag_name,
             release_name,
+            changelog,
             download_url,
             html_url,
             expected_sha256,
@@ -1935,15 +2945,21 @@ async fn check_youtube_channel_live(client: &Client, channel_url: &str) -> Optio
     Some((title, url))
 }
 
-/// Heuristic: channel name must contain the cleaned IGN (title-only matches are too noisy).
-async fn check_youtube_live(client: &Client, game_name: &str, api_key: &str) -> Option<(String, String, String)> {
+/// Region-aware multi-candidate YouTube heuristic: scores live Valorant streams and rejects cross-region mismatches.
+async fn check_youtube_live_candidates(
+    client: &Client,
+    game_name: &str,
+    api_key: &str,
+    region: &ServerRegionInfo,
+) -> Vec<LikelyStreamerCandidate> {
     let cleaned = clean_ign(game_name);
     let name_norm = normalize(&cleaned);
-    if name_norm.chars().count() < 4 {
-        return None;
+    if name_norm.chars().count() < 4 || is_generic_ign(&name_norm) {
+        return Vec::new();
     }
     let query = format!("{cleaned} Valorant");
-    let matches = |channel: &str| normalize(channel).contains(&name_norm);
+    let mut raw_hits: Vec<(String, String, String)> = Vec::new();
+    let mut used_api = false;
 
     if !api_key.trim().is_empty() {
         match client
@@ -1953,8 +2969,8 @@ async fn check_youtube_live(client: &Client, game_name: &str, api_key: &str) -> 
                 ("q", query.as_str()),
                 ("type", "video"),
                 ("eventType", "live"),
-                ("regionCode", "IN"),
-                ("maxResults", "5"),
+                ("regionCode", region.yt_region_code),
+                ("maxResults", "10"),
                 ("key", api_key.trim()),
             ])
             .send()
@@ -1963,56 +2979,88 @@ async fn check_youtube_live(client: &Client, game_name: &str, api_key: &str) -> 
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(data) = resp.json::<Value>().await {
                     if let Some(items) = data["items"].as_array() {
+                        used_api = true;
                         for item in items {
                             let video_id = item["id"]["videoId"].as_str().unwrap_or("");
-                            let title = item["snippet"]["title"].as_str().unwrap_or("");
-                            let channel = item["snippet"]["channelTitle"].as_str().unwrap_or("");
-                            if !video_id.is_empty() && matches(channel) {
-                                return Some((
-                                    channel.to_string(),
-                                    decode_entities(title),
+                            let title = decode_entities(item["snippet"]["title"].as_str().unwrap_or(""));
+                            let channel = decode_entities(item["snippet"]["channelTitle"].as_str().unwrap_or(""));
+                            if !video_id.is_empty() && !channel.is_empty() {
+                                raw_hits.push((
+                                    channel,
+                                    title,
                                     format!("https://www.youtube.com/watch?v={video_id}"),
                                 ));
                             }
                         }
-                        return None;
                     }
                 }
             }
-            // Quota exhausted / bad key: fall through to the keyless path.
             Ok(resp) => log(format!("YouTube API returned {}; using keyless fallback", resp.status())),
             Err(e) => log(format!("YouTube API request failed: {e}")),
         }
     }
 
-    let url = format!(
-        "https://www.youtube.com/results?search_query={}&sp=EgJAAQ%3D%3D",
-        urlencode(&query)
-    );
-    let html = http_get_text(client, &url).await?;
-    let caps = YT_DATA_RE.captures(&html)?;
-    let data: Value = serde_json::from_str(&caps[1]).ok()?;
-    let sections = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]
-        ["sectionListRenderer"]["contents"]
-        .as_array()?;
-
-    for section in sections {
-        let Some(items) = section["itemSectionRenderer"]["contents"].as_array() else { continue };
-        for item in items.iter().take(6) {
-            let Some(video) = item.get("videoRenderer") else { continue };
-            let video_id = video["videoId"].as_str().unwrap_or("");
-            let title = video["title"]["runs"][0]["text"].as_str().unwrap_or("");
-            let channel = video["ownerText"]["runs"][0]["text"].as_str().unwrap_or("");
-            if !video_id.is_empty() && matches(channel) {
-                return Some((
-                    channel.to_string(),
-                    title.to_string(),
-                    format!("https://www.youtube.com/watch?v={video_id}"),
-                ));
+    if !used_api {
+        let url = format!(
+            "https://www.youtube.com/results?search_query={}&sp=EgJAAQ%3D%3D&gl={}",
+            urlencode(&query),
+            region.yt_region_code
+        );
+        if let Some(html) = http_get_text_with_lang(client, &url, region.accept_lang).await {
+            if let Some(caps) = YT_DATA_RE.captures(&html) {
+                if let Ok(data) = serde_json::from_str::<Value>(&caps[1]) {
+                    if let Some(sections) = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]
+                        ["sectionListRenderer"]["contents"]
+                        .as_array()
+                    {
+                        for section in sections {
+                            let Some(items) = section["itemSectionRenderer"]["contents"].as_array() else {
+                                continue;
+                            };
+                            for item in items.iter().take(12) {
+                                let Some(video) = item.get("videoRenderer") else {
+                                    continue;
+                                };
+                                let video_id = video["videoId"].as_str().unwrap_or("");
+                                let title = video["title"]["runs"][0]["text"].as_str().unwrap_or("");
+                                let channel = video["ownerText"]["runs"][0]["text"].as_str().unwrap_or("");
+                                if !video_id.is_empty() && !channel.is_empty() {
+                                    raw_hits.push((
+                                        decode_entities(channel),
+                                        decode_entities(title),
+                                        format!("https://www.youtube.com/watch?v={video_id}"),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    None
+
+    let mut seen_urls = HashSet::new();
+    let mut scored = Vec::new();
+    for (channel, title, url) in raw_hits {
+        if !seen_urls.insert(url.clone()) {
+            continue;
+        }
+        if let Some(cand) = score_heuristic_candidate(
+            "YouTube",
+            &cleaned,
+            &channel,
+            &title,
+            &url,
+            None,
+            false,
+            region,
+        ) {
+            scored.push(cand);
+        }
+    }
+    scored.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+    scored.truncate(3);
+    scored
 }
 
 static TWITCH_TOKEN: Mutex<Option<(String, Instant)>> = Mutex::new(None);
@@ -2049,18 +3097,14 @@ async fn get_twitch_app_token(client: &Client, client_id: &str, client_secret: &
     Some(token)
 }
 
-async fn check_twitch_live(
+/// Fetches live Twitch metadata including game name, stream language, and tags.
+async fn fetch_twitch_stream_meta(
     client: &Client,
-    login_or_ign: &str,
+    login: &str,
     is_exact_login: bool,
     client_id: &str,
     bearer_token: Option<&str>,
-) -> Option<(String, String, String)> {
-    let login = if is_exact_login {
-        login_or_ign.trim().to_lowercase()
-    } else {
-        clean_ign(login_or_ign).to_lowercase().replace(' ', "")
-    };
+) -> Option<(String, String, String, String, String, bool)> {
     let min_len = if is_exact_login { 3 } else { 4 };
     if login.len() < min_len || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return None;
@@ -2072,7 +3116,7 @@ async fn check_twitch_live(
             .get("https://api.twitch.tv/helix/streams")
             .header("Client-Id", client_id.trim())
             .header("Authorization", format!("Bearer {token}"))
-            .query(&[("user_login", login.as_str())])
+            .query(&[("user_login", login)])
             .send()
             .await
         {
@@ -2080,25 +3124,43 @@ async fn check_twitch_live(
                 if let Ok(data) = resp.json::<Value>().await {
                     if let Some(stream) = data["data"].as_array().and_then(|a| a.first()) {
                         let game = stream["game_name"].as_str().unwrap_or("");
-                        if is_exact_login || game.eq_ignore_ascii_case("VALORANT") {
-                            let display = stream["user_name"].as_str().unwrap_or(&login).to_string();
+                        let is_val = game.eq_ignore_ascii_case("VALORANT");
+                        if is_exact_login || is_val {
+                            let display = stream["user_name"].as_str().unwrap_or(login).to_string();
                             let title = stream["title"].as_str().unwrap_or("Live on Twitch").to_string();
-                            return Some((display, title, format!("https://www.twitch.tv/{login}")));
+                            let lang = stream["language"].as_str().unwrap_or("").to_string();
+                            let tags = stream["tags"]
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(" ")
+                                })
+                                .unwrap_or_default();
+                            return Some((
+                                display,
+                                title,
+                                format!("https://www.twitch.tv/{login}"),
+                                lang,
+                                tags,
+                                is_val,
+                            ));
                         }
                     }
                     return None;
                 }
             }
             Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                *lock(&TWITCH_TOKEN) = None; // force refresh next scan, fall back to GQL now
+                *lock(&TWITCH_TOKEN) = None;
             }
             _ => {}
         }
     }
 
-    // 2. Keyless public web GraphQL fallback (variables, not string interpolation)
+    // 2. Keyless public web GraphQL fallback (includes broadcastSettings language & tags)
     let body = serde_json::json!({
-        "query": "query($login: String!) { user(login: $login) { displayName stream { title game { name } } } }",
+        "query": "query($login: String!) { user(login: $login) { displayName broadcastSettings { language } stream { title game { name } tags { localizedName } } } }",
         "variables": { "login": login }
     });
     let resp = client
@@ -2115,13 +3177,109 @@ async fn check_twitch_live(
     let stream = &v["data"]["user"]["stream"];
     if stream.is_object() {
         let game = stream["game"]["name"].as_str().unwrap_or("");
-        if is_exact_login || game.eq_ignore_ascii_case("VALORANT") {
-            let display = v["data"]["user"]["displayName"].as_str().unwrap_or(&login).to_string();
+        let is_val = game.eq_ignore_ascii_case("VALORANT");
+        if is_exact_login || is_val {
+            let display = v["data"]["user"]["displayName"].as_str().unwrap_or(login).to_string();
             let title = stream["title"].as_str().unwrap_or("Live on Twitch").to_string();
-            return Some((display, title, format!("https://www.twitch.tv/{login}")));
+            let lang = v["data"]["user"]["broadcastSettings"]["language"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let tags = stream["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t["localizedName"].as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
+            return Some((
+                display,
+                title,
+                format!("https://www.twitch.tv/{login}"),
+                lang,
+                tags,
+                is_val,
+            ));
         }
     }
     None
+}
+
+async fn check_twitch_live(
+    client: &Client,
+    login_or_ign: &str,
+    is_exact_login: bool,
+    client_id: &str,
+    bearer_token: Option<&str>,
+) -> Option<(String, String, String)> {
+    let login = if is_exact_login {
+        login_or_ign.trim().to_lowercase()
+    } else {
+        clean_ign(login_or_ign).to_lowercase().replace(' ', "")
+    };
+    fetch_twitch_stream_meta(client, &login, is_exact_login, client_id, bearer_token)
+        .await
+        .map(|(d, t, u, _, _, _)| (d, t, u))
+}
+
+async fn check_twitch_live_candidates(
+    client: &Client,
+    game_name: &str,
+    client_id: &str,
+    bearer_token: Option<&str>,
+    region: &ServerRegionInfo,
+) -> Vec<LikelyStreamerCandidate> {
+    let cleaned = clean_ign(game_name);
+    let base: String = cleaned
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    if base.len() < 4 || is_generic_ign(&normalize(&cleaned)) {
+        return Vec::new();
+    }
+
+    let mut logins = vec![base.clone()];
+    if base.len() <= 16 && !base.ends_with("tv") && !base.ends_with("ttv") {
+        logins.push(format!("{base}_tv"));
+        logins.push(format!("{base}ttv"));
+    }
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for login in logins {
+        if !seen.insert(login.clone()) {
+            continue;
+        }
+        if let Some((display, title, url, lang, tags, is_val)) =
+            fetch_twitch_stream_meta(client, &login, false, client_id, bearer_token).await
+        {
+            let title_with_tags = if tags.is_empty() {
+                title.clone()
+            } else {
+                format!("{title} {tags}")
+            };
+            let lang_opt = if lang.is_empty() { None } else { Some(lang.as_str()) };
+            if let Some(mut cand) = score_heuristic_candidate(
+                "Twitch",
+                &cleaned,
+                &display,
+                &title_with_tags,
+                &url,
+                lang_opt,
+                is_val,
+                region,
+            ) {
+                cand.title = title;
+                out.push(cand);
+            }
+        }
+    }
+    out.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+    out.truncate(3);
+    out
 }
 
 /// Note: Kick sits behind Cloudflare and may answer 403 at times; that simply yields "not live".
@@ -2153,6 +3311,290 @@ async fn check_kick_live(client: &Client, slug_or_ign: &str, is_exact_slug: bool
         return Some((channel, title, format!("https://kick.com/{slug}")));
     }
     None
+}
+
+async fn check_kick_live_candidates(
+    client: &Client,
+    game_name: &str,
+    region: &ServerRegionInfo,
+) -> Vec<LikelyStreamerCandidate> {
+    let cleaned = clean_ign(game_name);
+    let slug: String = cleaned
+        .to_ascii_lowercase()
+        .replace(' ', "_")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if slug.len() < 4 || is_generic_ign(&normalize(&cleaned)) {
+        return Vec::new();
+    }
+    let resp = match client
+        .get(format!("https://kick.com/api/v2/channels/{slug}"))
+        .header("User-Agent", BROWSER_UA)
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        _ => return Vec::new(),
+    };
+    let Ok(v) = resp.json::<Value>().await else {
+        return Vec::new();
+    };
+    if !v["livestream"].is_object() {
+        return Vec::new();
+    }
+    let title = v["livestream"]["session_title"].as_str().unwrap_or("Live on Kick").to_string();
+    let channel = v["user"]["username"].as_str().unwrap_or(&slug).to_string();
+    let lang = v["livestream"]["language"].as_str();
+    let is_val = v["livestream"]["categories"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .any(|c| c["name"].as_str().unwrap_or("").eq_ignore_ascii_case("VALORANT"))
+        })
+        .unwrap_or(false);
+    let url = format!("https://kick.com/{slug}");
+    score_heuristic_candidate("Kick", &cleaned, &channel, &title, &url, lang, is_val, region)
+        .into_iter()
+        .collect()
+}
+
+/// Optional (off by default) live Twitch + YouTube Valorant streamer recommendations for the active server region.
+async fn fetch_live_recommendations(
+    client: &Client,
+    region: &ServerRegionInfo,
+    youtube_api_key: &str,
+    twitch_client_id: &str,
+    twitch_client_secret: &str,
+) -> Result<Vec<RecommendedStreamer>> {
+    let twitch_token = get_twitch_app_token(client, twitch_client_id, twitch_client_secret).await;
+
+    // Fetch Twitch and YouTube recommendations concurrently
+    let yt_fut = async {
+        let mut list = Vec::new();
+        let query = format!("Valorant live {}", region.search_region_term);
+        let mut used_api = false;
+
+        if !youtube_api_key.trim().is_empty() {
+            if let Ok(resp) = client
+                .get("https://www.googleapis.com/youtube/v3/search")
+                .query(&[
+                    ("part", "snippet"),
+                    ("q", query.as_str()),
+                    ("type", "video"),
+                    ("eventType", "live"),
+                    ("regionCode", region.yt_region_code),
+                    ("maxResults", "8"),
+                    ("key", youtube_api_key.trim()),
+                ])
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(data) = resp.json::<Value>().await {
+                        if let Some(items) = data["items"].as_array() {
+                            used_api = true;
+                            for item in items {
+                                let vid = item["id"]["videoId"].as_str().unwrap_or("");
+                                let title = decode_entities(item["snippet"]["title"].as_str().unwrap_or(""));
+                                let channel = decode_entities(item["snippet"]["channelTitle"].as_str().unwrap_or(""));
+                                if vid.is_empty() || channel.is_empty() {
+                                    continue;
+                                }
+                                if let Some(z) = detect_text_geo_zone(&format!("{title} {channel}"), None) {
+                                    if !zones_compatible(region.zone, z) {
+                                        continue;
+                                    }
+                                }
+                                list.push(RecommendedStreamer {
+                                    platform: "YouTube".to_string(),
+                                    channel,
+                                    title,
+                                    url: format!("https://www.youtube.com/watch?v={vid}"),
+                                    viewers: None,
+                                    region_label: region.short_label.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !used_api {
+            let url = format!(
+                "https://www.youtube.com/results?search_query={}&sp=EgJAAQ%3D%3D&gl={}",
+                urlencode(&query),
+                region.yt_region_code
+            );
+            if let Some(html) = http_get_text_with_lang(client, &url, region.accept_lang).await {
+                if let Some(caps) = YT_DATA_RE.captures(&html) {
+                    if let Ok(data) = serde_json::from_str::<Value>(&caps[1]) {
+                        if let Some(sections) = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]
+                            ["sectionListRenderer"]["contents"]
+                            .as_array()
+                        {
+                            for section in sections {
+                                let Some(items) = section["itemSectionRenderer"]["contents"].as_array() else {
+                                    continue;
+                                };
+                                for item in items.iter().take(12) {
+                                    let Some(video) = item.get("videoRenderer") else {
+                                        continue;
+                                    };
+                                    let vid = video["videoId"].as_str().unwrap_or("");
+                                    let title = decode_entities(video["title"]["runs"][0]["text"].as_str().unwrap_or(""));
+                                    let channel = decode_entities(video["ownerText"]["runs"][0]["text"].as_str().unwrap_or(""));
+                                    if vid.is_empty() || channel.is_empty() || !looks_like_valorant_stream(&title, &channel) {
+                                        continue;
+                                    }
+                                    if let Some(z) = detect_text_geo_zone(&format!("{title} {channel}"), None) {
+                                        if !zones_compatible(region.zone, z) {
+                                            continue;
+                                        }
+                                    }
+                                    let viewers = video["viewCountText"]["runs"][0]["text"]
+                                        .as_str()
+                                        .and_then(|s| s.replace(',', "").trim().parse::<u64>().ok());
+                                    list.push(RecommendedStreamer {
+                                        platform: "YouTube".to_string(),
+                                        channel,
+                                        title,
+                                        url: format!("https://www.youtube.com/watch?v={vid}"),
+                                        viewers,
+                                        region_label: region.short_label.to_string(),
+                                    });
+                                    if list.len() >= 6 {
+                                        break;
+                                    }
+                                }
+                                if list.len() >= 6 {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        list
+    };
+
+    let tw_fut = async {
+        let mut list = Vec::new();
+        let mut used_helix = false;
+        if let Some(tok) = twitch_token.as_deref() {
+            if let Ok(resp) = client
+                .get("https://api.twitch.tv/helix/streams")
+                .header("Client-Id", twitch_client_id.trim())
+                .header("Authorization", format!("Bearer {tok}"))
+                .query(&[
+                    ("game_id", "516575"),
+                    ("language", region.twitch_lang),
+                    ("first", "8"),
+                ])
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(data) = resp.json::<Value>().await {
+                        if let Some(arr) = data["data"].as_array() {
+                            used_helix = !arr.is_empty();
+                            for st in arr.iter().take(6) {
+                                let login = st["user_login"].as_str().unwrap_or("");
+                                let name = st["user_name"].as_str().unwrap_or(login);
+                                let title = st["title"].as_str().unwrap_or("Live on Twitch");
+                                let viewers = st["viewer_count"].as_u64();
+                                if !login.is_empty() {
+                                    list.push(RecommendedStreamer {
+                                        platform: "Twitch".to_string(),
+                                        channel: name.to_string(),
+                                        title: title.to_string(),
+                                        url: format!("https://www.twitch.tv/{login}"),
+                                        viewers,
+                                        region_label: region.short_label.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !used_helix {
+            let body = serde_json::json!({
+                "query": "query { game(name: \"VALORANT\") { streams(first: 24, options: { sort: VIEWER_COUNT }) { edges { node { title viewersCount broadcaster { login displayName broadcastSettings { language } } } } } } }"
+            });
+            if let Ok(resp) = client
+                .post("https://gql.twitch.tv/gql")
+                .header("Client-Id", "kimne78kx3ncx6brgo4mv6wki5h1ko")
+                .json(&body)
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(v) = resp.json::<Value>().await {
+                        if let Some(edges) = v["data"]["game"]["streams"]["edges"].as_array() {
+                            let mut regional = Vec::new();
+                            let mut fallback = Vec::new();
+                            for edge in edges {
+                                let node = &edge["node"];
+                                let login = node["broadcaster"]["login"].as_str().unwrap_or("");
+                                let name = node["broadcaster"]["displayName"].as_str().unwrap_or(login);
+                                let title = node["title"].as_str().unwrap_or("Live on Twitch");
+                                let lang = node["broadcaster"]["broadcastSettings"]["language"].as_str();
+                                let viewers = node["viewersCount"].as_u64();
+                                if login.is_empty() {
+                                    continue;
+                                }
+                                let item = RecommendedStreamer {
+                                    platform: "Twitch".to_string(),
+                                    channel: name.to_string(),
+                                    title: title.to_string(),
+                                    url: format!("https://www.twitch.tv/{login}"),
+                                    viewers,
+                                    region_label: region.short_label.to_string(),
+                                };
+                                let z = detect_text_geo_zone(&format!("{title} {name}"), lang);
+                                if z.map(|dz| zones_compatible(region.zone, dz)).unwrap_or(false)
+                                    || lang.map(|l| l.eq_ignore_ascii_case(region.twitch_lang)).unwrap_or(false)
+                                {
+                                    regional.push(item);
+                                } else if z.is_none() {
+                                    fallback.push(item);
+                                }
+                            }
+                            for item in regional.into_iter().chain(fallback.into_iter()).take(6) {
+                                list.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        list
+    };
+
+    let (yt_list, tw_list) = tokio::join!(yt_fut, tw_fut);
+    let mut combined = Vec::new();
+    let max_len = yt_list.len().max(tw_list.len());
+    for i in 0..max_len {
+        if let Some(item) = tw_list.get(i) {
+            combined.push(item.clone());
+        }
+        if let Some(item) = yt_list.get(i) {
+            combined.push(item.clone());
+        }
+    }
+    if combined.is_empty() {
+        return Err(anyhow!(
+            "No live Valorant recommendations could be fetched for {} right now.",
+            region.short_label
+        ));
+    }
+    Ok(combined)
 }
 
 // ============================================================================
@@ -2197,13 +3639,38 @@ async fn fetch_remote_directory(public: &Client, owner: &str, repo: &str) -> (Ve
 }
 
 fn merge_directories(local: &[DirectoryStreamer], remote: &[DirectoryStreamer]) -> Vec<DirectoryStreamer> {
-    let mut seen = HashSet::new();
-    local
-        .iter()
-        .chain(remote.iter())
-        .filter_map(sanitize_directory_entry)
-        .filter(|d| seen.insert((d.riot_id.to_lowercase(), d.platform.clone(), d.channel_url.to_lowercase())))
-        .collect()
+    let mut out: Vec<DirectoryStreamer> = Vec::new();
+    let mut seen_riot: HashMap<(String, String), usize> = HashMap::new();
+    let mut seen_url: HashMap<(String, String), usize> = HashMap::new();
+
+    for entry in remote.iter().chain(local.iter()).filter_map(sanitize_directory_entry) {
+        let rkey = (entry.riot_id.to_ascii_lowercase(), entry.platform.to_ascii_lowercase());
+        let ukey = (
+            entry.channel_url.trim_end_matches('/').to_ascii_lowercase(),
+            entry.platform.to_ascii_lowercase(),
+        );
+        if let Some(&idx) = seen_riot.get(&rkey).or_else(|| seen_url.get(&ukey)) {
+            // Merge unique aliases without duplicating records; preserve verified flag if either is verified
+            let existing = &mut out[idx];
+            existing.verified = existing.verified || entry.verified;
+            if existing.server_region.is_empty() && !entry.server_region.is_empty() {
+                existing.server_region = entry.server_region;
+            }
+            for alias in entry.aliases {
+                if !alias.eq_ignore_ascii_case(&existing.riot_id)
+                    && !existing.aliases.iter().any(|a| a.eq_ignore_ascii_case(&alias))
+                {
+                    existing.aliases.push(alias);
+                }
+            }
+        } else {
+            let idx = out.len();
+            seen_riot.insert(rkey, idx);
+            seen_url.insert(ukey, idx);
+            out.push(entry);
+        }
+    }
+    out
 }
 
 #[cfg(windows)]
@@ -2275,7 +3742,8 @@ fn show_toast(entry: &StreamerEntry, _use_custom_app_id: bool) {
     log(format!("LIVE: {} -> {}", entry.riot_id, entry.url));
 }
 
-/// Records new detections (deduplicated by match_id + riot_id + platform), copies first link, and fires toast.
+/// Records new detections (deduplicated by match_id + riot_id + platform).
+/// Only copies links & shows Windows toast popups for Confirmed or Probable detections (never Unverified).
 fn record_and_notify(
     state: &Arc<Mutex<AppState>>,
     ctx: &egui::Context,
@@ -2283,6 +3751,7 @@ fn record_and_notify(
     copy: bool,
     use_custom_app_id: bool,
 ) {
+    let should_alert = !entry.confidence_tier.eq_ignore_ascii_case("Unverified");
     let is_new = {
         let mut s = lock(state);
         if let Some(existing) = s
@@ -2304,13 +3773,71 @@ fn record_and_notify(
     };
     repaint(ctx);
 
-    if copy {
+    if copy && should_alert {
         if let Ok(mut cb) = Clipboard::new() {
             let _ = cb.set_text(entry.url.clone());
         }
     }
-    if is_new {
+    if is_new && should_alert {
         show_toast(&entry, use_custom_app_id);
+    }
+}
+
+/// Evaluates whether a database entry's configured in-game server is compatible with the user's match server.
+fn evaluate_directory_server_match(
+    entry: &DirectoryStreamer,
+    match_region: &ServerRegionInfo,
+    match_kind: &str,
+) -> (ConfidenceTier, u8, String, String) {
+    if !entry.server_region.is_empty() {
+        if let Some(db_reg) = server_region_by_code(&entry.server_region) {
+            if db_reg.code == match_region.code {
+                let tier = if entry.verified { ConfidenceTier::Confirmed } else { ConfidenceTier::Probable };
+                let score = if entry.verified { 100 } else { 88 };
+                return (
+                    tier,
+                    score,
+                    "In-Game Server Confirmed".to_string(),
+                    format!("{match_kind} + Verified {} server", match_region.short_label),
+                );
+            } else if zones_compatible(match_region.zone, db_reg.zone) {
+                let tier = if entry.verified { ConfidenceTier::Confirmed } else { ConfidenceTier::Probable };
+                let score = if entry.verified { 94 } else { 84 };
+                return (
+                    tier,
+                    score,
+                    "Compatible Nearby Server".to_string(),
+                    format!("{match_kind} + Compatible server ({})", db_reg.short_label),
+                );
+            } else {
+                // Cross-continent mismatch (e.g., NA database entry while playing on Mumbai): caution as Unverified
+                return (
+                    ConfidenceTier::Unverified,
+                    48,
+                    format!("Server Mismatch (DB: {})", db_reg.short_label),
+                    format!(
+                        "{match_kind}, but streamer plays on {} (your match: {})",
+                        db_reg.short_label, match_region.short_label
+                    ),
+                );
+            }
+        }
+    }
+
+    if entry.verified {
+        (
+            ConfidenceTier::Confirmed,
+            92,
+            "Verified Database Entry (Server Any)".to_string(),
+            format!("{match_kind} (community verified)"),
+        )
+    } else {
+        (
+            ConfidenceTier::Probable,
+            80,
+            "Local Entry (Server Unspecified)".to_string(),
+            format!("{match_kind} (local custom entry)"),
+        )
     }
 }
 
@@ -2322,16 +3849,29 @@ async fn scan_player(
     match_id: String,
     map_name: String,
     queue_name: String,
+    region: &'static ServerRegionInfo,
     player_info: MatchPlayerInfo,
     chat_plug: Option<ChatStreamPlug>,
 ) -> Vec<StreamerEntry> {
     let player = player_info.record;
     let riot_id = format!("{}#{}", player.game_name, player.tag_line);
-    let timestamp = Local::now().format("%d %b %Y | %I:%M %p").to_string();
+    let now = Local::now();
+    let timestamp = now.format("%d %b %Y | %I:%M %p").to_string();
+    let detected_at_iso = now.format("%Y-%m-%d").to_string();
     let team_relation = player_info.team_relation;
     let agent_name = player_info.agent_name;
 
-    let make = |platform: &str, channel: String, title: String, url: String, source: &str, chat_msg: String| StreamerEntry {
+    let make = |platform: &str,
+                channel: String,
+                title: String,
+                url: String,
+                source: &str,
+                chat_msg: String,
+                confidence: u8,
+                confidence_tier: &str,
+                server_match_status: String,
+                match_reason: String,
+                candidates: Vec<LikelyStreamerCandidate>| StreamerEntry {
         match_id: match_id.clone(),
         riot_id: riot_id.clone(),
         platform: platform.to_string(),
@@ -2339,23 +3879,36 @@ async fn scan_player(
         title,
         url,
         timestamp: timestamp.clone(),
+        detected_at_iso: detected_at_iso.clone(),
         team_relation: team_relation.clone(),
         map_name: map_name.clone(),
         agent_name: agent_name.clone(),
         queue_name: queue_name.clone(),
         chat_message: chat_msg,
         source: source.to_string(),
+        confidence,
+        confidence_tier: confidence_tier.to_string(),
+        server_match_status,
+        match_reason,
+        server_region: region.label.to_string(),
+        candidates,
     };
 
     let mut out = Vec::new();
     let mut ran_heuristics = false;
 
-    // Phase 1: exact Riot ID mapping (authoritative; skips noisy heuristics when present)
-    let linked: Vec<&DirectoryStreamer> =
-        directory.iter().filter(|d| d.riot_id.eq_ignore_ascii_case(&riot_id)).collect();
+    // Phase 1: exact Riot ID or known alias mapping from centralized/local streamer database
+    let linked: Vec<(&DirectoryStreamer, &'static str)> = directory
+        .iter()
+        .filter_map(|d| directory_entry_matches_player(d, &riot_id).map(|kind| (d, kind)))
+        .collect();
     if !linked.is_empty() {
-        for d in linked {
-            let handle = last_path_segment(&d.channel_url);
+        for (d, match_kind) in linked {
+            let handle = if !d.channel_id.is_empty() {
+                d.channel_id.clone()
+            } else {
+                last_path_segment(&d.channel_url)
+            };
             let hit = match d.platform.as_str() {
                 "Twitch" => check_twitch_live(&client, &handle, true, &config.twitch_client_id, twitch_token.as_deref())
                     .await
@@ -2364,25 +3917,64 @@ async fn scan_player(
                 _ => check_youtube_channel_live(&client, &d.channel_url).await,
             };
             if let Some((title, url)) = hit {
-                out.push(make(&d.platform, d.channel_name.clone(), title, url, "Directory", String::new()));
+                let (tier, conf, srv_status, reason) = evaluate_directory_server_match(d, region, match_kind);
+                out.push(make(
+                    &d.platform,
+                    d.channel_name.clone(),
+                    title,
+                    url,
+                    "Directory",
+                    String::new(),
+                    conf,
+                    tier.as_str(),
+                    srv_status,
+                    reason,
+                    Vec::new(),
+                ));
             }
         }
     } else {
-        // Phase 2: concurrent heuristic fallback
+        // Phase 2: server-aware multi-signal heuristic fallback (produces ranked likely streamers)
         ran_heuristics = true;
-        let (yt, tw, kick) = tokio::join!(
-            check_youtube_live(&client, &player.game_name, &config.youtube_api_key),
-            check_twitch_live(&client, &player.game_name, false, &config.twitch_client_id, twitch_token.as_deref()),
-            check_kick_live(&client, &player.game_name, false),
+        let (yt_cands, tw_cands, kick_cands) = tokio::join!(
+            check_youtube_live_candidates(&client, &player.game_name, &config.youtube_api_key, region),
+            check_twitch_live_candidates(
+                &client,
+                &player.game_name,
+                &config.twitch_client_id,
+                twitch_token.as_deref(),
+                region
+            ),
+            check_kick_live_candidates(&client, &player.game_name, region),
         );
-        if let Some((c, t, u)) = yt {
-            out.push(make("YouTube", c, t, u, "Heuristic", String::new()));
-        }
-        if let Some((c, t, u)) = tw {
-            out.push(make("Twitch", c, t, u, "Heuristic", String::new()));
-        }
-        if let Some((c, t, u)) = kick {
-            out.push(make("Kick", c, t, u, "Heuristic", String::new()));
+        let mut all_cands: Vec<LikelyStreamerCandidate> = Vec::new();
+        all_cands.extend(yt_cands);
+        all_cands.extend(tw_cands);
+        all_cands.extend(kick_cands);
+        all_cands.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+        let mut dedup_urls = HashSet::new();
+        all_cands.retain(|c| dedup_urls.insert(c.url.to_ascii_lowercase()));
+        all_cands.truncate(3);
+
+        if let Some(best) = all_cands.first().cloned() {
+            let tier_str = if best.confidence_tier.is_empty() {
+                "Unverified"
+            } else {
+                best.confidence_tier.as_str()
+            };
+            out.push(make(
+                &best.platform,
+                best.channel.clone(),
+                best.title.clone(),
+                best.url.clone(),
+                "Heuristic",
+                String::new(),
+                best.confidence,
+                tier_str,
+                best.server_match_status.clone(),
+                best.match_reason.clone(),
+                all_cands,
+            ));
         }
     }
 
@@ -2391,6 +3983,10 @@ async fn scan_player(
         let quote = short(&plug.raw_message, 140);
         if let Some(existing) = out.iter_mut().find(|e| e.platform.eq_ignore_ascii_case(&plug.platform)) {
             existing.chat_message = quote;
+            existing.confidence = 100;
+            existing.confidence_tier = ConfidenceTier::Confirmed.as_str().to_string();
+            existing.server_match_status = "Confirmed in Match Chat".to_string();
+            existing.source = "Chat".to_string();
         } else if let Some(raw_url) = plug.url {
             let fallback_channel = plug.handle.clone().unwrap_or_else(|| player.game_name.clone());
             let enriched = match plug.platform.as_str() {
@@ -2422,28 +4018,53 @@ async fn scan_player(
                     raw_url,
                 ),
             };
-            out.push(make(&plug.platform, channel, title, final_url, "Chat", quote));
+            out.push(make(
+                &plug.platform,
+                channel,
+                title,
+                final_url,
+                "Chat",
+                quote,
+                100,
+                ConfidenceTier::Confirmed.as_str(),
+                "Confirmed in Match Chat".to_string(),
+                "Shared directly in match text chat".to_string(),
+                Vec::new(),
+            ));
         } else {
-            // Player said "im live on yt / twitch / kick" without pasting a direct link or handle.
-            let live_hit = if !ran_heuristics {
+            let live_cands = if !ran_heuristics {
                 match plug.platform.as_str() {
-                    "Twitch" => check_twitch_live(
-                        &client,
-                        &player.game_name,
-                        false,
-                        &config.twitch_client_id,
-                        twitch_token.as_deref(),
-                    )
-                    .await,
-                    "Kick" => check_kick_live(&client, &player.game_name, false).await,
-                    _ => check_youtube_live(&client, &player.game_name, &config.youtube_api_key).await,
+                    "Twitch" => {
+                        check_twitch_live_candidates(
+                            &client,
+                            &player.game_name,
+                            &config.twitch_client_id,
+                            twitch_token.as_deref(),
+                            region,
+                        )
+                        .await
+                    }
+                    "Kick" => check_kick_live_candidates(&client, &player.game_name, region).await,
+                    _ => check_youtube_live_candidates(&client, &player.game_name, &config.youtube_api_key, region).await,
                 }
             } else {
-                None
+                Vec::new()
             };
 
-            if let Some((c, t, u)) = live_hit {
-                out.push(make(&plug.platform, c, t, u, "Chat", quote));
+            if let Some(best) = live_cands.first().cloned() {
+                out.push(make(
+                    &plug.platform,
+                    best.channel.clone(),
+                    best.title.clone(),
+                    best.url.clone(),
+                    "Chat",
+                    quote,
+                    best.confidence.max(85),
+                    ConfidenceTier::Confirmed.as_str(),
+                    "Confirmed in Match Chat".to_string(),
+                    format!("Mentioned live in chat + {}", best.match_reason),
+                    live_cands,
+                ));
             } else {
                 let cleaned = clean_ign(&player.game_name);
                 let query_name = if cleaned.is_empty() { player.game_name.clone() } else { cleaned };
@@ -2451,8 +4072,9 @@ async fn scan_player(
                     "Twitch" => format!("https://www.twitch.tv/search?term={}", urlencode(&query_name)),
                     "Kick" => format!("https://kick.com/search?query={}", urlencode(&query_name)),
                     _ => format!(
-                        "https://www.youtube.com/results?search_query={}&sp=EgJAAQ%3D%3D",
-                        urlencode(&format!("{query_name} Valorant"))
+                        "https://www.youtube.com/results?search_query={}&sp=EgJAAQ%3D%3D&gl={}",
+                        urlencode(&format!("{query_name} Valorant")),
+                        region.yt_region_code
                     ),
                 };
                 out.push(make(
@@ -2462,6 +4084,11 @@ async fn scan_player(
                     search_url,
                     "Chat",
                     quote,
+                    82,
+                    ConfidenceTier::Probable.as_str(),
+                    "Chat Mention (Channel Link Unverified)".to_string(),
+                    "Player announced live stream in match chat".to_string(),
+                    Vec::new(),
                 ));
             }
         }
@@ -2471,23 +4098,22 @@ async fn scan_player(
 }
 
 async fn sync_directory_only(public_client: Client, state: Arc<Mutex<AppState>>, ctx: egui::Context) {
-    let (owner, repo) = {
+    {
         let mut s = lock(&state);
         s.is_syncing_directory = true;
-        (s.config.github_owner.clone(), s.config.github_repo.clone())
-    };
+    }
     repaint(&ctx);
 
-    let (remote, ok) = fetch_remote_directory(&public_client, &owner, &repo).await;
+    let (remote, ok) = fetch_remote_directory(&public_client, COMMUNITY_REPO_OWNER, COMMUNITY_REPO_NAME).await;
     {
         let mut s = lock(&state);
         s.remote_directory = remote;
         s.is_syncing_directory = false;
     }
     if ok {
-        set_toast(&state, format!("Synced directory from {owner}/{repo}"));
+        set_toast(&state, "Synced community streamer database!");
     } else {
-        set_toast(&state, "GitHub unreachable - using cached directory");
+        set_toast(&state, "Database unreachable - using cached directory");
     }
     repaint(&ctx);
 }
@@ -2499,21 +4125,27 @@ async fn scan_last_match(
     ctx: egui::Context,
     trigger: ScanTrigger,
 ) {
-    let (config, detected_shard, previous) = {
+    let (config, detected_server, detected_api_region, previous) = {
         let s = lock(&state);
-        (s.config.clone(), s.detected_shard.clone(), s.last_scanned_match.clone())
+        (
+            s.config.clone(),
+            s.detected_server.clone(),
+            s.detected_api_region.clone(),
+            s.last_scanned_match.clone(),
+        )
     };
-    let shard = effective_shard(&config, &detected_shard);
+    let initial_region = effective_server_region(&config, &detected_server, &detected_api_region);
+    let api_region = initial_region.api_region;
     set_status(
         &state,
         &ctx,
-        format!("Syncing directory & scanning last match ({})...", shard_label(shard)),
+        format!("Syncing database & scanning last match ({})...", initial_region.label),
     );
 
     let fetched = fetch_match_and_names(
         &local_client,
         &public_client,
-        shard,
+        api_region,
         previous.as_deref(),
         trigger == ScanTrigger::PostMatch,
     )
@@ -2522,23 +4154,43 @@ async fn scan_last_match(
     let (my_puuid, match_ctx) = match fetched {
         Ok(v) => v,
         Err(e) => {
-            log(format!("Match fetch failed on {shard}: {e:#}"));
+            log(format!("Match fetch failed on {api_region}: {e:#}"));
             set_status(&state, &ctx, format!("Could not fetch match: {}", short(&e.to_string(), 110)));
             return;
         }
     };
-    let MatchContext { match_id, map_name, queue_name, my_agent, players } = match_ctx;
+    let MatchContext {
+        match_id,
+        map_name,
+        queue_name,
+        my_agent,
+        server_region: match_pod_server,
+        players,
+    } = match_ctx;
+
+    if let Some(pod_srv) = &match_pod_server {
+        lock(&state).detected_server = pod_srv.clone();
+    }
     lock(&state).last_scanned_match = Some(match_id.clone());
+
+    let effective_region = if config.server_override.eq_ignore_ascii_case("auto") {
+        match_pod_server
+            .as_deref()
+            .and_then(server_region_by_code)
+            .unwrap_or(initial_region)
+    } else {
+        initial_region
+    };
 
     let display_map = if map_name.is_empty() { "Unknown Map" } else { map_name.as_str() };
     let display_queue = if queue_name.is_empty() { "Match" } else { queue_name.as_str() };
     set_status(
         &state,
         &ctx,
-        format!("Scanning {display_queue} on {display_map} ({})...", shard_label(shard)),
+        format!("Scanning {display_queue} on {display_map} ({})...", effective_region.label),
     );
 
-    let (remote, _) = fetch_remote_directory(&public_client, &config.github_owner, &config.github_repo).await;
+    let (remote, _) = fetch_remote_directory(&public_client, COMMUNITY_REPO_OWNER, COMMUNITY_REPO_NAME).await;
     let (local_dir, mut match_chat) = {
         let mut s = lock(&state);
         s.remote_directory = remote.clone();
@@ -2556,19 +4208,14 @@ async fn scan_last_match(
     let twitch_token =
         get_twitch_app_token(&public_client, &config.twitch_client_id, &config.twitch_client_secret).await;
 
+    // Exclude self, blank/duplicate entries, and (when enabled) party members before external platform calls
+    let (scannable_players, party_skipped) =
+        filter_scannable_players(players, &my_puuid, config.skip_party_members);
+    let players_checked = scannable_players.len();
+
     let sem = Arc::new(Semaphore::new(4));
     let mut set = JoinSet::new();
-    let mut seen = HashSet::new();
-    let mut players_checked = 0usize;
-    for player_info in players {
-        if player_info.record.subject == my_puuid
-            || player_info.record.game_name.trim().is_empty()
-            || !seen.insert(player_info.record.subject.clone())
-        {
-            continue;
-        }
-        players_checked += 1;
-
+    for player_info in scannable_players {
         let mut best_plug: Option<ChatStreamPlug> = None;
         if config.capture_in_game_chat {
             for msg in &match_chat {
@@ -2604,16 +4251,34 @@ async fn scan_last_match(
         );
         set.spawn(async move {
             let _permit = sem.acquire_owned().await.ok();
-            scan_player(client, cfg, dir, tok, mid, map_n, queue_n, player_info, best_plug).await
+            scan_player(
+                client,
+                cfg,
+                dir,
+                tok,
+                mid,
+                map_n,
+                queue_n,
+                effective_region,
+                player_info,
+                best_plug,
+            )
+            .await
         });
     }
 
     let mut found = 0usize;
+    let mut copied_primary = false;
     while let Some(res) = set.join_next().await {
         match res {
             Ok(entries) => {
                 for entry in entries {
-                    record_and_notify(&state, &ctx, entry, found == 0, config.use_custom_toast_app_id);
+                    let is_alertable = !entry.confidence_tier.eq_ignore_ascii_case("Unverified");
+                    let should_copy = is_alertable && !copied_primary;
+                    if should_copy {
+                        copied_primary = true;
+                    }
+                    record_and_notify(&state, &ctx, entry, should_copy, config.use_custom_toast_app_id);
                     found += 1;
                 }
             }
@@ -2628,18 +4293,28 @@ async fn scan_last_match(
         map_name: display_map.to_string(),
         my_agent,
         players_checked,
+        party_skipped,
         streamers_found: found,
         scanned_at: checked_time,
-        shard: shard_label(shard).to_string(),
+        server_name: effective_region.label.to_string(),
     };
     save_json("last_match.json", &summary);
     lock(&state).last_match_summary = Some(summary);
 
+    let party_note = if party_skipped > 0 {
+        format!(", {party_skipped} party skipped")
+    } else {
+        String::new()
+    };
     let status = if found > 0 {
-        format!("Found {found} live stream(s) in {display_queue} on {display_map}!")
+        format!(
+            "Found {found} match result(s) in {display_queue} on {display_map} ({}{party_note})!",
+            effective_region.short_label
+        )
     } else {
         format!(
-            "Scanned {display_queue} on {display_map} ({players_checked} players) | No live streamers found"
+            "Scanned {display_queue} on {display_map} ({players_checked} checked{party_note}, {}) | No live streamers found",
+            effective_region.short_label
         )
     };
     set_status(&state, &ctx, status);
@@ -2649,12 +4324,17 @@ async fn scan_last_match(
 // LOG WATCHER
 // ============================================================================
 
-static SHARD_RE: LazyLock<Regex> =
+static API_REGION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"https://pd\.([a-z0-9]+)\.a\.pvp\.net").unwrap());
+static POD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)aresriot\.[a-z0-9._-]+").unwrap());
 
 /// Reads only *complete* lines appended after `start`. A half-written trailing line is left for
-/// the next poll. Also extracts any Riot PD shard endpoint seen in the log.
-fn read_new_log_events(path: &Path, start: u64) -> std::io::Result<(Vec<String>, Option<String>, u64)> {
+/// the next poll. Also extracts any Riot PD endpoint or game server pod seen in the log.
+fn read_new_log_events(
+    path: &Path,
+    start: u64,
+) -> std::io::Result<(Vec<String>, Option<String>, Option<String>, u64)> {
     const CAP: u64 = 8 * 1024 * 1024;
     let mut f = File::open(path)?;
     f.seek(SeekFrom::Start(start))?;
@@ -2668,35 +4348,55 @@ fn read_new_log_events(path: &Path, start: u64) -> std::io::Result<(Vec<String>,
     };
     let text = String::from_utf8_lossy(&buf[..end]);
     let mut reconcile_lines = Vec::new();
-    let mut detected_shard = None;
+    let mut detected_api_region = None;
+    let mut detected_server = None;
 
     for line in text.lines() {
         if line.contains("Reconcile") {
             reconcile_lines.push(line.to_string());
         }
         if line.contains(".a.pvp.net") {
-            if let Some(caps) = SHARD_RE.captures(line) {
-                if let Some(s) = canonical_shard(&caps[1]) {
-                    detected_shard = Some(s.to_string());
+            if let Some(caps) = API_REGION_RE.captures(line) {
+                if let Some(s) = canonical_api_region(&caps[1]) {
+                    detected_api_region = Some(s.to_string());
+                }
+            }
+        }
+        if line.contains("aresriot.") {
+            if let Some(m) = POD_RE.find(line) {
+                if let Some(srv) = parse_game_pod_to_server(m.as_str()) {
+                    detected_server = Some(srv.to_string());
                 }
             }
         }
     }
-    Ok((reconcile_lines, detected_shard, start + end as u64))
+    Ok((reconcile_lines, detected_api_region, detected_server, start + end as u64))
 }
 
-/// Scans the head of ShooterGame.log once at startup so we know the shard even before a new line lands.
-fn detect_initial_shard(path: &Path) -> Option<String> {
-    let mut f = File::open(path).ok()?;
+/// Scans the head of ShooterGame.log once at startup so we know the server even before a new line lands.
+fn detect_initial_server(path: &Path) -> (Option<String>, Option<String>) {
+    let Ok(mut f) = File::open(path) else {
+        return (None, None);
+    };
     let mut buf = Vec::new();
-    f.take(256 * 1024).read_to_end(&mut buf).ok()?;
+    if f.take(256 * 1024).read_to_end(&mut buf).is_err() {
+        return (None, None);
+    }
     let text = String::from_utf8_lossy(&buf);
-    for caps in SHARD_RE.captures_iter(&text) {
-        if let Some(s) = canonical_shard(&caps[1]) {
-            return Some(s.to_string());
+    let mut api_region = None;
+    let mut server = None;
+    for caps in API_REGION_RE.captures_iter(&text) {
+        if let Some(s) = canonical_api_region(&caps[1]) {
+            api_region = Some(s.to_string());
+            break;
         }
     }
-    None
+    for m in POD_RE.find_iter(&text) {
+        if let Some(srv) = parse_game_pod_to_server(m.as_str()) {
+            server = Some(srv.to_string());
+        }
+    }
+    (api_region, server)
 }
 
 async fn watch_log(
@@ -2707,8 +4407,15 @@ async fn watch_log(
     tx: mpsc::UnboundedSender<ScanTrigger>,
 ) {
     let mut in_match = false;
-    if let Some(shard) = detect_initial_shard(&log_path) {
-        lock(&state).detected_shard = shard;
+    let (init_api_region, init_server) = detect_initial_server(&log_path);
+    {
+        let mut s = lock(&state);
+        if let Some(reg) = init_api_region {
+            s.detected_api_region = reg;
+        }
+        if let Some(server) = init_server {
+            s.detected_server = server;
+        }
     }
 
     let initial = fs::metadata(&log_path).ok();
@@ -2773,13 +4480,26 @@ async fn watch_log(
 
         if len > last_pos {
             match read_new_log_events(&log_path, last_pos) {
-                Ok((lines, shard_opt, new_pos)) => {
+                Ok((lines, api_reg_opt, server_opt, new_pos)) => {
                     last_pos = new_pos;
-                    if let Some(shard) = shard_opt {
-                        let mut s = lock(&state);
-                        if s.detected_shard != shard {
-                            s.detected_shard = shard;
-                            drop(s);
+                    if api_reg_opt.is_some() || server_opt.is_some() {
+                        let mut changed = false;
+                        {
+                            let mut s = lock(&state);
+                            if let Some(reg) = api_reg_opt {
+                                if s.detected_api_region != reg {
+                                    s.detected_api_region = reg;
+                                    changed = true;
+                                }
+                            }
+                            if let Some(srv) = server_opt {
+                                if s.detected_server != srv {
+                                    s.detected_server = srv;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        if changed {
                             repaint(&ctx);
                         }
                     }
@@ -2980,6 +4700,7 @@ fn quit_app(ctx: &egui::Context) {
 enum ActiveTab {
     History,
     Directory,
+    Discover,
     Settings,
 }
 
@@ -2991,9 +4712,195 @@ enum TeamFilter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DateRangeFilter {
+    AllTime,
+    Today,
+    Last7Days,
+    Last30Days,
+}
+
+impl DateRangeFilter {
+    fn label(self) -> &'static str {
+        match self {
+            DateRangeFilter::AllTime => "All Time",
+            DateRangeFilter::Today => "Today",
+            DateRangeFilter::Last7Days => "Last 7 Days",
+            DateRangeFilter::Last30Days => "Last 30 Days",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusFilter {
+    All,
+    Confirmed,
+    Probable,
+    Unverified,
+    ChatPlug,
+}
+
+impl StatusFilter {
+    fn label(self) -> &'static str {
+        match self {
+            StatusFilter::All => "All Statuses",
+            StatusFilter::Confirmed => "Confirmed",
+            StatusFilter::Probable => "Probable",
+            StatusFilter::Unverified => "Unverified",
+            StatusFilter::ChatPlug => "Chat Link",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DirectorySourceTab {
     Custom,
     Community,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiscoverPlatformFilter {
+    All,
+    Twitch,
+    YouTube,
+}
+
+fn resolve_entry_tier(entry: &StreamerEntry) -> &'static str {
+    if entry.confidence_tier.eq_ignore_ascii_case("Confirmed") {
+        "Confirmed"
+    } else if entry.confidence_tier.eq_ignore_ascii_case("Probable") {
+        "Probable"
+    } else if entry.confidence_tier.eq_ignore_ascii_case("Unverified") {
+        "Unverified"
+    } else if !entry.chat_message.is_empty()
+        || entry.source.eq_ignore_ascii_case("chat_plug")
+        || entry.source.eq_ignore_ascii_case("directory")
+        || entry.confidence >= 85
+    {
+        "Confirmed"
+    } else if entry.confidence >= 65 {
+        "Probable"
+    } else {
+        "Unverified"
+    }
+}
+
+fn entry_within_date_range(entry: &StreamerEntry, range: DateRangeFilter, now_local: chrono::DateTime<Local>) -> bool {
+    if range == DateRangeFilter::AllTime {
+        return true;
+    }
+    let parsed_date = if !entry.detected_at_iso.is_empty() {
+        chrono::DateTime::parse_from_rfc3339(&entry.detected_at_iso)
+            .ok()
+            .map(|dt| dt.with_timezone(&Local).date_naive())
+    } else {
+        None
+    }
+    .or_else(|| {
+        // Legacy format fallback: "YYYY-MM-DD HH:MM AM/PM"
+        entry
+            .timestamp
+            .get(0..10)
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+    });
+
+    let Some(entry_date) = parsed_date else {
+        return false;
+    };
+    let today = now_local.date_naive();
+    let days_ago = (today - entry_date).num_days();
+    match range {
+        DateRangeFilter::AllTime => true,
+        DateRangeFilter::Today => days_ago == 0,
+        DateRangeFilter::Last7Days => (0..=6).contains(&days_ago),
+        DateRangeFilter::Last30Days => (0..=29).contains(&days_ago),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn entry_matches_history_filters(
+    entry: &StreamerEntry,
+    search_query: &str,
+    team_filter: TeamFilter,
+    match_type_filter: &str,
+    server_filter: &str,
+    date_filter: DateRangeFilter,
+    status_filter: StatusFilter,
+    now_local: chrono::DateTime<Local>,
+) -> bool {
+    let team_ok = match team_filter {
+        TeamFilter::All => true,
+        TeamFilter::Ally => entry.team_relation.eq_ignore_ascii_case("Ally"),
+        TeamFilter::Enemy => entry.team_relation.eq_ignore_ascii_case("Enemy"),
+    };
+    if !team_ok {
+        return false;
+    }
+
+    if !match_type_filter.is_empty()
+        && !match_type_filter.eq_ignore_ascii_case("all")
+        && !entry.queue_name.eq_ignore_ascii_case(match_type_filter)
+    {
+        return false;
+    }
+
+    if !server_filter.is_empty() && !server_filter.eq_ignore_ascii_case("all") {
+        let sf = server_filter.to_lowercase();
+        let entry_srv = entry.server_region.to_lowercase();
+        if !entry_srv.contains(&sf) && entry_srv != sf {
+            return false;
+        }
+    }
+
+    if !entry_within_date_range(entry, date_filter, now_local) {
+        return false;
+    }
+
+    let tier = resolve_entry_tier(entry);
+    let status_ok = match status_filter {
+        StatusFilter::All => true,
+        StatusFilter::Confirmed => tier == "Confirmed",
+        StatusFilter::Probable => tier == "Probable",
+        StatusFilter::Unverified => tier == "Unverified",
+        StatusFilter::ChatPlug => !entry.chat_message.is_empty() || entry.source.eq_ignore_ascii_case("chat_plug"),
+    };
+    if !status_ok {
+        return false;
+    }
+
+    let q = search_query.trim().to_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    entry.riot_id.to_lowercase().contains(&q)
+        || entry.platform.to_lowercase().contains(&q)
+        || entry.channel.to_lowercase().contains(&q)
+        || entry.title.to_lowercase().contains(&q)
+        || entry.chat_message.to_lowercase().contains(&q)
+        || entry.map_name.to_lowercase().contains(&q)
+        || entry.agent_name.to_lowercase().contains(&q)
+        || entry.queue_name.to_lowercase().contains(&q)
+        || entry.server_region.to_lowercase().contains(&q)
+        || entry.match_reason.to_lowercase().contains(&q)
+}
+
+fn extract_channel_id_from_url(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let Some((_, rest)) = trimmed.split_once("://") else {
+        return String::new();
+    };
+    let path = rest.split_once('/').map(|(_, p)| p).unwrap_or("");
+    let path = path.split('?').next().unwrap_or("");
+    path.trim_matches('/').to_string()
+}
+
+fn format_viewers(count: u64) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M watching", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K watching", count as f64 / 1_000.0)
+    } else {
+        format!("{count} watching")
+    }
 }
 
 /// Crisp vector-painted icons (avoids missing Unicode glyphs in egui's bundled font).
@@ -3037,6 +4944,78 @@ fn paint_warn_icon(ui: &mut egui::Ui, color: Color32) {
     p.line_segment([br, bl], stroke);
     p.line_segment([bl, top], stroke);
     p.circle_filled(egui::pos2(rect.center().x, rect.bottom() - 4.5), 1.0, color);
+}
+
+/// Smooth left-to-right ON/OFF toggle slider (replaces checkbox tick marks in Settings).
+fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
+    let desired_size = Vec2::new(46.0, 24.0);
+    let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    let how_on = ui.ctx().animate_bool_with_time(response.id, *on, 0.14);
+    if ui.is_rect_visible(rect) {
+        let radius = rect.height() * 0.5;
+        let track_bg = Color32::from_rgb(
+            (29.0 + (255.0 - 29.0) * how_on) as u8,
+            (38.0 + (92.0 - 38.0) * how_on) as u8,
+            (54.0 + (168.0 - 54.0) * how_on) as u8,
+        );
+        let border_col = if *on {
+            ACCENT_BLUSH.linear_multiply(if response.hovered() { 0.95 } else { 0.7 })
+        } else if response.hovered() {
+            ACCENT_PINK.linear_multiply(0.55)
+        } else {
+            CARD_BORDER
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, Rounding::same(radius), track_bg);
+        painter.rect_stroke(rect, Rounding::same(radius), Stroke::new(1.0, border_col));
+
+        let thumb_x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), how_on);
+        let thumb_center = egui::pos2(thumb_x, rect.center().y);
+        let thumb_r = radius - 3.0;
+        painter.circle_filled(thumb_center, thumb_r, ACCENT_PEARL);
+        if *on {
+            painter.circle_stroke(thumb_center, thumb_r, Stroke::new(0.8, ACCENT_PINK.linear_multiply(0.45)));
+        }
+    }
+    response
+}
+
+fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> bool {
+    let mut changed = false;
+    Frame::none()
+        .fill(HEADER_BG)
+        .stroke(Stroke::new(1.0, if *on { ACCENT_PINK.linear_multiply(0.35) } else { CARD_BORDER }))
+        .rounding(Rounding::same(6.0))
+        .inner_margin(Margin::symmetric(12.0, 9.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_max_width((ui.available_width() - 96.0).max(160.0));
+                    ui.label(RichText::new(title).strong().color(TEXT_PRIMARY).size(12.5));
+                    if !subtitle.is_empty() {
+                        ui.label(RichText::new(subtitle).color(TEXT_MUTED).size(11.0));
+                    }
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if toggle_slider(ui, on).changed() {
+                        changed = true;
+                    }
+                    ui.add_space(6.0);
+                    let state_text = if *on { "ON" } else { "OFF" };
+                    let state_col = if *on { ACCENT_BLUSH } else { TEXT_MUTED };
+                    ui.label(RichText::new(state_text).strong().color(state_col).size(10.5));
+                });
+            });
+        });
+    changed
 }
 
 fn paint_gradient_strip(ui: &mut egui::Ui, height: f32) {
@@ -3184,19 +5163,29 @@ struct StreamerApp {
     bg_tx: mpsc::UnboundedSender<BgTask>,
     pending_initial_hide: bool,
     active_tab: ActiveTab,
-    // History filters
+    // History filters (non-destructive)
     search_query: String,
     team_filter: TeamFilter,
+    match_type_filter: String,
+    server_filter: String,
+    date_filter: DateRangeFilter,
+    status_filter: StatusFilter,
+    // Update banner changelog viewer
+    show_update_changelog: bool,
     // Directory manager state
     dir_source_tab: DirectorySourceTab,
     dir_search: String,
+    // Discover / Recommendations filter
+    discover_platform: DiscoverPlatformFilter,
     // Add / Edit modal state
     show_add_modal: bool,
     editing_original: Option<(String, String)>,
     input_riot_id: String,
+    input_aliases: String,
     input_platform: String,
     input_channel_name: String,
     input_channel_url: String,
+    input_server_region: String,
     modal_error: Option<String>,
     // Settings draft state
     cfg_draft: AppConfig,
@@ -3233,14 +5222,22 @@ impl StreamerApp {
             active_tab: ActiveTab::History,
             search_query: String::new(),
             team_filter: TeamFilter::All,
+            match_type_filter: "All".to_string(),
+            server_filter: "All".to_string(),
+            date_filter: DateRangeFilter::AllTime,
+            status_filter: StatusFilter::All,
+            show_update_changelog: true,
             dir_source_tab: DirectorySourceTab::Custom,
             dir_search: String::new(),
+            discover_platform: DiscoverPlatformFilter::All,
             show_add_modal: false,
             editing_original: None,
             input_riot_id: String::new(),
+            input_aliases: String::new(),
             input_platform: "YouTube".to_string(),
             input_channel_name: String::new(),
             input_channel_url: String::new(),
+            input_server_region: String::new(),
             modal_error: None,
             cfg_draft: initial_cfg,
             show_api_secrets: false,
@@ -3248,20 +5245,89 @@ impl StreamerApp {
         }
     }
 
+    fn has_active_history_filters(&self) -> bool {
+        !self.search_query.trim().is_empty()
+            || self.team_filter != TeamFilter::All
+            || !self.match_type_filter.eq_ignore_ascii_case("All")
+            || !self.server_filter.eq_ignore_ascii_case("All")
+            || self.date_filter != DateRangeFilter::AllTime
+            || self.status_filter != StatusFilter::All
+    }
+
+    fn reset_history_filters(&mut self) {
+        self.search_query.clear();
+        self.team_filter = TeamFilter::All;
+        self.match_type_filter = "All".to_string();
+        self.server_filter = "All".to_string();
+        self.date_filter = DateRangeFilter::AllTime;
+        self.status_filter = StatusFilter::All;
+    }
+
+    fn trigger_recommendations_fetch(&self, region_code: &str, force: bool) {
+        let cfg = {
+            let mut s = lock(&self.state);
+            if !s.config.enable_recommendations {
+                return;
+            }
+            if !force {
+                if let Some((cached_reg, fetched_at, cached_items, label)) = &s.recommendations_cache {
+                    if cached_reg.eq_ignore_ascii_case(region_code)
+                        && fetched_at.elapsed() < RECOMMENDATIONS_CACHE_TTL
+                    {
+                        s.recommendations = RecommendationsState::Loaded(cached_items.clone(), label.clone());
+                        return;
+                    }
+                }
+            }
+            s.recommendations = RecommendationsState::Loading;
+            s.config.clone()
+        };
+        let _ = self.bg_tx.send(BgTask::FetchRecommendations {
+            server_region: region_code.to_string(),
+            youtube_api_key: cfg.youtube_api_key,
+            twitch_client_id: cfg.twitch_client_id,
+            twitch_client_secret: cfg.twitch_client_secret,
+            force,
+        });
+    }
+
     fn open_add_modal(&mut self, edit: Option<&DirectoryStreamer>) {
         if let Some(d) = edit {
             self.editing_original = Some((d.riot_id.clone(), d.platform.clone()));
             self.input_riot_id = d.riot_id.clone();
+            self.input_aliases = d.aliases.join(", ");
             self.input_platform = d.platform.clone();
             self.input_channel_name = d.channel_name.clone();
             self.input_channel_url = d.channel_url.clone();
+            self.input_server_region = d.server_region.clone();
         } else {
             self.editing_original = None;
             self.input_riot_id.clear();
+            self.input_aliases.clear();
             self.input_platform = "YouTube".to_string();
             self.input_channel_name.clear();
             self.input_channel_url.clear();
+            let active_code = {
+                let s = lock(&self.state);
+                effective_server_region(&s.config, &s.detected_server, &s.detected_api_region)
+                    .code
+                    .to_string()
+            };
+            self.input_server_region = active_code;
         }
+        self.modal_error = None;
+        lock(&self.state).streamer_verify = CheckState::Idle;
+        self.show_add_modal = true;
+    }
+
+    fn open_add_modal_from_rec(&mut self, rec: &RecommendedStreamer, region_code: &str) {
+        self.editing_original = None;
+        self.input_riot_id.clear();
+        self.input_aliases.clear();
+        self.input_platform = rec.platform.clone();
+        self.input_channel_name = rec.channel.clone();
+        self.input_channel_url = rec.url.clone();
+        self.input_server_region = region_code.to_string();
         self.modal_error = None;
         lock(&self.state).streamer_verify = CheckState::Idle;
         self.show_add_modal = true;
@@ -3272,41 +5338,61 @@ impl StreamerApp {
         let cname = self.input_channel_name.trim().to_string();
         let curl = self.input_channel_url.trim().to_string();
         let platform = self.input_platform.clone();
+        let server_region = self.input_server_region.trim().to_string();
+        let aliases = parse_aliases_csv(&self.input_aliases, &rid);
 
         if let Err(msg) = validate_submission(&rid, &platform, &cname, &curl) {
             self.modal_error = Some(msg);
             return;
         }
 
+        let slug = format!(
+            "{}-{}",
+            platform.to_lowercase(),
+            normalize_id(&cname.to_lowercase())
+        );
         let new_entry = DirectoryStreamer {
+            id: slug,
+            display_name: cname.clone(),
             riot_id: rid.clone(),
+            aliases,
             platform: platform.clone(),
+            channel_id: extract_channel_id_from_url(&curl),
             channel_name: cname,
-            channel_url: curl,
+            channel_url: curl.clone(),
+            server_region,
+            verified: false,
+            submitted_at: Local::now().to_rfc3339(),
+            source: if open_github { "community_submission".to_string() } else { "local".to_string() },
         };
-        let (gh_owner, gh_repo) = {
+
+        let norm_url = curl.trim_end_matches('/').to_lowercase();
+        {
             let mut s = lock(&self.state);
             if let Some((orig_rid, orig_plat)) = self.editing_original.take() {
                 s.local_directory
                     .retain(|x| !(x.riot_id.eq_ignore_ascii_case(&orig_rid) && x.platform == orig_plat));
             }
-            // Replace only the same Riot ID + platform (a player may stream on several platforms).
-            s.local_directory
-                .retain(|x| !(x.riot_id.eq_ignore_ascii_case(&rid) && x.platform == platform));
+            // Prevent duplicates by both (riot_id, platform) and normalized (channel_url, platform).
+            s.local_directory.retain(|x| {
+                let same_rid = x.riot_id.eq_ignore_ascii_case(&rid) && x.platform.eq_ignore_ascii_case(&platform);
+                let same_url = x.channel_url.trim_end_matches('/').to_lowercase() == norm_url
+                    && x.platform.eq_ignore_ascii_case(&platform);
+                !(same_rid || same_url)
+            });
             s.local_directory.push(new_entry.clone());
             save_json("custom_streamers.json", &s.local_directory);
-            (s.config.github_owner.clone(), s.config.github_repo.clone())
-        };
+        }
 
-        if open_github && valid_github_segment(&gh_owner) && valid_github_segment(&gh_repo) {
-            set_toast(&self.state, format!("Saved {rid} locally & opened GitHub!"));
+        if open_github {
+            set_toast(&self.state, format!("Saved {rid} locally & opened moderated community submission!"));
             let issue_title = format!("Add Streamer: {rid}");
             let json_payload = serde_json::to_string_pretty(&new_entry).unwrap_or_default();
-            let issue_body = format!("### New Streamer Submission\n\n```json\n{json_payload}\n```");
+            let issue_body = format!(
+                "### New Streamer Submission\n\nThis submission will be reviewed by a maintainer before being merged into `streamers.json`.\n\n```json\n{json_payload}\n```"
+            );
             let gh_issue_url = format!(
-                "https://github.com/{}/{}/issues/new?title={}&body={}",
-                gh_owner.trim(),
-                gh_repo.trim(),
+                "https://github.com/{COMMUNITY_REPO_OWNER}/{COMMUNITY_REPO_NAME}/issues/new?labels=streamer-database&title={}&body={}",
                 urlencode(&issue_title),
                 urlencode(&issue_body)
             );
@@ -3316,21 +5402,15 @@ impl StreamerApp {
         }
 
         self.input_riot_id.clear();
+        self.input_aliases.clear();
         self.input_channel_name.clear();
         self.input_channel_url.clear();
+        self.input_server_region.clear();
         self.modal_error = None;
         self.show_add_modal = false;
     }
 
     fn save_settings(&mut self) {
-        let owner = self.cfg_draft.github_owner.trim().to_string();
-        let repo = self.cfg_draft.github_repo.trim().to_string();
-        if !valid_github_segment(&owner) || !valid_github_segment(&repo) {
-            self.settings_error = Some("Enter a valid GitHub owner and repository name.".into());
-            return;
-        }
-        self.cfg_draft.github_owner = owner;
-        self.cfg_draft.github_repo = repo;
         self.cfg_draft.youtube_api_key = self.cfg_draft.youtube_api_key.trim().to_string();
         self.cfg_draft.twitch_client_id = self.cfg_draft.twitch_client_id.trim().to_string();
         self.cfg_draft.twitch_client_secret = self.cfg_draft.twitch_client_secret.trim().to_string();
@@ -3342,6 +5422,10 @@ impl StreamerApp {
         {
             let mut s = lock(&self.state);
             s.config = self.cfg_draft.clone();
+            if !s.config.enable_recommendations {
+                s.recommendations = RecommendationsState::Idle;
+                s.recommendations_cache = None;
+            }
         }
         self.settings_error = None;
         set_toast(&self.state, "Settings saved to config.json!");
@@ -3389,7 +5473,10 @@ impl eframe::App for StreamerApp {
             is_scanning,
             is_syncing_dir,
             riot_status,
-            active_shard,
+            active_region,
+            detected_server_code,
+            recs_enabled,
+            recommendations,
             history,
             local_dir,
             remote_dir,
@@ -3404,13 +5491,16 @@ impl eframe::App for StreamerApp {
             if matches!(&s.toast, Some((_, at)) if at.elapsed() > TOAST_TTL) {
                 s.toast = None;
             }
-            let shard = effective_shard(&s.config, &s.detected_shard);
+            let region = effective_server_region(&s.config, &s.detected_server, &s.detected_api_region);
             (
                 s.status.clone(),
                 s.is_scanning,
                 s.is_syncing_directory,
                 s.riot_status,
-                shard,
+                region,
+                s.detected_server.clone(),
+                s.config.enable_recommendations,
+                s.recommendations.clone(),
                 s.history.clone(),
                 s.local_directory.clone(),
                 s.remote_directory.clone(),
@@ -3450,6 +5540,8 @@ impl eframe::App for StreamerApp {
                             ui.label(RichText::new("VALORANT").font(FontId::proportional(20.0)).strong().color(ACCENT_PINK));
                             ui.label(RichText::new("STREAMER").font(FontId::proportional(20.0)).strong().color(ACCENT_BLUSH));
                             ui.label(RichText::new("RADAR").font(FontId::proportional(20.0)).strong().color(ACCENT_PEARL));
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(format!("v{APP_VERSION}")).size(11.0).color(TEXT_MUTED));
                         });
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
@@ -3457,17 +5549,17 @@ impl eframe::App for StreamerApp {
                                 RiotStatus::ValorantActive => (
                                     LIVE_GREEN,
                                     true,
-                                    format!("Valorant Active ({})", shard_label(active_shard)),
+                                    format!("Valorant Active ({})", active_region.label),
                                 ),
                                 RiotStatus::RiotClientOnly => (
                                     ENEMY_AMBER,
                                     true,
-                                    format!("Riot Client Open - Launch Valorant ({})", shard_label(active_shard)),
+                                    format!("Riot Client Open - Launch Valorant ({})", active_region.label),
                                 ),
                                 RiotStatus::Offline => (
                                     TEXT_MUTED,
                                     false,
-                                    format!("Waiting for Valorant ({})", shard_label(active_shard)),
+                                    format!("Waiting for Valorant ({})", active_region.label),
                                 ),
                             };
                             paint_status_dot(ui, dot, glowing);
@@ -3498,9 +5590,15 @@ impl eframe::App for StreamerApp {
 
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
+                    let discover_title = if recs_enabled {
+                        "Discover (Live)".to_string()
+                    } else {
+                        "Discover (Off)".to_string()
+                    };
                     for (tab, title) in [
                         (ActiveTab::History, format!("History ({})", history.len())),
                         (ActiveTab::Directory, format!("Directory ({})", local_dir.len() + remote_dir.len())),
+                        (ActiveTab::Discover, discover_title),
                         (ActiveTab::Settings, "Settings".to_string()),
                     ] {
                         let selected = self.active_tab == tab;
@@ -3518,6 +5616,11 @@ impl eframe::App for StreamerApp {
                             if tab == ActiveTab::Settings {
                                 self.cfg_draft = lock(&self.state).config.clone();
                                 self.settings_error = None;
+                            } else if tab == ActiveTab::Discover
+                                && recs_enabled
+                                && matches!(recommendations, RecommendationsState::Idle)
+                            {
+                                self.trigger_recommendations_fetch(active_region.code, false);
                             }
                             self.active_tab = tab;
                         }
@@ -3534,7 +5637,13 @@ impl eframe::App for StreamerApp {
                             UpdateState::Checking => "Checking...",
                             UpdateState::Downloading(_) => "Downloading...",
                             UpdateState::Installing(_) => "Restarting...",
-                            UpdateState::Available(_) => "Update Ready!",
+                            UpdateState::Available(info) => {
+                                if !info.tag_name.is_empty() {
+                                    "Update Ready!"
+                                } else {
+                                    "Update Ready!"
+                                }
+                            }
                             _ => "Check for Updates",
                         };
                         let upd_btn = egui::Button::new(
@@ -3552,7 +5661,7 @@ impl eframe::App for StreamerApp {
                         .min_size(Vec2::new(118.0, 26.0));
                         if ui.add_enabled(!upd_busy, upd_btn).clicked() {
                             lock(&self.state).update_state = UpdateState::Checking;
-                            let _ = self.bg_tx.send(BgTask::CheckForUpdates);
+                            let _ = self.bg_tx.send(BgTask::CheckForUpdates { silent: false });
                         }
 
                         if let Some(msg) = &toast {
@@ -3569,7 +5678,7 @@ impl eframe::App for StreamerApp {
             let modal_title = if is_edit {
                 "Edit Custom Streamer Entry"
             } else {
-                "Register Streamer to Directory"
+                "Contribute Streamer to Database"
             };
             let (mut submit_gh, mut submit_local, mut cancel, mut trigger_verify) = (false, false, false, false);
             let mut apply_suggested_name: Option<String> = None;
@@ -3580,9 +5689,9 @@ impl eframe::App for StreamerApp {
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .default_width(460.0)
-                .min_width(460.0)
-                .max_width(460.0)
+                .default_width(480.0)
+                .min_width(480.0)
+                .max_width(480.0)
                 .frame(
                     Frame::none()
                         .fill(CARD_BG)
@@ -3591,14 +5700,32 @@ impl eframe::App for StreamerApp {
                         .inner_margin(Margin::same(20.0)),
                 )
                 .show(ctx, |ui| {
-                    ui.label(RichText::new("Link a Valorant Riot ID to a Stream Channel").color(TEXT_MUTED).size(12.5));
+                    ui.label(
+                        RichText::new("Link a Valorant Riot ID (and optional alt accounts) to a Stream Channel. Community submissions are moderated before merging.")
+                            .color(TEXT_MUTED)
+                            .size(12.0),
+                    );
                     ui.add_space(12.0);
 
-                    ui.label(RichText::new("Riot ID (IGN#TAG)").strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Primary Riot ID (IGN#TAG)").strong().color(TEXT_PRIMARY));
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.input_riot_id)
                                 .hint_text("e.g. RohanYT#IND")
+                                .desired_width(f32::INFINITY)
+                                .margin(Margin::symmetric(8.0, 6.0)),
+                        )
+                        .changed()
+                    {
+                        changed_input = true;
+                    }
+                    ui.add_space(8.0);
+
+                    ui.label(RichText::new("Known Aliases / Alt Riot IDs (Optional, comma-separated)").strong().color(TEXT_PRIMARY));
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.input_aliases)
+                                .hint_text("e.g. RohanAlt#IND, RohanSmurf#AP")
                                 .desired_width(f32::INFINITY)
                                 .margin(Margin::symmetric(8.0, 6.0)),
                         )
@@ -3616,6 +5743,25 @@ impl eframe::App for StreamerApp {
                             }
                         }
                     });
+                    ui.add_space(8.0);
+
+                    ui.label(RichText::new("Primary Valorant Server (prevents cross-region false positives)").strong().color(TEXT_PRIMARY));
+                    let selected_reg_label = if self.input_server_region.is_empty() {
+                        "Any / Global".to_string()
+                    } else {
+                        server_region_by_code(&self.input_server_region)
+                            .map(|r| r.label.to_string())
+                            .unwrap_or_else(|| self.input_server_region.clone())
+                    };
+                    egui::ComboBox::from_id_salt("modal_server_region_combo")
+                        .width(430.0)
+                        .selected_text(selected_reg_label)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.input_server_region, String::new(), "Any / Global");
+                            for reg in SERVER_REGIONS {
+                                ui.selectable_value(&mut self.input_server_region, reg.code.to_string(), reg.label);
+                            }
+                        });
                     ui.add_space(8.0);
 
                     ui.label(RichText::new("Channel Display Name (or leave blank & click Verify to auto-fill)").strong().color(TEXT_PRIMARY));
@@ -3690,7 +5836,7 @@ impl eframe::App for StreamerApp {
 
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        submit_gh = gradient_button(ui, "Save & Submit to GitHub", Vec2::new(178.0, 34.0), true, 12.5).clicked();
+                        submit_gh = gradient_button(ui, "Save & Submit to DB", Vec2::new(168.0, 34.0), true, 12.5).clicked();
 
                         ui.add_space(6.0);
                         let local_btn = egui::Button::new(RichText::new("Save Local").color(TEXT_PRIMARY))
@@ -3745,9 +5891,17 @@ impl eframe::App for StreamerApp {
                 match self.active_tab {
                     ActiveTab::History => self.render_history_tab(ui, &history, last_match_summary.as_ref()),
                     ActiveTab::Directory => self.render_directory_tab(ui, &local_dir, &remote_dir, is_syncing_dir),
-                    ActiveTab::Settings => {
-                        self.render_settings_tab(ui, &yt_key_check, &twitch_key_check, &update_state)
+                    ActiveTab::Discover => {
+                        self.render_discover_tab(ui, recs_enabled, &recommendations, active_region)
                     }
+                    ActiveTab::Settings => self.render_settings_tab(
+                        ui,
+                        &yt_key_check,
+                        &twitch_key_check,
+                        &update_state,
+                        &detected_server_code,
+                        active_region,
+                    ),
                 }
             });
     }
@@ -3755,6 +5909,7 @@ impl eframe::App for StreamerApp {
 
 impl StreamerApp {
     fn render_update_banner(&mut self, ui: &mut egui::Ui, update_state: &UpdateState) {
+        // Automatically hidden when UpToDate or Idle (no manual dismissal required for up-to-date state).
         match update_state {
             UpdateState::Available(info) => {
                 Frame::none()
@@ -3773,7 +5928,7 @@ impl StreamerApp {
                                             .color(ACCENT_PINK),
                                     );
                                     ui.label(
-                                        RichText::new(&info.release_name)
+                                        RichText::new(format!("{} (Installed: v{APP_VERSION})", info.release_name))
                                             .size(13.0)
                                             .strong()
                                             .color(ACCENT_PEARL),
@@ -3781,7 +5936,7 @@ impl StreamerApp {
                                 });
                                 let mut meta = Vec::new();
                                 if !info.tag_name.is_empty() {
-                                    meta.push(format!("Tag: {}", info.tag_name));
+                                    meta.push(format!("Version {}", info.tag_name));
                                 }
                                 if let Some(sha) = &info.remote_sha {
                                     meta.push(format!("Build {sha}"));
@@ -3801,15 +5956,7 @@ impl StreamerApp {
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let dismiss = egui::Button::new(RichText::new("Dismiss").size(11.5).color(TEXT_MUTED))
-                                    .fill(Color32::TRANSPARENT)
-                                    .stroke(Stroke::new(1.0, CARD_BORDER))
-                                    .rounding(Rounding::same(5.0));
-                                if ui.add(dismiss).clicked() {
-                                    lock(&self.state).update_state = UpdateState::Idle;
-                                }
-                                ui.add_space(6.0);
-                                let rel_btn = egui::Button::new(RichText::new("Releases").size(11.5).color(TEXT_PRIMARY))
+                                let rel_btn = egui::Button::new(RichText::new("Release Notes").size(11.5).color(TEXT_PRIMARY))
                                     .fill(BTN_SECONDARY)
                                     .stroke(Stroke::new(1.0, CARD_BORDER))
                                     .rounding(Rounding::same(5.0));
@@ -3817,11 +5964,44 @@ impl StreamerApp {
                                     let _ = open::that(&info.html_url);
                                 }
                                 ui.add_space(6.0);
+                                let toggle_lbl = if self.show_update_changelog { "Hide Changelog" } else { "Show Changelog" };
+                                let ch_btn = egui::Button::new(RichText::new(toggle_lbl).size(11.5).color(ACCENT_BLUSH))
+                                    .fill(BTN_SECONDARY)
+                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .rounding(Rounding::same(5.0));
+                                if ui.add(ch_btn).clicked() {
+                                    self.show_update_changelog = !self.show_update_changelog;
+                                }
+                                ui.add_space(6.0);
                                 if gradient_button(ui, "Download & Install", Vec2::new(132.0, 28.0), true, 12.0).clicked() {
                                     let _ = self.bg_tx.send(BgTask::InstallUpdate(info.clone()));
                                 }
                             });
                         });
+
+                        if self.show_update_changelog && !info.changelog.is_empty() {
+                            ui.add_space(8.0);
+                            Frame::none()
+                                .fill(HEADER_BG)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(6.0))
+                                .inner_margin(Margin::symmetric(10.0, 8.0))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(format!("RELEASE CHANGELOG ({})", info.tag_name))
+                                            .size(10.0)
+                                            .strong()
+                                            .color(ACCENT_BLUSH),
+                                    );
+                                    ui.add_space(4.0);
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("update_changelog_scroll")
+                                        .max_height(110.0)
+                                        .show(ui, |ui| {
+                                            ui.label(RichText::new(&info.changelog).size(11.5).color(TEXT_PRIMARY));
+                                        });
+                                });
+                        }
                     });
                 ui.add_space(10.0);
             }
@@ -3840,24 +6020,6 @@ impl StreamerApp {
                     });
                 ui.add_space(10.0);
             }
-            UpdateState::UpToDate(msg) if self.active_tab != ActiveTab::Settings => {
-                Frame::none()
-                    .fill(CARD_BG)
-                    .stroke(Stroke::new(1.0, LIVE_GREEN))
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(14.0, 8.0))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(msg).size(12.0).color(LIVE_GREEN));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("Dismiss").clicked() {
-                                    lock(&self.state).update_state = UpdateState::Idle;
-                                }
-                            });
-                        });
-                    });
-                ui.add_space(10.0);
-            }
             UpdateState::Error(msg) if self.active_tab != ActiveTab::Settings => {
                 Frame::none()
                     .fill(CARD_BG)
@@ -3866,10 +6028,12 @@ impl StreamerApp {
                     .inner_margin(Margin::symmetric(14.0, 8.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            paint_warn_icon(ui, ERR_ROSE);
                             ui.label(RichText::new(msg).size(12.0).color(ERR_ROSE));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("Dismiss").clicked() {
-                                    lock(&self.state).update_state = UpdateState::Idle;
+                                if ui.small_button("Retry").clicked() {
+                                    lock(&self.state).update_state = UpdateState::Checking;
+                                    let _ = self.bg_tx.send(BgTask::CheckForUpdates { silent: false });
                                 }
                                 if ui.small_button("Releases").clicked() {
                                     let _ = open::that(format!(
@@ -3884,70 +6048,260 @@ impl StreamerApp {
             _ => {}
         }
     }
+
+    fn render_history_card(&self, ui: &mut egui::Ui, entry: &StreamerEntry) {
+        let badge = match entry.platform.as_str() {
+            "Twitch" => TWITCH_PURPLE,
+            "Kick" => KICK_GREEN,
+            _ => ACCENT_PINK,
+        };
+        let tier = resolve_entry_tier(entry);
+        let tier_color = match tier {
+            "Confirmed" => LIVE_GREEN,
+            "Probable" => ENEMY_AMBER,
+            _ => TEXT_MUTED,
+        };
+
+        Frame::none()
+            .fill(CARD_BG)
+            .stroke(Stroke::new(
+                1.0,
+                if !entry.chat_message.is_empty() {
+                    ACCENT_PINK.linear_multiply(0.5)
+                } else {
+                    CARD_BORDER
+                },
+            ))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(Margin::symmetric(16.0, 14.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_max_width((ui.available_width() - 220.0).max(160.0));
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&entry.riot_id).font(FontId::proportional(16.0)).strong().color(ACCENT_PEARL));
+                            Frame::none()
+                                .fill(badge.linear_multiply(0.18))
+                                .stroke(Stroke::new(1.0, badge))
+                                .rounding(Rounding::same(4.0))
+                                .inner_margin(Margin::symmetric(6.0, 2.0))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(&entry.platform).size(11.0).strong().color(badge));
+                                });
+                            if !entry.team_relation.is_empty() {
+                                let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
+                                Frame::none()
+                                    .fill(tc.linear_multiply(0.18))
+                                    .stroke(Stroke::new(1.0, tc))
+                                    .rounding(Rounding::same(4.0))
+                                    .inner_margin(Margin::symmetric(6.0, 2.0))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new(&entry.team_relation).size(11.0).strong().color(tc));
+                                    });
+                            }
+                            let conf_label = if entry.confidence > 0 {
+                                format!("{tier} ({}%)", entry.confidence)
+                            } else {
+                                tier.to_string()
+                            };
+                            Frame::none()
+                                .fill(tier_color.linear_multiply(0.16))
+                                .stroke(Stroke::new(1.0, tier_color))
+                                .rounding(Rounding::same(4.0))
+                                .inner_margin(Margin::symmetric(6.0, 2.0))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(conf_label).size(10.5).strong().color(tier_color));
+                                });
+                            if !entry.server_region.is_empty() {
+                                Frame::none()
+                                    .fill(BTN_SECONDARY)
+                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .rounding(Rounding::same(4.0))
+                                    .inner_margin(Margin::symmetric(6.0, 2.0))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new(&entry.server_region).size(10.5).color(TEXT_MUTED));
+                                    });
+                            }
+                            if !entry.server_match_status.is_empty() {
+                                let sm_col = if entry.server_match_status.contains("Verified") {
+                                    ALLY_TEAL
+                                } else {
+                                    ENEMY_AMBER
+                                };
+                                ui.label(RichText::new(&entry.server_match_status).size(10.5).color(sm_col));
+                            }
+                            if !entry.chat_message.is_empty() {
+                                Frame::none()
+                                    .fill(ACCENT_PINK.linear_multiply(0.16))
+                                    .stroke(Stroke::new(1.0, ACCENT_BLUSH))
+                                    .rounding(Rounding::same(4.0))
+                                    .inner_margin(Margin::symmetric(6.0, 2.0))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new("In-Game Chat").size(10.5).strong().color(ACCENT_PEARL));
+                                    });
+                            }
+                            ui.label(RichText::new(&entry.channel).font(FontId::proportional(13.5)).strong().color(badge));
+                        });
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(13.0));
+                        if !entry.match_reason.is_empty() {
+                            ui.add_space(2.0);
+                            ui.label(RichText::new(&entry.match_reason).color(TEXT_MUTED).size(11.0));
+                        }
+                        if !entry.chat_message.is_empty() {
+                            ui.add_space(5.0);
+                            Frame::none()
+                                .fill(HEADER_BG)
+                                .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.4)))
+                                .rounding(Rounding::same(5.0))
+                                .inner_margin(Margin::symmetric(8.0, 4.0))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(format!("Chat: \"{}\"", entry.chat_message))
+                                            .color(ACCENT_BLUSH)
+                                            .size(11.5),
+                                    );
+                                });
+                        }
+                        ui.add_space(6.0);
+
+                        let mut meta_parts: Vec<&str> = Vec::new();
+                        if !entry.map_name.is_empty() {
+                            meta_parts.push(&entry.map_name);
+                        }
+                        if !entry.agent_name.is_empty() {
+                            meta_parts.push(&entry.agent_name);
+                        }
+                        if !entry.queue_name.is_empty() {
+                            meta_parts.push(&entry.queue_name);
+                        }
+                        meta_parts.push(&entry.timestamp);
+                        ui.label(RichText::new(meta_parts.join("  |  ")).color(TEXT_MUTED).size(11.5));
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if gradient_button(ui, "Watch Stream", Vec2::new(114.0, 32.0), true, 12.5)
+                            .on_hover_text(&entry.url)
+                            .clicked()
+                        {
+                            let _ = open::that(&entry.url);
+                        }
+
+                        let copy = egui::Button::new(RichText::new("Copy Link").color(TEXT_PRIMARY).size(12.5))
+                            .fill(BTN_SECONDARY)
+                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .rounding(Rounding::same(6.0))
+                            .min_size(Vec2::new(84.0, 32.0));
+                        if ui.add(copy).clicked() {
+                            if let Ok(mut cb) = Clipboard::new() {
+                                let _ = cb.set_text(entry.url.clone());
+                            }
+                            set_toast(&self.state, "Copied link to clipboard!");
+                        }
+                    });
+                });
+
+                if entry.candidates.len() > 1 {
+                    ui.add_space(10.0);
+                    Frame::none()
+                        .fill(HEADER_BG)
+                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .rounding(Rounding::same(6.0))
+                        .inner_margin(Margin::symmetric(10.0, 8.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "RANKED CANDIDATES FOR {} ({} MATCHES)",
+                                    entry.riot_id,
+                                    entry.candidates.len()
+                                ))
+                                .size(10.0)
+                                .strong()
+                                .color(TEXT_MUTED),
+                            );
+                            ui.add_space(5.0);
+                            for (idx, cand) in entry.candidates.iter().enumerate() {
+                                let c_badge = match cand.platform.as_str() {
+                                    "Twitch" => TWITCH_PURPLE,
+                                    "Kick" => KICK_GREEN,
+                                    _ => ACCENT_PINK,
+                                };
+                                let c_tier = if !cand.confidence_tier.is_empty() {
+                                    cand.confidence_tier.as_str()
+                                } else if cand.confidence >= 85 {
+                                    "Confirmed"
+                                } else if cand.confidence >= 65 {
+                                    "Probable"
+                                } else {
+                                    "Unverified"
+                                };
+                                let c_conf_col = match c_tier {
+                                    "Confirmed" => LIVE_GREEN,
+                                    "Probable" => ENEMY_AMBER,
+                                    _ => TEXT_MUTED,
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(format!("#{}", idx + 1))
+                                            .size(11.0)
+                                            .strong()
+                                            .color(if idx == 0 { ACCENT_BLUSH } else { TEXT_MUTED }),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("{}% {}", cand.confidence, c_tier))
+                                            .size(11.0)
+                                            .strong()
+                                            .color(c_conf_col),
+                                    );
+                                    ui.label(RichText::new(&cand.platform).size(11.0).strong().color(c_badge));
+                                    ui.label(RichText::new(&cand.channel).size(11.5).strong().color(TEXT_PRIMARY));
+                                    if !cand.region_hint.is_empty() {
+                                        ui.label(
+                                            RichText::new(format!("[{}]", cand.region_hint))
+                                                .size(10.5)
+                                                .color(ALLY_TEAL),
+                                        );
+                                    }
+                                    if !cand.match_reason.is_empty() {
+                                        ui.label(
+                                            RichText::new(format!("- {}", short(&cand.match_reason, 52)))
+                                                .size(10.5)
+                                                .color(TEXT_MUTED),
+                                        );
+                                    }
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let open_cand = egui::Button::new(
+                                            RichText::new("Open").size(10.5).color(ACCENT_PEARL),
+                                        )
+                                        .fill(BTN_SECONDARY)
+                                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                                        .rounding(Rounding::same(4.0));
+                                        if ui.add(open_cand).on_hover_text(&cand.url).clicked() {
+                                            let _ = open::that(&cand.url);
+                                        }
+                                    });
+                                });
+                                if idx + 1 < entry.candidates.len() {
+                                    ui.add_space(3.0);
+                                }
+                            }
+                        });
+                }
+            });
+    }
+
     fn render_history_tab(
         &mut self,
         ui: &mut egui::Ui,
         history: &[StreamerEntry],
         last_match: Option<&LastMatchSummary>,
     ) {
-        if let Some(m) = last_match {
-            let mode_color = match m.queue_name.as_str() {
-                "Competitive" | "Premier" => ACCENT_PINK,
-                "Deathmatch" | "Team Deathmatch" => ALLY_TEAL,
-                "Swiftplay" | "Spike Rush" | "Escalation" => ENEMY_AMBER,
-                _ => ACCENT_BLUSH,
-            };
-            Frame::none()
-                .fill(HEADER_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(7.0))
-                .inner_margin(Margin::symmetric(14.0, 9.0))
-                .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new("LAST SCANNED MATCH").size(10.5).strong().color(TEXT_MUTED));
-                        Frame::none()
-                            .fill(mode_color.linear_multiply(0.16))
-                            .stroke(Stroke::new(1.0, mode_color))
-                            .rounding(Rounding::same(4.0))
-                            .inner_margin(Margin::symmetric(6.0, 1.5))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(&m.queue_name).size(11.0).strong().color(mode_color));
-                            });
-                        ui.label(RichText::new(&m.map_name).size(12.5).strong().color(Color32::WHITE));
-                        if !m.my_agent.is_empty() {
-                            ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                            ui.label(RichText::new(format!("Agent: {}", m.my_agent)).color(TEXT_PRIMARY).size(12.0));
-                        }
-                        ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                        ui.label(
-                            RichText::new(format!("{} players checked", m.players_checked))
-                                .color(TEXT_MUTED)
-                                .size(12.0),
-                        );
-                        ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                        if m.streamers_found > 0 {
-                            ui.label(
-                                RichText::new(format!("{} live found", m.streamers_found))
-                                    .color(LIVE_GREEN)
-                                    .strong()
-                                    .size(12.0),
-                            );
-                        } else {
-                            ui.label(RichText::new("0 live").color(TEXT_MUTED).size(12.0));
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(&m.scanned_at).color(TEXT_MUTED).size(11.0));
-                        });
-                    });
-                });
-            ui.add_space(10.0);
-        }
-
+        // Row 1: Search + Team + Clear History
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
-                    .hint_text("Search Riot ID, platform, channel, map, or stream title...")
-                    .desired_width(320.0)
+                    .hint_text("Search Riot ID, platform, channel, map, server, or stream title...")
+                    .desired_width(300.0)
                     .margin(Margin::symmetric(10.0, 7.0)),
             );
             ui.add_space(6.0);
@@ -3959,7 +6313,7 @@ impl StreamerApp {
                 ui.selectable_value(&mut self.team_filter, f, label);
             }
             ui.add_space(6.0);
-            ui.label(RichText::new(format!("{} detected", history.len())).color(TEXT_MUTED).size(12.5));
+            ui.label(RichText::new(format!("{} total", history.len())).color(TEXT_MUTED).size(12.0));
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let clear = egui::Button::new(RichText::new("Clear History").color(TEXT_MUTED).size(12.0))
@@ -3971,152 +6325,266 @@ impl StreamerApp {
                     s.history.clear();
                     save_json("streamer_history.json", &s.history);
                 }
+                if self.has_active_history_filters() {
+                    ui.add_space(6.0);
+                    let reset = egui::Button::new(RichText::new("Reset Filters").color(ACCENT_BLUSH).size(12.0))
+                        .fill(BTN_SECONDARY)
+                        .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.5)))
+                        .rounding(Rounding::same(5.0));
+                    if ui.add(reset).clicked() {
+                        self.reset_history_filters();
+                    }
+                }
             });
         });
 
-        ui.add_space(14.0);
+        ui.add_space(8.0);
 
-        let q = self.search_query.to_lowercase();
+        // Row 2: Combinable filters - Match Type, Server, Date Range, Detection Status
+        let mut queue_options: Vec<String> = vec!["All".to_string()];
+        for qn in ["Competitive", "Unrated", "Swiftplay", "Deathmatch", "Team Deathmatch", "Spike Rush", "Premier"] {
+            queue_options.push(qn.to_string());
+        }
+        for e in history {
+            if !e.queue_name.is_empty() && !queue_options.iter().any(|x| x.eq_ignore_ascii_case(&e.queue_name)) {
+                queue_options.push(e.queue_name.clone());
+            }
+        }
+
+        let mut server_options: Vec<String> = vec!["All".to_string()];
+        for e in history {
+            if !e.server_region.is_empty() && !server_options.iter().any(|x| x.eq_ignore_ascii_case(&e.server_region)) {
+                server_options.push(e.server_region.clone());
+            }
+        }
+        if let Some(m) = last_match {
+            if !m.server_name.is_empty() && !server_options.iter().any(|x| x.eq_ignore_ascii_case(&m.server_name)) {
+                server_options.push(m.server_name.clone());
+            }
+        }
+        for reg in SERVER_REGIONS {
+            if !server_options.iter().any(|x| x.eq_ignore_ascii_case(reg.short_label)) {
+                server_options.push(reg.short_label.to_string());
+            }
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Match:").color(TEXT_MUTED).size(11.5));
+            egui::ComboBox::from_id_salt("history_match_type_filter")
+                .width(126.0)
+                .selected_text(&self.match_type_filter)
+                .show_ui(ui, |ui| {
+                    for opt in &queue_options {
+                        ui.selectable_value(&mut self.match_type_filter, opt.clone(), opt);
+                    }
+                });
+
+            ui.add_space(6.0);
+            ui.label(RichText::new("Server:").color(TEXT_MUTED).size(11.5));
+            egui::ComboBox::from_id_salt("history_server_filter")
+                .width(136.0)
+                .selected_text(&self.server_filter)
+                .show_ui(ui, |ui| {
+                    for opt in &server_options {
+                        ui.selectable_value(&mut self.server_filter, opt.clone(), opt);
+                    }
+                });
+
+            ui.add_space(6.0);
+            ui.label(RichText::new("Date:").color(TEXT_MUTED).size(11.5));
+            egui::ComboBox::from_id_salt("history_date_filter")
+                .width(104.0)
+                .selected_text(self.date_filter.label())
+                .show_ui(ui, |ui| {
+                    for opt in [
+                        DateRangeFilter::AllTime,
+                        DateRangeFilter::Today,
+                        DateRangeFilter::Last7Days,
+                        DateRangeFilter::Last30Days,
+                    ] {
+                        ui.selectable_value(&mut self.date_filter, opt, opt.label());
+                    }
+                });
+
+            ui.add_space(6.0);
+            ui.label(RichText::new("Status:").color(TEXT_MUTED).size(11.5));
+            egui::ComboBox::from_id_salt("history_status_filter")
+                .width(114.0)
+                .selected_text(self.status_filter.label())
+                .show_ui(ui, |ui| {
+                    for opt in [
+                        StatusFilter::All,
+                        StatusFilter::Confirmed,
+                        StatusFilter::Probable,
+                        StatusFilter::Unverified,
+                        StatusFilter::ChatPlug,
+                    ] {
+                        ui.selectable_value(&mut self.status_filter, opt, opt.label());
+                    }
+                });
+        });
+
+        ui.add_space(12.0);
+
+        let now_local = Local::now();
         let filtered: Vec<&StreamerEntry> = history
             .iter()
             .filter(|e| {
-                let team_ok = match self.team_filter {
-                    TeamFilter::All => true,
-                    TeamFilter::Ally => e.team_relation.eq_ignore_ascii_case("Ally"),
-                    TeamFilter::Enemy => e.team_relation.eq_ignore_ascii_case("Enemy"),
-                };
-                team_ok
-                    && (q.is_empty()
-                        || e.riot_id.to_lowercase().contains(&q)
-                        || e.platform.to_lowercase().contains(&q)
-                        || e.channel.to_lowercase().contains(&q)
-                        || e.title.to_lowercase().contains(&q)
-                        || e.chat_message.to_lowercase().contains(&q)
-                        || e.map_name.to_lowercase().contains(&q)
-                        || e.agent_name.to_lowercase().contains(&q))
+                entry_matches_history_filters(
+                    e,
+                    &self.search_query,
+                    self.team_filter,
+                    &self.match_type_filter,
+                    &self.server_filter,
+                    self.date_filter,
+                    self.status_filter,
+                    now_local,
+                )
             })
             .collect();
 
-        if filtered.is_empty() {
-            ui.add_space(80.0);
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(18.0)).strong().color(TEXT_PRIMARY));
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new("Play a match or click '+ Add Streamer' to register your Riot ID & channel.")
-                        .color(TEXT_MUTED)
-                        .size(13.0),
-                );
-            });
-            return;
-        }
+        // Separate Latest Match entries from Previous History entries without duplicating or altering order
+        let latest_match_id = last_match.map(|m| m.match_id.as_str()).filter(|id| !id.is_empty());
+        let (latest_entries, previous_entries): (Vec<&StreamerEntry>, Vec<&StreamerEntry>) = match latest_match_id {
+            Some(mid) => filtered.into_iter().partition(|e| e.match_id == mid),
+            None => (Vec::new(), filtered),
+        };
+
+        let filters_active = self.has_active_history_filters();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for entry in filtered {
-                let badge = match entry.platform.as_str() {
-                    "Twitch" => TWITCH_PURPLE,
-                    "Kick" => KICK_GREEN,
-                    _ => ACCENT_PINK,
+            // Subsection 1: LATEST MATCH
+            if let Some(m) = last_match {
+                let mode_color = match m.queue_name.as_str() {
+                    "Competitive" | "Premier" => ACCENT_PINK,
+                    "Deathmatch" | "Team Deathmatch" => ALLY_TEAL,
+                    "Swiftplay" | "Spike Rush" | "Escalation" => ENEMY_AMBER,
+                    _ => ACCENT_BLUSH,
                 };
-
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("LATEST MATCH").size(11.5).strong().color(ACCENT_PINK));
+                    ui.label(RichText::new("Most recently completed & scanned game").size(11.0).color(TEXT_MUTED));
+                });
+                ui.add_space(5.0);
                 Frame::none()
-                    .fill(CARD_BG)
-                    .stroke(Stroke::new(1.0, if !entry.chat_message.is_empty() { ACCENT_PINK.linear_multiply(0.5) } else { CARD_BORDER }))
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(16.0, 14.0))
+                    .fill(HEADER_BG)
+                    .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.35)))
+                    .rounding(Rounding::same(7.0))
+                    .inner_margin(Margin::symmetric(14.0, 9.0))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.set_max_width((ui.available_width() - 220.0).max(160.0));
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label(RichText::new(&entry.riot_id).font(FontId::proportional(16.0)).strong().color(ACCENT_PEARL));
-                                    Frame::none()
-                                        .fill(badge.linear_multiply(0.18))
-                                        .stroke(Stroke::new(1.0, badge))
-                                        .rounding(Rounding::same(4.0))
-                                        .inner_margin(Margin::symmetric(6.0, 2.0))
-                                        .show(ui, |ui| {
-                                            ui.label(RichText::new(&entry.platform).size(11.0).strong().color(badge));
-                                        });
-                                    if !entry.team_relation.is_empty() {
-                                        let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
-                                        Frame::none()
-                                            .fill(tc.linear_multiply(0.18))
-                                            .stroke(Stroke::new(1.0, tc))
-                                            .rounding(Rounding::same(4.0))
-                                            .inner_margin(Margin::symmetric(6.0, 2.0))
-                                            .show(ui, |ui| {
-                                                ui.label(RichText::new(&entry.team_relation).size(11.0).strong().color(tc));
-                                            });
-                                    }
-                                    if !entry.chat_message.is_empty() {
-                                        Frame::none()
-                                            .fill(ACCENT_PINK.linear_multiply(0.16))
-                                            .stroke(Stroke::new(1.0, ACCENT_BLUSH))
-                                            .rounding(Rounding::same(4.0))
-                                            .inner_margin(Margin::symmetric(6.0, 2.0))
-                                            .show(ui, |ui| {
-                                                ui.label(RichText::new("In-Game Chat").size(10.5).strong().color(ACCENT_PEARL));
-                                            });
-                                    }
-                                    ui.label(RichText::new(&entry.channel).font(FontId::proportional(13.5)).strong().color(badge));
+                        ui.horizontal_wrapped(|ui| {
+                            Frame::none()
+                                .fill(mode_color.linear_multiply(0.16))
+                                .stroke(Stroke::new(1.0, mode_color))
+                                .rounding(Rounding::same(4.0))
+                                .inner_margin(Margin::symmetric(6.0, 1.5))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(&m.queue_name).size(11.0).strong().color(mode_color));
                                 });
-                                ui.add_space(4.0);
-                                ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(13.0));
-                                if !entry.chat_message.is_empty() {
-                                    ui.add_space(5.0);
-                                    Frame::none()
-                                        .fill(HEADER_BG)
-                                        .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.4)))
-                                        .rounding(Rounding::same(5.0))
-                                        .inner_margin(Margin::symmetric(8.0, 4.0))
-                                        .show(ui, |ui| {
-                                            ui.label(
-                                                RichText::new(format!("Chat: \"{}\"", entry.chat_message))
-                                                    .color(ACCENT_BLUSH)
-                                                    .size(11.5),
-                                            );
-                                        });
-                                }
-                                ui.add_space(6.0);
-
-                                let mut meta_parts: Vec<&str> = Vec::new();
-                                if !entry.map_name.is_empty() {
-                                    meta_parts.push(&entry.map_name);
-                                }
-                                if !entry.agent_name.is_empty() {
-                                    meta_parts.push(&entry.agent_name);
-                                }
-                                if !entry.queue_name.is_empty() {
-                                    meta_parts.push(&entry.queue_name);
-                                }
-                                meta_parts.push(&entry.timestamp);
-                                ui.label(RichText::new(meta_parts.join("  |  ")).color(TEXT_MUTED).size(11.5));
-                            });
-
+                            ui.label(RichText::new(&m.map_name).size(12.5).strong().color(Color32::WHITE));
+                            if !m.server_name.is_empty() {
+                                ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                                ui.label(RichText::new(&m.server_name).color(ALLY_TEAL).size(11.5).strong());
+                            }
+                            if !m.my_agent.is_empty() {
+                                ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                                ui.label(RichText::new(format!("Agent: {}", m.my_agent)).color(TEXT_PRIMARY).size(12.0));
+                            }
+                            ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                            ui.label(
+                                RichText::new(format!("{} players checked", m.players_checked))
+                                    .color(TEXT_MUTED)
+                                    .size(12.0),
+                            );
+                            if m.party_skipped > 0 {
+                                ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                                ui.label(
+                                    RichText::new(format!("{} party skipped", m.party_skipped))
+                                        .color(ALLY_TEAL)
+                                        .size(11.5),
+                                );
+                            }
+                            ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
+                            if m.streamers_found > 0 {
+                                ui.label(
+                                    RichText::new(format!("{} live found", m.streamers_found))
+                                        .color(LIVE_GREEN)
+                                        .strong()
+                                        .size(12.0),
+                                );
+                            } else {
+                                ui.label(RichText::new("0 live").color(TEXT_MUTED).size(12.0));
+                            }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if gradient_button(ui, "Watch Stream", Vec2::new(114.0, 32.0), true, 12.5)
-                                    .on_hover_text(&entry.url)
-                                    .clicked()
-                                {
-                                    let _ = open::that(&entry.url);
-                                }
-
-                                let copy = egui::Button::new(RichText::new("Copy Link").color(TEXT_PRIMARY).size(12.5))
-                                    .fill(BTN_SECONDARY)
-                                    .stroke(Stroke::new(1.0, CARD_BORDER))
-                                    .rounding(Rounding::same(6.0))
-                                    .min_size(Vec2::new(84.0, 32.0));
-                                if ui.add(copy).clicked() {
-                                    if let Ok(mut cb) = Clipboard::new() {
-                                        let _ = cb.set_text(entry.url.clone());
-                                    }
-                                    set_toast(&self.state, "Copied link to clipboard!");
-                                }
+                                ui.label(RichText::new(&m.scanned_at).color(TEXT_MUTED).size(11.0));
                             });
                         });
                     });
-                ui.add_space(10.0);
+
+                ui.add_space(8.0);
+                if !latest_entries.is_empty() {
+                    for entry in &latest_entries {
+                        self.render_history_card(ui, entry);
+                        ui.add_space(8.0);
+                    }
+                } else {
+                    let msg = if filters_active && m.streamers_found > 0 {
+                        "Latest match detections hidden by active filters."
+                    } else {
+                        "No live streamers detected in your latest match."
+                    };
+                    ui.label(RichText::new(msg).color(TEXT_MUTED).size(12.0));
+                    ui.add_space(6.0);
+                }
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(8.0);
+            }
+
+            // Subsection 2: PREVIOUS HISTORY
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("PREVIOUS HISTORY").size(11.5).strong().color(TEXT_PRIMARY));
+                ui.label(
+                    RichText::new(format!("({} matching entries)", previous_entries.len()))
+                        .size(11.0)
+                        .color(TEXT_MUTED),
+                );
+            });
+            ui.add_space(8.0);
+
+            if previous_entries.is_empty() && latest_entries.is_empty() {
+                ui.add_space(40.0);
+                ui.vertical_centered(|ui| {
+                    if history.is_empty() {
+                        ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(17.0)).strong().color(TEXT_PRIMARY));
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("Play a match or click '+ Add Streamer' to register a Riot ID & channel.")
+                                .color(TEXT_MUTED)
+                                .size(12.5),
+                        );
+                    } else {
+                        ui.label(RichText::new("No Records Match Your Active Filters").font(FontId::proportional(17.0)).strong().color(TEXT_PRIMARY));
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("Your saved history is intact. Adjust or reset filters to view older records.")
+                                .color(TEXT_MUTED)
+                                .size(12.5),
+                        );
+                        ui.add_space(10.0);
+                        if gradient_button(ui, "Reset Filters", Vec2::new(118.0, 30.0), true, 12.0).clicked() {
+                            self.reset_history_filters();
+                        }
+                    }
+                });
+            } else if previous_entries.is_empty() {
+                ui.label(RichText::new("No earlier history records match your current filters.").color(TEXT_MUTED).size(12.0));
+            } else {
+                for entry in previous_entries {
+                    self.render_history_card(ui, entry);
+                    ui.add_space(10.0);
+                }
             }
         });
     }
@@ -4137,30 +6605,37 @@ impl StreamerApp {
             ui.selectable_value(
                 &mut self.dir_source_tab,
                 DirectorySourceTab::Community,
-                format!("Community Cache ({})", remote_dir.len()),
+                format!("Community Database ({})", remote_dir.len()),
             );
             ui.add_space(10.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.dir_search)
-                    .hint_text("Filter Riot ID or channel...")
-                    .desired_width(220.0)
+                    .hint_text("Filter Riot ID, alias, channel, or server...")
+                    .desired_width(230.0)
                     .margin(Margin::symmetric(8.0, 6.0)),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let sync_label = if is_syncing { "Syncing..." } else { "Sync GitHub" };
+                let sync_label = if is_syncing { "Syncing..." } else { "Sync Database" };
                 let sync_btn = egui::Button::new(RichText::new(sync_label).color(TEXT_PRIMARY).size(12.0))
                     .fill(BTN_SECONDARY)
                     .stroke(Stroke::new(1.0, CARD_BORDER))
                     .rounding(Rounding::same(5.0))
-                    .min_size(Vec2::new(98.0, 28.0));
+                    .min_size(Vec2::new(108.0, 28.0));
                 if ui.add_enabled(!is_syncing, sync_btn).clicked() {
                     let _ = self.manual_scan_tx.send(ScanTrigger::RefreshDirectory);
                 }
             });
         });
 
-        ui.add_space(12.0);
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("Community contributions are moderated before being merged into the central streamers.json database.")
+                .color(TEXT_MUTED)
+                .size(11.5),
+        );
+        ui.add_space(10.0);
+
         let q = self.dir_search.to_lowercase();
         let list = match self.dir_source_tab {
             DirectorySourceTab::Custom => local_dir,
@@ -4171,8 +6646,11 @@ impl StreamerApp {
             .filter(|d| {
                 q.is_empty()
                     || d.riot_id.to_lowercase().contains(&q)
+                    || d.display_name.to_lowercase().contains(&q)
                     || d.channel_name.to_lowercase().contains(&q)
                     || d.platform.to_lowercase().contains(&q)
+                    || d.server_region.to_lowercase().contains(&q)
+                    || d.aliases.iter().any(|a| a.to_lowercase().contains(&q))
             })
             .collect();
 
@@ -4181,7 +6659,7 @@ impl StreamerApp {
             ui.vertical_centered(|ui| {
                 let msg = match self.dir_source_tab {
                     DirectorySourceTab::Custom => "No custom streamers saved yet. Click '+ Add Streamer' to add one.",
-                    DirectorySourceTab::Community => "Community directory cache is empty. Click 'Sync GitHub' or check your repo in Settings.",
+                    DirectorySourceTab::Community => "Community database cache is empty. Click 'Sync Database' to fetch the latest streamers.json.",
                 };
                 ui.label(RichText::new(msg).color(TEXT_MUTED).size(13.0));
             });
@@ -4206,11 +6684,41 @@ impl StreamerApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(14.5));
                                     ui.label(RichText::new(&d.platform).strong().color(badge).size(12.0));
                                     ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(13.0));
+                                    if d.verified {
+                                        Frame::none()
+                                            .fill(LIVE_GREEN.linear_multiply(0.16))
+                                            .stroke(Stroke::new(1.0, LIVE_GREEN))
+                                            .rounding(Rounding::same(4.0))
+                                            .inner_margin(Margin::symmetric(5.0, 1.5))
+                                            .show(ui, |ui| {
+                                                ui.label(RichText::new("Verified").size(10.0).strong().color(LIVE_GREEN));
+                                            });
+                                    }
+                                    if !d.server_region.is_empty() {
+                                        let reg_label = server_region_by_code(&d.server_region)
+                                            .map(|r| r.short_label)
+                                            .unwrap_or(&d.server_region);
+                                        Frame::none()
+                                            .fill(BTN_SECONDARY)
+                                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                                            .rounding(Rounding::same(4.0))
+                                            .inner_margin(Margin::symmetric(5.0, 1.5))
+                                            .show(ui, |ui| {
+                                                ui.label(RichText::new(reg_label).size(10.5).color(ALLY_TEAL));
+                                            });
+                                    }
                                 });
+                                if !d.aliases.is_empty() {
+                                    ui.label(
+                                        RichText::new(format!("Aliases: {}", d.aliases.join(", ")))
+                                            .color(ACCENT_BLUSH)
+                                            .size(11.0),
+                                    );
+                                }
                                 ui.label(RichText::new(&d.channel_url).color(TEXT_MUTED).size(11.5));
                             });
 
@@ -4258,60 +6766,400 @@ impl StreamerApp {
         }
     }
 
+    fn render_discover_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        recs_enabled: bool,
+        recommendations: &RecommendationsState,
+        active_region: &ServerRegionInfo,
+    ) {
+        if !recs_enabled {
+            ui.add_space(36.0);
+            Frame::none()
+                .fill(CARD_BG)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .rounding(Rounding::same(10.0))
+                .inner_margin(Margin::same(24.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("Live Streamer Recommendations are OFF")
+                                    .font(FontId::proportional(17.0))
+                                    .strong()
+                                    .color(ACCENT_PEARL),
+                            );
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Disabled by default to save internet bandwidth and external API quota (zero background requests while OFF). Enable to browse optional Twitch and YouTube Valorant streams for {}.",
+                                    active_region.label
+                                ))
+                                .color(TEXT_MUTED)
+                                .size(12.5),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new("Note: Recommended streams are regional discovery suggestions and are never treated as confirmed player detections from your matches.")
+                                    .color(ENEMY_AMBER)
+                                    .size(11.5),
+                            );
+                        });
+                    });
+                    ui.add_space(16.0);
+                    let mut enable_now = false;
+                    if toggle_row(
+                        ui,
+                        &mut enable_now,
+                        "Enable Live Streamer Recommendations (Twitch & YouTube)",
+                        "Uses additional internet bandwidth when opened or refreshed (5-minute local cache).",
+                    ) && enable_now
+                    {
+                        self.cfg_draft.enable_recommendations = true;
+                        {
+                            let mut s = lock(&self.state);
+                            s.config.enable_recommendations = true;
+                            save_json("config.json", &s.config);
+                        }
+                        self.trigger_recommendations_fetch(active_region.code, false);
+                    }
+                });
+            return;
+        }
+
+        ui.horizontal(|ui| {
+            for (plat, lbl) in [
+                (DiscoverPlatformFilter::All, "All Platforms"),
+                (DiscoverPlatformFilter::Twitch, "Twitch"),
+                (DiscoverPlatformFilter::YouTube, "YouTube"),
+            ] {
+                ui.selectable_value(&mut self.discover_platform, plat, lbl);
+            }
+            ui.add_space(8.0);
+            Frame::none()
+                .fill(BTN_SECONDARY)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .rounding(Rounding::same(4.0))
+                .inner_margin(Margin::symmetric(8.0, 3.0))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(format!("Server: {}", active_region.label)).size(11.5).color(ALLY_TEAL));
+                });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut keep_on = true;
+                if toggle_slider(ui, &mut keep_on).changed() && !keep_on {
+                    self.cfg_draft.enable_recommendations = false;
+                    let mut s = lock(&self.state);
+                    s.config.enable_recommendations = false;
+                    s.recommendations = RecommendationsState::Idle;
+                    s.recommendations_cache = None;
+                    save_json("config.json", &s.config);
+                    return;
+                }
+                ui.label(RichText::new("ON").size(10.5).strong().color(ACCENT_BLUSH));
+                ui.add_space(8.0);
+
+                let busy = matches!(recommendations, RecommendationsState::Loading);
+                let ref_lbl = if busy { "Refreshing..." } else { "Refresh Live" };
+                if gradient_button(ui, ref_lbl, Vec2::new(112.0, 28.0), !busy, 12.0).clicked() {
+                    self.trigger_recommendations_fetch(active_region.code, true);
+                }
+            });
+        });
+
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("Discovery Suggestions (Not Matched to Your Lobby)  |  Cached for 5 minutes to reduce bandwidth & API usage.")
+                .color(TEXT_MUTED)
+                .size(11.0),
+        );
+        ui.add_space(10.0);
+
+        match recommendations {
+            RecommendationsState::Idle => {
+                ui.add_space(50.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("Click 'Refresh Live' to load regional Twitch & YouTube Valorant streams.").color(TEXT_MUTED).size(13.0));
+                });
+            }
+            RecommendationsState::Loading => {
+                ui.add_space(60.0);
+                ui.vertical_centered(|ui| {
+                    ui.spinner();
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(format!("Fetching live Twitch & YouTube Valorant streamers for {}...", active_region.short_label))
+                            .color(TEXT_MUTED)
+                            .size(13.0),
+                    );
+                });
+            }
+            RecommendationsState::Error(err) => {
+                Frame::none()
+                    .fill(ERR_ROSE.linear_multiply(0.12))
+                    .stroke(Stroke::new(1.0, ERR_ROSE.linear_multiply(0.6)))
+                    .rounding(Rounding::same(6.0))
+                    .inner_margin(Margin::same(14.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            paint_cross_icon(ui, ERR_ROSE);
+                            ui.label(RichText::new(err).color(ERR_ROSE).size(12.5));
+                        });
+                    });
+            }
+            RecommendationsState::Loaded(items, fetched_at) => {
+                let filtered: Vec<&RecommendedStreamer> = items
+                    .iter()
+                    .filter(|r| match self.discover_platform {
+                        DiscoverPlatformFilter::All => true,
+                        DiscoverPlatformFilter::Twitch => r.platform.eq_ignore_ascii_case("Twitch"),
+                        DiscoverPlatformFilter::YouTube => r.platform.eq_ignore_ascii_case("YouTube"),
+                    })
+                    .collect();
+
+                ui.label(
+                    RichText::new(format!(
+                        "Showing {} recommended streams for {}  |  Updated {}",
+                        filtered.len(),
+                        active_region.short_label,
+                        fetched_at
+                    ))
+                    .color(TEXT_MUTED)
+                    .size(11.5),
+                );
+                ui.add_space(8.0);
+
+                if filtered.is_empty() {
+                    ui.add_space(40.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            RichText::new("No live Valorant streams found for this platform filter. Try 'All Platforms' or Refresh.")
+                                .color(TEXT_MUTED)
+                                .size(13.0),
+                        );
+                    });
+                    return;
+                }
+
+                let mut prefill_rec: Option<RecommendedStreamer> = None;
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for rec in filtered {
+                        let badge = if rec.platform.eq_ignore_ascii_case("Twitch") {
+                            TWITCH_PURPLE
+                        } else {
+                            ACCENT_PINK
+                        };
+                        Frame::none()
+                            .fill(CARD_BG)
+                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .rounding(Rounding::same(8.0))
+                            .inner_margin(Margin::symmetric(14.0, 12.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.set_max_width((ui.available_width() - 210.0).max(160.0));
+                                        ui.horizontal_wrapped(|ui| {
+                                            paint_status_dot(ui, LIVE_GREEN, true);
+                                            ui.label(RichText::new(&rec.channel).strong().color(ACCENT_PEARL).size(14.5));
+                                            Frame::none()
+                                                .fill(badge.linear_multiply(0.18))
+                                                .stroke(Stroke::new(1.0, badge))
+                                                .rounding(Rounding::same(4.0))
+                                                .inner_margin(Margin::symmetric(6.0, 1.5))
+                                                .show(ui, |ui| {
+                                                    ui.label(RichText::new(&rec.platform).size(10.5).strong().color(badge));
+                                                });
+                                            if let Some(v) = rec.viewers {
+                                                ui.label(RichText::new(format_viewers(v)).size(11.5).color(LIVE_GREEN));
+                                            }
+                                            ui.label(RichText::new(&rec.region_label).size(11.0).color(TEXT_MUTED));
+                                        });
+                                        ui.add_space(3.0);
+                                        ui.label(RichText::new(&rec.title).color(TEXT_PRIMARY).size(12.5));
+                                    });
+
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if gradient_button(ui, "Watch Live", Vec2::new(98.0, 30.0), true, 12.0)
+                                            .on_hover_text(&rec.url)
+                                            .clicked()
+                                        {
+                                            let _ = open::that(&rec.url);
+                                        }
+                                        let save_btn = egui::Button::new(RichText::new("+ Directory").color(TEXT_PRIMARY).size(11.5))
+                                            .fill(BTN_SECONDARY)
+                                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                                            .rounding(Rounding::same(6.0))
+                                            .min_size(Vec2::new(88.0, 30.0));
+                                        if ui.add(save_btn).clicked() {
+                                            prefill_rec = Some(rec.clone());
+                                        }
+                                    });
+                                });
+                            });
+                        ui.add_space(8.0);
+                    }
+                });
+
+                if let Some(rec) = prefill_rec {
+                    self.open_add_modal_from_rec(&rec, active_region.code);
+                }
+            }
+        }
+    }
+
     fn render_settings_tab(
         &mut self,
         ui: &mut egui::Ui,
         yt_check: &CheckState,
         twitch_check: &CheckState,
         update_state: &UpdateState,
+        detected_server_code: &str,
+        active_region: &ServerRegionInfo,
     ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // Card 1: Valorant Servers & Detection (GitHub owner/repo intentionally hidden from end users)
             Frame::none()
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
                 .rounding(Rounding::same(8.0))
                 .inner_margin(Margin::same(18.0))
                 .show(ui, |ui| {
-                    ui.label(RichText::new("Riot Shard & Community Directory").font(FontId::proportional(15.0)).strong().color(Color32::WHITE));
+                    ui.label(
+                        RichText::new("Valorant Servers & Region Detection")
+                            .font(FontId::proportional(15.0))
+                            .strong()
+                            .color(Color32::WHITE),
+                    );
+                    ui.label(
+                        RichText::new(
+                            "Matches streamers to the exact Valorant server you play on to prevent cross-region false positives (e.g. US streamers showing up in Mumbai lobbies).",
+                        )
+                        .color(TEXT_MUTED)
+                        .size(12.0),
+                    );
                     ui.add_space(10.0);
 
-                    ui.label(RichText::new("Riot Shard").strong().color(TEXT_PRIMARY).size(12.5));
-                    ui.horizontal_wrapped(|ui| {
-                        for (code, label) in [
-                            ("auto", "Auto-detect (ShooterGame.log)"),
-                            ("ap", "AP (Mumbai)"),
-                            ("na", "NA / LATAM / BR"),
-                            ("eu", "EU (Europe)"),
-                            ("kr", "KR (Korea)"),
-                        ] {
-                            ui.selectable_value(&mut self.cfg_draft.shard_override, code.to_string(), label);
-                        }
-                    });
-                    ui.add_space(12.0);
+                    let selected_label = if self.cfg_draft.server_override.eq_ignore_ascii_case("auto") {
+                        format!("Auto-detect from Riot log (Current: {})", active_region.label)
+                    } else {
+                        server_region_by_code(&self.cfg_draft.server_override)
+                            .map(|r| r.label.to_string())
+                            .unwrap_or_else(|| self.cfg_draft.server_override.clone())
+                    };
 
                     ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("GitHub Directory Owner").strong().color(TEXT_PRIMARY).size(12.5));
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.cfg_draft.github_owner)
-                                    .desired_width(240.0)
-                                    .margin(Margin::symmetric(8.0, 6.0)),
-                            );
-                        });
-                        ui.add_space(14.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("GitHub Directory Repo").strong().color(TEXT_PRIMARY).size(12.5));
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.cfg_draft.github_repo)
-                                    .desired_width(260.0)
-                                    .margin(Margin::symmetric(8.0, 6.0)),
-                            );
-                        });
+                        ui.label(RichText::new("Active Server").strong().color(TEXT_PRIMARY).size(12.5));
+                        ui.add_space(10.0);
+                        egui::ComboBox::from_id_salt("settings_server_region_combo")
+                            .width(360.0)
+                            .selected_text(selected_label)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.cfg_draft.server_override,
+                                    "auto".to_string(),
+                                    "Auto-detect (ShooterGame.log server pod)",
+                                );
+                                for reg in SERVER_REGIONS {
+                                    ui.selectable_value(
+                                        &mut self.cfg_draft.server_override,
+                                        reg.code.to_string(),
+                                        reg.label,
+                                    );
+                                }
+                            });
                     });
+
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("Quick Select:").color(TEXT_MUTED).size(11.5));
+                        for (code, lbl) in [
+                            ("auto", "Auto"),
+                            ("ap-mumbai", "Mumbai"),
+                            ("ap-tokyo", "Tokyo"),
+                            ("ap-manila", "Manila"),
+                            ("ap-singapore", "Singapore"),
+                            ("na-austin", "Austin / TX"),
+                            ("na-us-east", "US East"),
+                            ("eu-frankfurt", "Frankfurt"),
+                            ("eu-london", "London"),
+                            ("kr-seoul", "Seoul"),
+                        ] {
+                            ui.selectable_value(&mut self.cfg_draft.server_override, code.to_string(), lbl);
+                        }
+                    });
+
+                    ui.add_space(8.0);
+                    let detected_info = server_region_by_code(detected_server_code)
+                        .map(|r| r.label)
+                        .unwrap_or("Waiting for game server pod in ShooterGame.log");
+                    ui.label(
+                        RichText::new(format!("Detected Server Pod: {detected_info}"))
+                            .color(ALLY_TEAL)
+                            .size(11.5),
+                    );
+                    ui.label(
+                        RichText::new("Community Streamer Database syncs automatically in the background (no Git setup required).")
+                            .color(TEXT_MUTED)
+                            .size(11.0),
+                    );
                 });
 
             ui.add_space(12.0);
 
+            // Card 2: Features & Windows Integration (left-to-right ON/OFF toggle sliders)
+            Frame::none()
+                .fill(CARD_BG)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(Margin::same(18.0))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new("Features & Windows Integration")
+                            .font(FontId::proportional(15.0))
+                            .strong()
+                            .color(ACCENT_PEARL),
+                    );
+                    ui.add_space(10.0);
+
+                    toggle_row(
+                        ui,
+                        &mut self.cfg_draft.skip_party_members,
+                        "Skip Party Members During Scans (Save API Calls)",
+                        "ON by default. Uses match-details partyId (zero extra Riot calls) to skip scanning your premade teammates on YouTube, Twitch, and Kick.",
+                    );
+                    ui.add_space(8.0);
+                    toggle_row(
+                        ui,
+                        &mut self.cfg_draft.enable_recommendations,
+                        "Live Streamer Recommendations (Twitch & YouTube)",
+                        "OFF by default to save internet bandwidth. Turn ON to browse optional regional Valorant streams under the Discover tab.",
+                    );
+                    ui.add_space(8.0);
+                    toggle_row(
+                        ui,
+                        &mut self.cfg_draft.capture_in_game_chat,
+                        "Post-Match In-Game Chat Stream Plugs",
+                        "Reads local post-match text chat for YouTube, Twitch, or Kick links posted by players.",
+                    );
+                    ui.add_space(8.0);
+                    toggle_row(
+                        ui,
+                        &mut self.cfg_draft.start_with_windows,
+                        "Start Silently with Windows",
+                        "Launches minimized in the system tray at Windows logon (HKCU Run).",
+                    );
+                    ui.add_space(8.0);
+                    toggle_row(
+                        ui,
+                        &mut self.cfg_draft.use_custom_toast_app_id,
+                        "Custom Windows Toast App ID",
+                        "Shows 'Valorant Streamer Radar' as the sender on desktop notifications instead of PowerShell.",
+                    );
+                });
+
+            ui.add_space(12.0);
+
+            // Card 3: Optional Platform API Keys
             Frame::none()
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
@@ -4321,7 +7169,9 @@ impl StreamerApp {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Optional Platform API Keys").font(FontId::proportional(15.0)).strong().color(Color32::WHITE));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.checkbox(&mut self.show_api_secrets, "Show keys");
+                            toggle_slider(ui, &mut self.show_api_secrets);
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("Show keys").color(TEXT_MUTED).size(11.5));
                         });
                     });
                     ui.label(RichText::new("Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.").color(TEXT_MUTED).size(12.0));
@@ -4462,27 +7312,7 @@ impl StreamerApp {
 
             ui.add_space(12.0);
 
-            Frame::none()
-                .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(Margin::same(18.0))
-                .show(ui, |ui| {
-                    ui.label(RichText::new("In-Game Chat & Windows Integration").font(FontId::proportional(15.0)).strong().color(ACCENT_PEARL));
-                    ui.add_space(8.0);
-                    ui.checkbox(
-                        &mut self.cfg_draft.capture_in_game_chat,
-                        "Read post-match in-game text chat for stream links (e.g. 'live on yt', YouTube/Twitch/Kick plugs)",
-                    );
-                    ui.checkbox(&mut self.cfg_draft.start_with_windows, "Start silently with Windows (HKCU Run)");
-                    ui.checkbox(
-                        &mut self.cfg_draft.use_custom_toast_app_id,
-                        "Register custom Windows Toast AppUserModelID (shows 'Valorant Streamer Radar' instead of PowerShell)",
-                    );
-                });
-
-            ui.add_space(12.0);
-
+            // Card 4: App Updates & Version
             Frame::none()
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
@@ -4499,7 +7329,7 @@ impl StreamerApp {
                             );
                             ui.label(
                                 RichText::new(format!(
-                                    "Installed: v{APP_VERSION} (build {APP_BUILD_SHA})  |  Source: {UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}"
+                                    "Installed: v{APP_VERSION} (build {APP_BUILD_SHA})"
                                 ))
                                 .color(TEXT_MUTED)
                                 .size(12.0),
@@ -4529,7 +7359,7 @@ impl StreamerApp {
                             };
                             if gradient_button(ui, check_lbl, Vec2::new(136.0, 32.0), !busy, 12.0).clicked() {
                                 lock(&self.state).update_state = UpdateState::Checking;
-                                let _ = self.bg_tx.send(BgTask::CheckForUpdates);
+                                let _ = self.bg_tx.send(BgTask::CheckForUpdates { silent: false });
                             }
                         });
                     });
@@ -4543,7 +7373,7 @@ impl StreamerApp {
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(format!("New build ready: {}", info.release_name))
+                                    RichText::new(format!("New release ready: {} ({})", info.release_name, info.tag_name))
                                         .color(ACCENT_BLUSH)
                                         .strong()
                                         .size(12.0),
@@ -4553,6 +7383,10 @@ impl StreamerApp {
                                     let _ = self.bg_tx.send(BgTask::InstallUpdate(info.clone()));
                                 }
                             });
+                            if !info.changelog.is_empty() {
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(&info.changelog).color(TEXT_MUTED).size(11.5));
+                            }
                         }
                         UpdateState::Downloading(msg) | UpdateState::Installing(msg) => {
                             ui.add_space(8.0);
@@ -4630,7 +7464,8 @@ fn main() -> Result<()> {
         is_scanning: false,
         is_syncing_directory: false,
         riot_status: RiotStatus::Offline,
-        detected_shard: "ap".to_string(),
+        detected_api_region: "ap".to_string(),
+        detected_server: String::new(),
         config: config.clone(),
         history: load_json("streamer_history.json"),
         local_directory: load_json("custom_streamers.json"),
@@ -4643,6 +7478,9 @@ fn main() -> Result<()> {
         twitch_key_check: CheckState::Idle,
         streamer_verify: CheckState::Idle,
         update_state: UpdateState::Idle,
+        notified_update_key: None,
+        recommendations: RecommendationsState::Idle,
+        recommendations_cache: None,
     }));
 
     let tray_menu = Menu::new();
@@ -4678,8 +7516,8 @@ fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Valorant Streamer Radar")
             .with_icon(window_icon)
-            .with_inner_size([840.0, 580.0])
-            .with_min_inner_size([660.0, 440.0])
+            .with_inner_size([880.0, 620.0])
+            .with_min_inner_size([680.0, 460.0])
             .with_visible(!start_hidden),
         ..Default::default()
     };
@@ -4730,7 +7568,7 @@ fn main() -> Result<()> {
                     let _ = tx_menu.send(ScanTrigger::Manual);
                 } else if event.id == update_id {
                     lock(&st_menu).update_state = UpdateState::Checking;
-                    let _ = bg_menu.send(BgTask::CheckForUpdates);
+                    let _ = bg_menu.send(BgTask::CheckForUpdates { silent: false });
                     show_window(&ctx_menu);
                 } else if event.id == quit_id {
                     quit_app(&ctx_menu);
@@ -4740,6 +7578,7 @@ fn main() -> Result<()> {
             let state_bg = state.clone();
             let ctx_bg = ctx.clone();
             let tx_bg = scan_tx.clone();
+            let bg_startup = bg_tx.clone();
 
             let spawned = std::thread::Builder::new().name("radar-bg".into()).spawn(move || {
                 let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
@@ -4763,7 +7602,7 @@ fn main() -> Result<()> {
                         .build()
                         .expect("public HTTP client");
 
-                    // Non-blocking worker for API key tests & live streamer credential verification.
+                    // Non-blocking worker for API key tests, verification, updates, & live recommendations.
                     let (st_check, cx_check, pub_check) = (state_bg.clone(), ctx_bg.clone(), public_client.clone());
                     tokio::spawn(async move {
                         while let Some(task) = bg_rx.recv().await {
@@ -4785,18 +7624,120 @@ fn main() -> Result<()> {
                                         lock(&st).streamer_verify = res;
                                         repaint(&cx);
                                     }
-                                    BgTask::CheckForUpdates => {
+                                    BgTask::CheckForUpdates { silent } => {
                                         let res = check_for_app_update(&client).await;
-                                        lock(&st).update_state = res;
+                                        let mut s = lock(&st);
+                                        match res {
+                                            UpdateState::Available(info) => {
+                                                let key = format!(
+                                                    "{}|{}",
+                                                    info.tag_name,
+                                                    info.remote_sha.clone().unwrap_or_default()
+                                                );
+                                                let already_notified =
+                                                    s.notified_update_key.as_deref() == Some(key.as_str());
+                                                s.update_state = UpdateState::Available(info);
+                                                if !already_notified {
+                                                    s.notified_update_key = Some(key);
+                                                }
+                                            }
+                                            UpdateState::UpToDate(msg) => {
+                                                s.notified_update_key = None;
+                                                // Auto-hide notification when no update is available; only show inline in Settings on manual check
+                                                s.update_state = if silent {
+                                                    UpdateState::Idle
+                                                } else {
+                                                    UpdateState::UpToDate(msg)
+                                                };
+                                            }
+                                            UpdateState::Error(msg) => {
+                                                // Never misreport failed checks as up-to-date; quiet on background startup, visible on manual check
+                                                if !silent {
+                                                    s.update_state = UpdateState::Error(msg);
+                                                } else {
+                                                    log(format!("Silent update check failed: {msg}"));
+                                                }
+                                            }
+                                            other => {
+                                                s.update_state = other;
+                                            }
+                                        }
+                                        drop(s);
                                         repaint(&cx);
                                     }
                                     BgTask::InstallUpdate(info) => {
                                         download_and_install_update(info, st, cx).await;
                                     }
+                                    BgTask::FetchRecommendations {
+                                        server_region,
+                                        youtube_api_key,
+                                        twitch_client_id,
+                                        twitch_client_secret,
+                                        force,
+                                    } => {
+                                        // Guard: zero network calls if recommendations were turned OFF before task ran
+                                        if !lock(&st).config.enable_recommendations {
+                                            lock(&st).recommendations = RecommendationsState::Idle;
+                                            repaint(&cx);
+                                            return;
+                                        }
+                                        if !force {
+                                            let cached = {
+                                                let s = lock(&st);
+                                                s.recommendations_cache.as_ref().and_then(|(reg, at, list, lbl)| {
+                                                    if reg.eq_ignore_ascii_case(&server_region)
+                                                        && at.elapsed() < RECOMMENDATIONS_CACHE_TTL
+                                                    {
+                                                        Some((list.clone(), lbl.clone()))
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                            };
+                                            if let Some((list, lbl)) = cached {
+                                                lock(&st).recommendations = RecommendationsState::Loaded(list, lbl);
+                                                repaint(&cx);
+                                                return;
+                                            }
+                                        }
+                                        let reg = server_region_by_code(&server_region)
+                                            .unwrap_or(&SERVER_REGIONS[0]);
+                                        match fetch_live_recommendations(
+                                            &client,
+                                            reg,
+                                            &youtube_api_key,
+                                            &twitch_client_id,
+                                            &twitch_client_secret,
+                                        )
+                                        .await
+                                        {
+                                            Ok(list) => {
+                                                let at = Local::now().format("%I:%M %p").to_string();
+                                                let mut s = lock(&st);
+                                                s.recommendations_cache = Some((
+                                                    reg.code.to_string(),
+                                                    Instant::now(),
+                                                    list.clone(),
+                                                    at.clone(),
+                                                ));
+                                                s.recommendations = RecommendationsState::Loaded(list, at);
+                                            }
+                                            Err(e) => {
+                                                lock(&st).recommendations = RecommendationsState::Error(format!(
+                                                    "Could not fetch recommendations: {}",
+                                                    short(&e.to_string(), 120)
+                                                ));
+                                            }
+                                        }
+                                        repaint(&cx);
+                                    }
                                 }
                             });
                         }
                     });
+
+                    // Automatic silent update check once at startup (auto-hides if up to date)
+                    let _ = bg_startup.send(BgTask::CheckForUpdates { silent: true });
 
                     // Single worker serializes all scans (manual + post-match) and survives panics.
                     let (st, cx, local_scan) = (state_bg.clone(), ctx_bg.clone(), local_client.clone());
@@ -4858,3 +7799,218 @@ fn main() -> Result<()> {
     )
     .map_err(|e| anyhow!("GUI error: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_entry(
+        match_id: &str,
+        riot_id: &str,
+        queue: &str,
+        server: &str,
+        tier: &str,
+        iso: &str,
+        chat: &str,
+    ) -> StreamerEntry {
+        StreamerEntry {
+            match_id: match_id.to_string(),
+            riot_id: riot_id.to_string(),
+            platform: "Twitch".to_string(),
+            channel: "SampleChan".to_string(),
+            title: "VALORANT Ranked".to_string(),
+            url: "https://www.twitch.tv/samplechan".to_string(),
+            timestamp: "2026-06-15 08:30 PM".to_string(),
+            detected_at_iso: iso.to_string(),
+            team_relation: "Enemy".to_string(),
+            map_name: "Ascent".to_string(),
+            agent_name: "Jett".to_string(),
+            queue_name: queue.to_string(),
+            chat_message: chat.to_string(),
+            source: if !chat.is_empty() { "chat_plug".to_string() } else { "heuristic".to_string() },
+            confidence: if tier == "Confirmed" { 96 } else if tier == "Probable" { 78 } else { 54 },
+            confidence_tier: tier.to_string(),
+            server_match_status: "In-Game Server Match".to_string(),
+            match_reason: "Test".to_string(),
+            server_region: server.to_string(),
+            candidates: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_version_comparison_detects_newer_and_avoids_false_updates() {
+        assert!(has_newer_release("1.2.0", "v1.2.1", None, None, None, "abc1234"));
+        assert!(has_newer_release("1.0.1", "v1.2.0", None, None, None, "abc1234"));
+        assert!(!has_newer_release("1.2.0", "v1.2.0", None, None, None, "abc1234"));
+        assert!(!has_newer_release("1.2.0", "v1.0.1", None, None, None, "abc1234"));
+    }
+
+    #[test]
+    fn test_server_pod_parsing_includes_manila_austin_tokyo_mumbai() {
+        assert_eq!(parse_game_pod_to_server("aresriot.aws-ap-south-1-mumbai-1"), Some("ap-mumbai"));
+        assert_eq!(parse_game_pod_to_server("aresriot.aws-ap-southeast-manila-1"), Some("ap-manila"));
+        assert_eq!(parse_game_pod_to_server("aresriot.aws-ap-northeast-1-tokyo-2"), Some("ap-tokyo"));
+        assert_eq!(parse_game_pod_to_server("aresriot.aws-us-central-austin-1"), Some("na-austin"));
+        assert_eq!(parse_game_pod_to_server("aresriot.aws-us-central-dallas-1"), Some("na-austin"));
+        assert_eq!(server_region_by_code("manila").map(|r| r.code), Some("ap-manila"));
+        assert_eq!(server_region_by_code("austin").map(|r| r.code), Some("na-austin"));
+        assert_eq!(server_region_by_code("tokyo").map(|r| r.code), Some("ap-tokyo"));
+    }
+
+    #[test]
+    fn test_mumbai_server_rejects_american_streamer_false_positive() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai server");
+        let rejected = score_heuristic_candidate(
+            "Twitch",
+            "KairoFPS",
+            "KairoFPS",
+            "VALORANT NA Ranked Grind | Texas / US East Radiant",
+            "https://www.twitch.tv/kairofps",
+            Some("en"),
+            true,
+            mumbai,
+        );
+        assert!(rejected.is_none(), "NA streamer must be rejected on Mumbai server");
+    }
+
+    #[test]
+    fn test_unknown_region_never_becomes_confirmed_match() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai server");
+        let res = score_heuristic_candidate(
+            "Twitch",
+            "UniqueViper99",
+            "UniqueViper99",
+            "VALORANT Chill Ranked Games",
+            "https://www.twitch.tv/uniqueviper99",
+            None,
+            true,
+            mumbai,
+        )
+        .expect("exact handle + confirmed VALORANT should still surface as Unverified");
+        assert_eq!(res.confidence_tier, "Unverified");
+        assert!(res.confidence <= 62);
+    }
+
+    #[test]
+    fn test_mumbai_explicit_server_cue_becomes_probable_not_confirmed() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai server");
+        let res = score_heuristic_candidate(
+            "YouTube",
+            "RohanClutch",
+            "RohanClutch",
+            "VALORANT Mumbai Server Ranked Live | Immortal Grind",
+            "https://www.youtube.com/watch?v=test123",
+            Some("hi"),
+            true,
+            mumbai,
+        )
+        .expect("matching Mumbai server cue should score as Probable");
+        assert_eq!(res.confidence_tier, "Probable");
+        assert!(res.confidence >= 68);
+    }
+
+    #[test]
+    fn test_generic_ign_cannot_trigger_heuristic_detection() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai server");
+        let res = score_heuristic_candidate(
+            "Twitch",
+            "Shadow",
+            "Shadow",
+            "VALORANT Mumbai Server Live",
+            "https://www.twitch.tv/shadow",
+            Some("en"),
+            true,
+            mumbai,
+        );
+        assert!(res.is_none(), "Generic IGN 'Shadow' must be rejected");
+    }
+
+    #[test]
+    fn test_directory_aliases_and_cross_region_caution() {
+        let entry = DirectoryStreamer {
+            id: "twitch-tenz".to_string(),
+            display_name: "TenZ".to_string(),
+            riot_id: "TenZ#0505".to_string(),
+            aliases: vec!["SEN TenZ#NA1".to_string()],
+            platform: "Twitch".to_string(),
+            channel_id: "tenz".to_string(),
+            channel_name: "TenZ".to_string(),
+            channel_url: "https://www.twitch.tv/tenz".to_string(),
+            server_region: "na-us-east".to_string(),
+            verified: true,
+            submitted_at: String::new(),
+            source: "community".to_string(),
+        };
+        assert_eq!(directory_entry_matches_player(&entry, "TenZ#0505"), Some("Exact Riot ID match"));
+        assert_eq!(directory_entry_matches_player(&entry, "SEN TenZ#NA1"), Some("Verified alias match"));
+        assert_eq!(directory_entry_matches_player(&entry, "Random#IND"), None);
+
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai");
+        let (tier_mismatch, _, _, _) = evaluate_directory_server_match(&entry, mumbai, "Exact Riot ID match");
+        assert_eq!(tier_mismatch, ConfidenceTier::Unverified);
+
+        let us_east = server_region_by_code("na-us-east").expect("us-east");
+        let (tier_match, score, _, _) = evaluate_directory_server_match(&entry, us_east, "Exact Riot ID match");
+        assert_eq!(tier_match, ConfidenceTier::Confirmed);
+        assert_eq!(score, 100);
+    }
+
+    #[test]
+    fn test_party_member_exclusion_and_dynamic_changes() {
+        let mk = |sub: &str, name: &str, party: &str, is_party: bool| MatchPlayerInfo {
+            record: RiotNameRecord {
+                subject: sub.to_string(),
+                game_name: name.to_string(),
+                tag_line: "IND".to_string(),
+            },
+            team_relation: "Ally".to_string(),
+            agent_name: "Omen".to_string(),
+            party_id: party.to_string(),
+            is_party_member: is_party,
+        };
+
+        let players = vec![
+            mk("me", "MySelf", "party-1", false),
+            mk("p1", "FriendOne", "party-1", true),
+            mk("p2", "FriendTwo", "party-1", true),
+            mk("r1", "RandomAlly", "party-2", false),
+            mk("e1", "EnemyStreamer", "party-3", false),
+        ];
+
+        let (scannable_skip, skipped) = filter_scannable_players(players.clone(), "me", true);
+        assert_eq!(skipped, 2);
+        assert_eq!(scannable_skip.len(), 2);
+        assert!(scannable_skip.iter().all(|p| !p.is_party_member));
+
+        let (scannable_all, skipped_none) = filter_scannable_players(players, "me", false);
+        assert_eq!(skipped_none, 0);
+        assert_eq!(scannable_all.len(), 4);
+    }
+
+    #[test]
+    fn test_history_filters_combine_cleanly() {
+        let now = Local::now();
+        let today_iso = now.to_rfc3339();
+        let old_iso = (now - chrono::Duration::days(15)).to_rfc3339();
+
+        let e_today = sample_entry("m1", "Rohan#IND", "Competitive", "Mumbai (India)", "Confirmed", &today_iso, "");
+        let e_old = sample_entry("m0", "TokyoPro#JP1", "Unrated", "Tokyo (Japan)", "Probable", &old_iso, "");
+        let e_chat = sample_entry("m2", "Plugger#PH1", "Swiftplay", "Manila (Philippines)", "Confirmed", &today_iso, "live on twitch.tv/plugger");
+
+        assert!(entry_matches_history_filters(&e_today, "rohan", TeamFilter::Enemy, "Competitive", "Mumbai", DateRangeFilter::Today, StatusFilter::Confirmed, now));
+        assert!(!entry_matches_history_filters(&e_old, "", TeamFilter::All, "All", "All", DateRangeFilter::Last7Days, StatusFilter::All, now));
+        assert!(entry_matches_history_filters(&e_old, "", TeamFilter::All, "Unrated", "Tokyo", DateRangeFilter::Last30Days, StatusFilter::Probable, now));
+        assert!(entry_matches_history_filters(&e_chat, "", TeamFilter::All, "Swiftplay", "Manila", DateRangeFilter::Today, StatusFilter::ChatPlug, now));
+        assert!(!entry_matches_history_filters(&e_today, "", TeamFilter::All, "All", "All", DateRangeFilter::AllTime, StatusFilter::ChatPlug, now));
+    }
+
+    #[test]
+    fn test_legacy_config_shard_override_alias_deserializes_cleanly() {
+        let legacy_json = r#"{"shard_override":"ap-manila","enable_recommendations":false}"#;
+        let cfg: AppConfig = serde_json::from_str(legacy_json).expect("legacy config must deserialize");
+        assert_eq!(cfg.server_override, "ap-manila");
+        assert!(cfg.skip_party_members, "skip_party_members should default to true");
+        assert!(!cfg.enable_recommendations, "recommendations must default to OFF");
+    }
+}
+

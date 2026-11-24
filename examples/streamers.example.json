@@ -1,20 +1,51 @@
 [
   {
+    "id": "rohan-gaming-yt",
+    "display_name": "Rohan Gaming",
     "riot_id": "RohanYT#IND",
+    "aliases": [
+      "RohanLive#IND",
+      "RohanValo#MUM"
+    ],
     "platform": "YouTube",
+    "channel_id": "@RohanGaming",
     "channel_name": "Rohan Gaming",
-    "channel_url": "https://www.youtube.com/@RohanGaming"
+    "channel_url": "https://www.youtube.com/@RohanGaming",
+    "server_region": "ap-mumbai",
+    "verified": true,
+    "submitted_at": "2026-06-01",
+    "source": "community-verified"
   },
   {
+    "id": "vexfps-twitch",
+    "display_name": "VexFPS",
     "riot_id": "VexFPS#MUM",
+    "aliases": [
+      "VexOnLan#IND"
+    ],
     "platform": "Twitch",
+    "channel_id": "vexfps",
     "channel_name": "VexFPS",
-    "channel_url": "https://www.twitch.tv/vexfps"
+    "channel_url": "https://www.twitch.tv/vexfps",
+    "server_region": "ap-mumbai",
+    "verified": true,
+    "submitted_at": "2026-06-01",
+    "source": "community-verified"
   },
   {
+    "id": "kairoclutch-kick",
+    "display_name": "KairoClutch",
     "riot_id": "KairoClutch#AP",
+    "aliases": [
+      "KairoSG#SEA"
+    ],
     "platform": "Kick",
+    "channel_id": "kairoclutch",
     "channel_name": "KairoClutch",
-    "channel_url": "https://kick.com/kairoclutch"
+    "channel_url": "https://kick.com/kairoclutch",
+    "server_region": "ap-singapore",
+    "verified": true,
+    "submitted_at": "2026-06-01",
+    "source": "community-verified"
   }
 ]

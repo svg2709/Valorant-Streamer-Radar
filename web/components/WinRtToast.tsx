@@ -1,6 +1,7 @@
 import React from 'react';
 import { ExternalLink, Terminal, X } from 'lucide-react';
 import { StreamerEntry } from '../types/radar';
+import { resolveEntryTier } from '../utils/validation';
 import { RadarIcon } from './RadarIcon';
 
 interface WinRtToastProps {
@@ -23,7 +24,13 @@ export const WinRtToast: React.FC<WinRtToastProps> = ({
   if (!entry) return null;
 
   const relationSuffix = entry.team_relation ? ` (${entry.team_relation})` : '';
-  const tag = entry.source === 'Chat' ? 'CHAT LIVE' : 'LIVE';
+  const tier = resolveEntryTier(entry);
+  const tag =
+    entry.source === 'Chat'
+      ? 'CHAT LIVE'
+      : tier === 'Confirmed'
+      ? 'CONFIRMED LIVE'
+      : 'PROBABLE LIVE';
 
   return (
     <div

@@ -2,13 +2,11 @@
 
 # Valorant Streamer Radar
 
-***This is 100% vibe coded.***
-
-**Find out if anyone in your last Valorant lobby was streaming live on YouTube, Twitch, or Kick — automatically, silently, and strictly after the match ends.**
+**Discover whether players from your last finished Valorant match were streaming live on YouTube, Twitch, or Kick — strictly post-match, server-aware, and confidence-tiered.**
 
 <p align="center">
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.0.1%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.0.1 for Windows" />
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.0%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.0 for Windows" />
   </a>
   &nbsp;
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest/download/ValorantStreamerRadar.exe">
@@ -16,25 +14,13 @@
   </a>
 </p>
 
-<sub>Looking for older builds or CI artifacts? Open the <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases">Releases</a> or <a href="https://github.com/svg2709/Valorant-Streamer-Radar/actions">Actions</a> tab.</sub>
+<sub>Looking for older builds, SHA-256 checksums, or full release notes? Check <a href="CHANGELOG.md">CHANGELOG.md</a>, <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases">Releases</a>, or <a href="https://github.com/svg2709/Valorant-Streamer-Radar/actions">Actions</a>.</sub>
 
 <br /><br />
-
-![RAM Usage](https://img.shields.io/badge/RAM%20Usage-50--60%20MB-ff5ca8?style=for-the-badge&labelColor=141b27)
-&nbsp;
-![CPU Usage](https://img.shields.io/badge/CPU%20Usage-~0%25%20Idle%20%7C%20%3C1%25%20Active-10b981?style=for-the-badge&labelColor=141b27)
-
-<br /><br />
-
-| Memory Footprint | CPU Usage | In-Game FPS Impact |
-| :---: | :---: | :---: |
-| **~50–60 MB RAM** | **~0% Idle / <1% Active** | **Zero** *(Post-Match Scan Only)* |
-
-<br />
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v1.0.1-fff5fa?style=flat-square&labelColor=141b27)
+![Version](https://img.shields.io/badge/Version-v1.2.0-fff5fa?style=flat-square&labelColor=141b27)
 ![Mode](https://img.shields.io/badge/Scan%20Mode-Post--Match%20Only-10b981?style=flat-square)
 
 <br />
@@ -45,61 +31,138 @@
 
 ---
 
-## Is This Bannable?
+## Not a Stream Sniping Tool
 
-> **Short answer: No — this app is built to be Vanguard-safe and does not provide any in-game advantage.**
->
-> **Disclaimer: Use this software at your own risk. If your Riot account is ever warned, suspended, or banned for any reason while using this tool, I will NOT be responsible.**
+**Valorant Streamer Radar is strictly a post-match discovery tool and is NOT designed for, nor intended to enable, stream sniping.**
 
-### Why it is designed to be safe
-- **100% user-space only:** It **never** reads or writes game memory, **never** injects DLLs, **never** hooks DirectX/Vulkan or any Valorant process, and **never** draws in-game overlays.
-- **Strictly post-match:** It never inspects live agent-select lobbies or notifies you mid-match (so it cannot be used for stream-sniping). Scans only trigger after `ShooterGame.log` records an `InGame -> MainMenu` transition or when you manually click **Check Last Match**.
-- **Standard local read-only data:** It only tails Riot's local `ShooterGame.log`, reads Riot Client's local `lockfile` (the same local endpoint used by popular Valorant companion apps), and checks public stream URLs on YouTube, Twitch, and Kick.
-- **Strict URL allowlisting:** Every community directory entry and extracted chat link is strictly validated against `youtube.com`, `youtu.be`, `twitch.tv`, and `kick.com` (no userinfo, no custom ports, no arbitrary links).
+- **Never scans live lobbies or active matches:** The application intentionally waits until a match has completely ended (`InGame -> MainMenu` in `ShooterGame.log`) or until you manually click **Check Last Match** after finishing a game.
+- **No mid-match notifications:** Desktop notifications never fire while a match is in progress, and the app never draws overlays or inspects live agent-select rosters.
+- **Zero gameplay interference:** Runs 100% in user space—never reads/writes game memory, never injects DLLs, and never hooks DirectX/Vulkan.
+- **Intended purpose:** Help players find VODs, review matches from another perspective, say GG after a game, and discover creators playing on the same Valorant servers.
 
-> **Important Note:** Riot Games does not officially endorse third-party tools that interact with the local Riot Client API, and their Terms of Service or Vanguard policies can change at any time. By downloading, building, or running Valorant Streamer Radar, you acknowledge that you do so **at your own risk**, and the author/contributors accept **zero liability** for any account action, penalty, or ban.
+> **Disclaimer:** Riot Games does not officially endorse third-party tools that interact with the local Riot Client API, and Vanguard or Terms of Service policies can change at any time. By downloading, building, or running this software, you acknowledge that you use it **at your own risk**.
 
 ---
 
-## Features
+## Detection Limitations
 
-- **Post-Match Live Stream Detection:** Automatically checks all other players from your last finished match across **YouTube**, **Twitch**, and **Kick**.
-- **In-Game Text Chat Stream Plug Capture:** Silently buffers match text chat via Riot's local chat API while you play and, *only after the match ends*, extracts live plugs and stream links (e.g., `"gg im live on yt"`, `"ttv/handle"`, or pasted YouTube/Twitch/Kick URLs) and shows the captured quote right in your History card and Windows toast notification.
-- **Last Scanned Match Summary:** Displays the exact queue/match type (**Competitive**, **Deathmatch**, **Swiftplay**, **Unrated**, **Premier**, **Spike Rush**, etc.), **Map**, your **Agent**, players checked, and how many live streamers were found.
-- **Streamer Directory + Credential Verification:** Maintain your own `custom_streamers.json` list alongside a synced GitHub community directory, with a built-in **Verify Channel** button to check that a streamer's link and display name are valid before saving.
-- **Works Keyless Out of the Box (+ Optional API Keys):** Runs completely without API keys by default, with optional YouTube Data API v3 and Twitch Helix support—plus built-in step-by-step setup guides and quick-launch links right inside Settings.
-- **Multi-Region Shard Auto-Detection:** Automatically detects your Riot shard (`ap`, `na`, `eu`, `kr`) from `ShooterGame.log` with a manual override option in Settings.
-- **Built-In Self-Updater (`Check for Updates`):** Checks GitHub Releases directly from the header bar, Settings, or system tray menu, verifies the SHA-256 checksum, and swaps & restarts the `.exe` automatically on Windows.
-- **Lightweight Native Windows Tray App:** Written in pure Rust (`eframe/egui 0.29`, `tray-icon 0.19`, `tokio`, `tauri-winrt-notification`). Uses only **~50–60 MB RAM** and **~0% idle CPU (<1% active)** with zero in-game FPS impact and branded native Windows toast notifications.
+**Streamer detection is NOT 100% accurate.** Results are best-effort signals derived from public platform data, community-verified records, and server compatibility checks.
+
+Please keep the following limitations in mind:
+
+- **False positives & missed detections:** Live-stream matching cannot guarantee that a live channel belongs to a specific player in your lobby, and streamers whose channel names differ completely from their Riot ID (and who are not in the database) may not be detected.
+- **Username & alias changes:** Players frequently change Riot IDs, play on alternate accounts, or useStreamer Mode / hidden names, which can reduce matching accuracy unless those aliases are recorded in the streamer database.
+- **Server / region verification limits:** Many Twitch, YouTube, and Kick streams do not expose which exact Valorant server the creator is queued on. When a streamer's in-game server cannot be verified, Valorant Streamer Radar marks the match as **Unverified** rather than reporting it as a confirmed detection.
+- **API quotas, rate limits, & network availability:** YouTube, Twitch, Kick (Cloudflare), and GitHub APIs impose rate limits or intermittent blocks. Failed checks are reported gracefully rather than treated as confirmed results.
+- **Community database coverage:** Exact high-confidence matches rely heavily on verified entries in `streamers.json` and your local custom list. Unlisted creators fall back to lower-confidence heuristic matching.
+- **Recommendations are NOT match detections:** The optional **Discover** tab shows regional live stream suggestions only—they are strictly separated from players detected in your lobby.
 
 ---
 
-## Download & Installation
+## Key Features (v1.2.0)
 
-### Option 1: Direct Download (Recommended)
-1. Click the **[Download for Windows](https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest)** button above (or grab **`ValorantStreamerRadar.exe`** directly from the **[Releases](https://github.com/svg2709/Valorant-Streamer-Radar/releases)** tab).
-2. Run `ValorantStreamerRadar.exe` on Windows 10/11 while Valorant is installed.
-   *(If Windows SmartScreen shows a prompt for an unsigned open-source `.exe`, click **More info -> Run anyway**.)*
+### 1. Server-Aware, Confidence-Tiered Streamer Detection
+- **Three clear confidence tiers:** Every match is classified as **Confirmed**, **Probable**, or **Unverified**—never treating weak display-name similarity as a confirmed streamer.
+- **Server-first matching:** Compares your actual in-game Valorant server against the streamer's verified or detected in-game server (prioritizing actual in-game server over streaming region or language).
+- **Cross-server false-positive rejection:** Incompatible regions (for example, an NA/US streamer appearing while you play on the **Mumbai** server) are penalized or rejected instead of being falsely flagged.
+- **Unknown server protection:** If a streamer's active Valorant server cannot be verified, the match is capped at **Unverified** and does not trigger a desktop toast notification.
+- **Multi-alias streamer database:** Supports primary Riot IDs plus multiple alternate Riot IDs (`aliases`) per creator without duplicating entries.
 
-### Option 2: Build Locally on Windows (Rust 1.80+)
-```powershell
-git clone https://github.com/svg2709/Valorant-Streamer-Radar.git
-cd Valorant-Streamer-Radar
-cargo build --release
-```
-Your executable will be generated at:
-```text
-target\release\ValorantStreamerRadar.exe
-```
+### 2. Party Member Detection & API Optimization
+- **Zero extra Riot API calls:** Reads each player's `partyId` directly from Riot's post-match `match-details` response.
+- **Automatic party skipping (ON by default):** Excludes your own party teammates from external YouTube/Twitch/Kick lookups, reducing network requests, scan latency, and API quota usage.
+- **Dynamic per-match adaptation:** Automatically adapts when party members join or leave between games, and can be toggled ON/OFF anytime in **Settings**.
+
+### 3. Organized Match History & Multi-Criteria Filtering
+- **Latest Match vs. Previous History:** Your most recent scanned match is displayed in a dedicated **Latest Match** subsection (including queue type, map, server, agent, players scanned, party members skipped, and detections), separated by a divider from **Previous History**.
+- **Combinable, non-destructive filters:** Filter history simultaneously by **Search**, **Team** (`All` / `Ally` / `Enemy`), **Match Type**, **Server**, **Date/Time** (`All Time`, `Today`, `Last 7 Days`, `Last 30 Days`), and **Detection Status** (`Confirmed`, `Probable`, `Unverified`, `In-Game Chat`), with one-click **Reset Filters**.
+
+### 4. Community Streamer Database & Moderated Submissions
+- **Central structured database (`streamers.json`):** Stores verified streamer entries (`id`, `display_name`, `riot_id`, `aliases`, `platform`, `channel_id`, `channel_name`, `channel_url`, `server_region`, `verified`, `submitted_at`, `source`).
+- **Simple in-app submission workflow:** Regular users can submit new streamers or aliases via **+ Add Streamer** without configuring or managing Git repositories.
+- **Moderated verification:** Submissions are validated for schema & allowed domains (`youtube.com`, `youtu.be`, `twitch.tv`, `kick.com`), checked for duplicates, and reviewed by maintainers before being approved and merged via GitHub Actions.
+
+### 5. Optional Regional Recommendations (OFF by Default)
+- **Disabled by default to save bandwidth:** Zero recommendation network requests are sent while the feature is OFF.
+- **Cached discovery:** When enabled in **Discover** or **Settings**, fetches regional live Valorant streams on Twitch/YouTube with a **5-minute local cache** and clearly labels them as **Discovery Suggestions — Not Matched to Your Lobby**.
+
+### 6. Automatic Version Update Detection & Synced Changelog
+- Compares the installed version (`v1.2.0`) against the latest published GitHub Release.
+- Displays the latest version number, release changelog (synced directly from [`CHANGELOG.md`](CHANGELOG.md)), and download/install action when a newer version is available.
+- **Automatically hides** the update notification when no newer version is pending—no manual dismissal needed.
+- Gracefully handles network errors, missing releases, and GitHub API rate limits without falsely claiming the app is up to date.
+
+---
+
+## Supported Valorant Servers
+
+User-facing terminology throughout the app uses **Servers** instead of internal Riot shards. All major Valorant servers are supported for auto-detection, manual override, history filtering, and region-aware matching:
+
+| Region Group | Supported Servers |
+| :--- | :--- |
+| **Asia-Pacific (AP)** | **Mumbai**, **Singapore**, **Tokyo**, **Manila**, **Hong Kong**, **Sydney** |
+| **Korea (KR)** | **Seoul** |
+| **North America (NA)** | **Austin** *(Texas / Dallas)*, **US East** *(Virginia / Georgia / Illinois)*, **US West** *(California / Oregon)* |
+| **Latin America & Brazil** | **LATAM** *(Mexico / Bogota / Santiago)*, **Sao Paulo** *(Brazil)* |
+| **Europe, Middle East & Africa (EU)** | **London**, **Frankfurt**, **Paris**, **Stockholm**, **Warsaw**, **Madrid**, **Istanbul**, **Bahrain**, **Cape Town** |
 
 ---
 
 ## How It Works
 
-1. **Runs quietly in the tray** while Valorant is open and detects your active shard automatically.
-2. **Waits for the match to finish** (`InGame -> MainMenu` in `ShooterGame.log`), buffering match chat silently in memory if enabled.
-3. **Fetches your last completed match** (mode, map, agents, teams, and player Riot IDs) via Riot's local lockfile and post-match history endpoint.
-4. **Checks each player** against your local & community Streamer Directory, keyless/API live checks, and any stream links shared in match chat—then pops a **Windows Toast notification** and saves the result to your History tab.
+1. **Runs quietly in the Windows system tray** while Valorant is open and auto-detects your active Valorant server from `ShooterGame.log`.
+2. **Waits until your match finishes** (`InGame -> MainMenu`), optionally buffering match text chat in memory so post-match stream links can be parsed after the game ends.
+3. **Reads your completed match** via Riot's local lockfile (`match-details`) and identifies party members via `partyId` so they can be skipped.
+4. **Evaluates remaining players** against the local & community streamer database (including aliases), server-aware live checks on YouTube/Twitch/Kick, and post-match chat links.
+5. **Categorizes detections by confidence tier** (**Confirmed**, **Probable**, **Unverified**), displays results in **Latest Match**, and sends a Windows toast notification only for **Confirmed** or **Probable** matches.
+
+---
+
+## Download & Installation
+
+### Option 1: Direct Download (Windows 10/11)
+1. Download `ValorantStreamerRadar.exe` from the **[Latest Release](https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest)**.
+2. Run `ValorantStreamerRadar.exe` while Valorant is installed.
+   *(If Windows SmartScreen prompts for an unsigned open-source binary, choose **More info -> Run anyway**.)*
+
+### Option 2: Build & Test Locally on Windows (Rust 1.80+)
+```powershell
+git clone https://github.com/svg2709/Valorant-Streamer-Radar.git
+cd Valorant-Streamer-Radar
+cargo test
+cargo build --release
+```
+The compiled binary is placed at `target\release\ValorantStreamerRadar.exe`.
+
+### Interactive Browser Preview (Vite + React)
+```bash
+npm install
+npm run dev
+```
+
+---
+
+## Settings Overview
+
+All settings use accessible left-to-right **ON/OFF** toggle sliders and are saved atomically to `%APPDATA%\ValorantStreamerRadar\config.json` (see [`examples/config.example.json`](examples/config.example.json)). Legacy config files using `shard_override` are migrated automatically.
+
+| Setting | Default | Description |
+| :--- | :---: | :--- |
+| **Active Valorant Server** (`server_override`) | `auto` | Auto-detects your Valorant server from `ShooterGame.log`, or lets you pin any supported server (Mumbai, Tokyo, Manila, Austin, etc.). |
+| **Skip Party Members** (`skip_party_members`) | **ON** | Excludes party teammates (`partyId`) from external YouTube/Twitch/Kick scans to save API calls and speed up scans. |
+| **Live Streamer Recommendations** (`enable_recommendations`) | **OFF** | Optional Discover tab suggestions. Enabling may increase internet usage; sends zero network requests while OFF. |
+| **Post-Match In-Game Chat Stream Plugs** (`capture_in_game_chat`) | **ON** | Buffers match chat and extracts self-posted stream links strictly after the match ends. |
+| **Start Silently with Windows** (`start_with_windows`) | **ON** | Registers auto-start minimized in the tray via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. |
+| **Custom Windows Toast App ID** (`use_custom_toast_app_id`) | **ON** | Shows `Valorant Streamer Radar` as the notification sender instead of `Windows PowerShell`. |
+| **YouTube / Twitch API Keys** | *(blank)* | Optional. The app runs keyless out of the box, or accepts free YouTube Data API v3 / Twitch Helix credentials for faster official lookups. |
+
+---
+
+## Performance & Memory Notes
+
+- **Native Rust desktop app:** Built with `eframe/egui`, `tray-icon`, and `tokio` (no bundled Electron/Chromium runtime).
+- **Tray idle behavior:** When closed to the Windows system tray, the GUI hides (`WINDOW_VISIBLE = false`) and stops repainting; only the lightweight background log watcher remains active.
+- **Honest RAM note:** Actual Windows memory usage varies by OS build, GPU driver/wgpu/OpenGL backend, history size, and whether the window is open or minimized to tray. Rather than quoting an unverified static number, you can inspect live working-set usage directly in Windows Task Manager on your own machine.
 
 ---
 
@@ -107,88 +170,35 @@ target\release\ValorantStreamerRadar.exe
 
 ```text
 Valorant-Streamer-Radar/
-├── .github/workflows/
-│   └── build-windows.yml        # Automated Windows x64 build & GitHub Releases publisher
-├── docs/
-│   └── preview.png              # Desktop UI screenshot
+├── .github/
+│   ├── ISSUE_TEMPLATE/add-streamer.yml       # Structured community streamer submission form
+│   └── workflows/
+│       ├── build-windows.yml                 # Runs cargo test, builds Windows .exe, syncs CHANGELOG.md to Releases
+│       └── merge-approved-streamer.yml       # Validates & merges approved submissions into streamers.json
 ├── examples/
-│   ├── config.example.json      # Example %APPDATA% configuration
-│   └── streamers.example.json   # Example community directory JSON
+│   ├── config.example.json                   # Sample %APPDATA% config.json
+│   └── streamers.example.json                # Sample v1.2.0 streamer database schema
 ├── src/
-│   └── main.rs                  # Native Windows Rust application
-├── web/                         # Interactive browser preview & match simulator
-│   ├── components/
-│   ├── data/
-│   ├── types/
-│   ├── utils/
-│   ├── App.tsx
-│   ├── index.css
-│   └── main.tsx
-├── build.rs                     # Procedural pink-white gradient .ico generator
-├── Cargo.toml                   # Rust crate manifest & dependencies
+│   └── main.rs                               # Native Windows Rust application + unit tests
+├── web/                                      # Interactive React/TypeScript web simulator
+├── streamers.json                            # Central moderated community streamer database
+├── CHANGELOG.md                              # Versioned release notes (source for GitHub Releases)
+├── Cargo.toml                                # Rust package manifest (v1.2.0)
 └── README.md
 ```
 
 ---
 
-## Configuration
+## Troubleshooting
 
-Settings are managed directly inside the app's **Settings** tab and saved atomically to:
-```text
-%APPDATA%\ValorantStreamerRadar\config.json
-```
-
-See [`examples/config.example.json`](examples/config.example.json). The app creates this file automatically on first launch and works completely keyless out of the box:
-
-```json
-{
-  "youtube_api_key": "",
-  "twitch_client_id": "",
-  "twitch_client_secret": "",
-  "start_with_windows": true,
-  "shard_override": "auto",
-  "github_owner": "svg2709",
-  "github_repo": "Valorant-Streamer-Radar",
-  "use_custom_toast_app_id": true,
-  "capture_in_game_chat": true
-}
-```
-
-| Field | Description |
-| :--- | :--- |
-| `youtube_api_key` | Optional YouTube Data API v3 key. Falls back to keyless YouTube live search if empty or rate-limited. |
-| `twitch_client_id` / `twitch_client_secret` | Optional Twitch Helix OAuth2 credentials. Falls back to public Twitch GQL if omitted. |
-| `start_with_windows` | Adds/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ValorantStreamerRadar` (`--background`). |
-| `shard_override` | `"auto"` (reads from `ShooterGame.log`, fallback `"ap"`), or force `"ap"`, `"na"`, `"eu"`, `"kr"`. |
-| `github_owner` / `github_repo` | GitHub repo hosting `main/streamers.json` for authoritative Riot ID -> channel lookups. |
-| `use_custom_toast_app_id` | Registers `ValorantStreamerRadar` in `HKCU` so Windows toasts show the app name & icon instead of PowerShell. |
-| `capture_in_game_chat` | Silently captures in-game text chat and extracts live stream plugs/links post-match. |
+- **"Riot Client not running" when clicking Check Last Match:** Make sure Valorant or the Riot Client is open so the local lockfile exists at `%LOCALAPPDATA%\Riot Games\Riot Client\Config\lockfile`.
+- **Wrong server auto-detected:** Open **Settings -> Valorant Servers & Detection** and select your server manually (e.g., **Mumbai**, **Tokyo**, **Manila**, **Austin**).
+- **Update check fails with rate-limit or network error:** GitHub limits unauthenticated API requests per IP. Open the [Releases page](https://github.com/svg2709/Valorant-Streamer-Radar/releases) directly or retry later; failed checks never falsely claim you are up to date.
+- **Kick shows not live even when a creator is streaming:** Kick sits behind Cloudflare and may return HTTP `403`, which the app safely treats as unavailable rather than crashing.
+- **Toast notifications show "Windows PowerShell":** Enable **Custom Windows Toast App ID** in Settings (or check whether Windows policy restricts `HKCU` registry writes).
 
 ---
 
-## Community Directory Schema (`streamers.json`)
+## Changelog
 
-See [`examples/streamers.example.json`](examples/streamers.example.json). To share a curated streamer database across friends or a community, host a `streamers.json` file in the `main` branch of your configured GitHub repository:
-
-```json
-[
-  {
-    "riot_id": "Name#TAG",
-    "platform": "YouTube",
-    "channel_name": "Channel Display Name",
-    "channel_url": "https://www.youtube.com/@ChannelHandle"
-  }
-]
-```
-
-- `platform`: `"YouTube"`, `"Twitch"`, or `"Kick"`
-- `channel_url`: Must be a plain `https://` URL on an allowed platform host (`youtube.com`, `youtu.be`, `twitch.tv`, or `kick.com`).
-
----
-
-## Known Limitations
-
-- **Kick / Cloudflare:** Kick sits behind Cloudflare and may periodically return HTTP `403`; those responses are safely treated as "not live".
-- **Heuristic False Positives:** Keyless IGN heuristics can occasionally match unrelated channels—add known creators to your local Directory or community `streamers.json` for exact matches.
-- **Chat Room Timing:** Riot clears the in-game match chat room shortly after returning to the main menu; keeping the app running in the tray during matches lets it buffer chat reliably before the room closes.
-- **Custom Toast AppID Fallback:** If `use_custom_toast_app_id` is disabled or Windows Registry writes are blocked by policy, toasts fall back to the `"Windows PowerShell"` AppUserModelID.
+See [`CHANGELOG.md`](CHANGELOG.md) for the complete version history and release notes for **v1.2.0** and earlier versions.

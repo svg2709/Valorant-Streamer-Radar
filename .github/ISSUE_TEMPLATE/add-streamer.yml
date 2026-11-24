@@ -1,0 +1,79 @@
+name: Add Streamer to Community Database
+description: Submit a Valorant streamer Riot ID, aliases, server, and channel link for moderation into streamers.json
+title: "Add Streamer: "
+labels: ["streamer-database"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Submit a Valorant streamer for review and inclusion in `streamers.json`.
+        Submissions are validated and moderated before being merged — once approved, everyone running **Valorant Streamer Radar** receives the entry automatically.
+  - type: input
+    id: riot_id
+    attributes:
+      label: Riot ID (IGN#TAG)
+      description: Primary in-game Riot ID including the #TAG
+      placeholder: "e.g. Name#IND"
+    validations:
+      required: true
+  - type: input
+    id: aliases
+    attributes:
+      label: Known Aliases / Alt Riot IDs (Optional)
+      description: Comma-separated alternate in-game names or Riot IDs (e.g. AltOne#IND, AltTwo#MUM)
+      placeholder: "e.g. RohanLive#IND, RohanValo#MUM"
+    validations:
+      required: false
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Streaming Platform
+      options:
+        - YouTube
+        - Twitch
+        - Kick
+    validations:
+      required: true
+  - type: input
+    id: channel_name
+    attributes:
+      label: Channel Display Name
+      placeholder: "e.g. Channel Name"
+    validations:
+      required: true
+  - type: input
+    id: channel_url
+    attributes:
+      label: Channel URL
+      description: Must be a valid https:// link on youtube.com, twitch.tv, or kick.com
+      placeholder: "https://www.youtube.com/@ChannelHandle"
+    validations:
+      required: true
+  - type: dropdown
+    id: server_region
+    attributes:
+      label: Primary Valorant Server (Optional)
+      options:
+        - ap-mumbai (Mumbai / India)
+        - ap-singapore (Singapore / SEA)
+        - ap-tokyo (Tokyo / Japan)
+        - ap-manila (Manila / Philippines)
+        - ap-hongkong (Hong Kong)
+        - ap-sydney (Sydney / OCE)
+        - kr-seoul (Seoul / Korea)
+        - na-austin (Austin / Texas)
+        - na-us-east (US East)
+        - na-us-west (US West)
+        - latam-mexico (Mexico City / LATAM)
+        - br-saopaulo (Sao Paulo / Brazil)
+        - eu-london (London / UK)
+        - eu-frankfurt (Frankfurt / Central EU)
+        - eu-paris (Paris / France)
+        - eu-stockholm (Stockholm / Nordics)
+        - eu-warsaw (Warsaw / Poland)
+        - eu-madrid (Madrid / Spain)
+        - eu-istanbul (Istanbul / Turkey)
+        - eu-bahrain (Bahrain / Middle East)
+        - eu-capetown (Cape Town / South Africa)
+    validations:
+      required: false

@@ -1,0 +1,181 @@
+name: Merge Approved Streamer into Database
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  merge-streamer:
+    if: github.event.label.name == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse, validate, deduplicate, and upsert into streamers.json
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, pathlib, re, sys
+          from urllib.parse import urlparse
+
+          VALID_SERVERS = {
+              "ap-mumbai", "ap-singapore", "ap-tokyo", "ap-manila", "ap-hongkong",
+              "ap-sydney", "kr-seoul", "na-austin", "na-us-east", "na-us-west",
+              "latam-mexico", "br-saopaulo", "eu-london", "eu-frankfurt", "eu-paris",
+              "eu-stockholm", "eu-warsaw", "eu-madrid", "eu-istanbul", "eu-bahrain",
+              "eu-capetown",
+          }
+
+          body = os.environ.get("ISSUE_BODY", "")
+          entry = None
+
+          # 1. Try fenced JSON block submitted directly from the Windows app
+          m = re.search(r"```json\s*(\{.*?\})\s*```", body, re.S | re.I)
+          if m:
+              try:
+                  entry = json.loads(m.group(1))
+              except json.JSONDecodeError as e:
+                  sys.exit(f"Invalid JSON block in issue body: {e}")
+          else:
+              # 2. Fallback: parse GitHub Issue Form markdown sections
+              def field(heading):
+                  fm = re.search(rf"###\s+{re.escape(heading)}\s*\n+([^\n#]+)", body, re.I)
+                  return fm.group(1).strip() if fm else ""
+
+              rid = field("Riot ID (IGN#TAG)")
+              aliases_raw = field("Known Aliases / Alt Riot IDs (Optional)")
+              plat = field("Streaming Platform")
+              cname = field("Channel Display Name")
+              curl = field("Channel URL")
+              reg = (field("Primary Valorant Server (Optional)") or field("Primary Server Region (Optional)")).split(" ")[0].strip()
+              if rid and plat and cname and curl:
+                  aliases = [a.strip() for a in aliases_raw.split(",") if a.strip() and a.strip() != "_No response_"]
+                  entry = {
+                      "riot_id": rid,
+                      "aliases": aliases,
+                      "platform": plat,
+                      "channel_name": cname,
+                      "channel_url": curl,
+                  }
+                  if reg and reg != "_No":
+                      entry["server_region"] = reg
+
+          if not isinstance(entry, dict):
+              sys.exit("Could not find a valid streamer JSON block or form fields in the issue.")
+
+          riot_id = str(entry.get("riot_id", "")).strip()
+          platform = str(entry.get("platform", "")).strip()
+          channel_name = str(entry.get("channel_name") or entry.get("display_name") or "").strip()
+          channel_url = str(entry.get("channel_url", "")).strip()
+          server_region = str(entry.get("server_region", "")).strip().lower()
+
+          raw_aliases = entry.get("aliases", [])
+          if isinstance(raw_aliases, str):
+              raw_aliases = [a.strip() for a in raw_aliases.split(",") if a.strip()]
+          aliases = []
+          seen_aliases = {riot_id.lower()}
+          for a in raw_aliases if isinstance(raw_aliases, list) else []:
+              s = str(a).strip()
+              if s and len(s) <= 24 and s.lower() not in seen_aliases:
+                  seen_aliases.add(s.lower())
+                  aliases.append(s)
+
+          if "#" not in riot_id or len(riot_id) > 24:
+              sys.exit(f"Invalid riot_id: {riot_id!r}")
+          if platform not in ("YouTube", "Twitch", "Kick"):
+              sys.exit(f"Invalid platform: {platform!r}")
+          if not channel_name or len(channel_name) > 64:
+              sys.exit(f"Invalid channel_name: {channel_name!r}")
+          if server_region and server_region not in VALID_SERVERS:
+              sys.exit(f"Unsupported server_region: {server_region!r}")
+
+          parsed = urlparse(channel_url)
+          if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.port:
+              sys.exit(f"Invalid channel_url: {channel_url!r}")
+          host = parsed.hostname.lower().removeprefix("www.").removeprefix("m.")
+          allowed = {
+              "YouTube": {"youtube.com", "youtu.be"},
+              "Twitch": {"twitch.tv"},
+              "Kick": {"kick.com"},
+          }[platform]
+          if host not in allowed:
+              sys.exit(f"Host {host!r} not allowed for {platform}")
+
+          channel_id = str(entry.get("channel_id", "")).strip()
+          if not channel_id:
+              path_parts = [seg for seg in parsed.path.split("/") if seg]
+              channel_id = path_parts[-1] if path_parts else channel_name.lower().replace(" ", "")
+
+          slug = re.sub(r"[^a-z0-9]+", "-", f"{channel_name}-{platform}".lower()).strip("-")
+          entry_id = str(entry.get("id", "")).strip() or slug
+
+          clean = {
+              "id": entry_id,
+              "display_name": channel_name,
+              "riot_id": riot_id,
+              "aliases": aliases,
+              "platform": platform,
+              "channel_id": channel_id,
+              "channel_name": channel_name,
+              "channel_url": channel_url,
+              "verified": True,
+              "submitted_at": datetime.date.today().isoformat(),
+              "source": f"github-issue-{os.environ.get('ISSUE_NUMBER', 'manual')}",
+          }
+          if server_region:
+              clean["server_region"] = server_region
+
+          db_path = pathlib.Path("streamers.json")
+          db = json.loads(db_path.read_text(encoding="utf-8")) if db_path.exists() else []
+          if not isinstance(db, list):
+              db = []
+
+          norm_url = channel_url.rstrip("/").lower()
+          merged_db = []
+          for item in db:
+              same_riot = (
+                  str(item.get("riot_id", "")).lower() == riot_id.lower()
+                  and str(item.get("platform", "")).lower() == platform.lower()
+              )
+              same_url = (
+                  str(item.get("channel_url", "")).rstrip("/").lower() == norm_url
+                  and str(item.get("platform", "")).lower() == platform.lower()
+              )
+              if same_riot or same_url:
+                  # Preserve existing unique aliases when updating a duplicate record
+                  for old_alias in item.get("aliases", []):
+                      oa = str(old_alias).strip()
+                      if oa and oa.lower() not in seen_aliases:
+                          seen_aliases.add(oa.lower())
+                          clean["aliases"].append(oa)
+                  continue
+              merged_db.append(item)
+
+          merged_db.append(clean)
+          db_path.write_text(json.dumps(merged_db, indent=2) + "\n", encoding="utf-8")
+          print(f"Upserted {riot_id} ({platform}) into streamers.json (total: {len(merged_db)})")
+          PY
+
+      - name: Commit streamers.json and close issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet streamers.json; then
+            echo "No changes to streamers.json"
+          else
+            git add streamers.json
+            git commit -m "chore(db): add approved streamer from #${ISSUE_NUMBER}"
+            git push
+          fi
+          gh issue comment "$ISSUE_NUMBER" --body "Verified and added to \`streamers.json\`! Everyone running Valorant Streamer Radar will receive this entry automatically on their next database sync."
+          gh issue close "$ISSUE_NUMBER"

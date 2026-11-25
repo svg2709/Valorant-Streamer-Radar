@@ -3,6 +3,17 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.1] - 2026-11-25
+
+### Changed
+- **Custom Frameless Windows Title Bar:** Replaced the native Windows title bar with a thin, draggable AMOLED Black custom title bar featuring Minimize and Close-to-tray controls only, plus edge/corner window resizing.
+- **Decluttered AMOLED Black UI & Left Sidebar Navigation:** Switched the theme to True AMOLED Black (`#000000`) with a dedicated left sidebar navigation rail (`History`, `Directory`, `Discover`, `Settings`) and anchored quick actions (`Check Last Match`, `+ Add Streamer`, live Riot/Server status).
+- **Collapsible History Filters & Streamlined Cards:** Moved History filter controls into a collapsible `Filters` popover with active count badge, simplified detection cards with unboxed inline metadata and an expandable `Details` drawer, and kept `Latest Match` cleanly separated from `Previous History`.
+- **Larger Typography & Expanded Window Size:** Increased font sizes across the interface for sharper readability and expanded the default desktop window to `1120x740` (minimum `860x560`) so all controls fit comfortably.
+
+### Fixed
+- **Map Name & Build Reliability:** Corrected the Valorant map name from `Plummet` to `Summit` and resolved Rust Windows build compilation issues.
+
 ## [1.2.0] - 2026-11-24
 
 ### Added

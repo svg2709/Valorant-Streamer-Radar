@@ -43,7 +43,7 @@ export interface ServerRegionInfo {
 
 export const COMMUNITY_REPO_OWNER = 'svg2709';
 export const COMMUNITY_REPO_NAME = 'Valorant-Streamer-Radar';
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.2.1';
 
 export const SERVER_REGIONS: ServerRegionInfo[] = [
   {

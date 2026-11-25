@@ -783,7 +783,7 @@ export default function App() {
       {/* Simulated Windows 11 WinRT Toast Notification */}
       <WinRtToast
         entry={winRtToastEntry}
-        useCustomAppId={config.use_custom_toast_app_id}
+        useCustomAppId={true}
         onDismiss={() => setWinRtToastEntry(null)}
         onOpenStream={(entry) => {
           handleWatchStream(entry);

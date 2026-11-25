@@ -387,9 +387,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   useEffect(() => {
     if (!startupCheckedRef.current) {
       startupCheckedRef.current = true;
-      void handleCheckForUpdates(true);
+      if (config.check_updates_on_boot) {
+        void handleCheckForUpdates(true);
+      }
     }
-  }, [handleCheckForUpdates]);
+  }, [config.check_updates_on_boot, handleCheckForUpdates]);
 
   useEffect(() => {
     setDraft(config);
@@ -1859,14 +1861,6 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     title="Start Silently with Windows"
                     description="Launches hidden in the Windows system tray at logon."
                   />
-                  <ToggleSettingRow
-                    checked={draft.use_custom_toast_app_id}
-                    onChange={(next) =>
-                      setDraft({ ...draft, use_custom_toast_app_id: next })
-                    }
-                    title="Custom Windows Toast App ID"
-                    description="Shows 'Valorant Streamer Radar' as the sender on Windows desktop notifications."
-                  />
                 </div>
               </section>
 
@@ -2135,7 +2129,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       App Updates
                     </h3>
                     <p className="mt-1 font-mono text-xs text-[#8E95A5]">
-                      Installed v{APP_VERSION} · Checks GitHub Releases automatically
+                      Installed v{APP_VERSION} ·{' '}
+                      {config.check_updates_on_boot
+                        ? 'Checks GitHub Releases silently on boot (GUI-only)'
+                        : 'Boot update checks disabled (manual check only)'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -2160,6 +2157,17 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   </div>
+                </div>
+
+                <div className="mt-4">
+                  <ToggleSettingRow
+                    checked={draft.check_updates_on_boot}
+                    onChange={(next) =>
+                      setDraft({ ...draft, check_updates_on_boot: next })
+                    }
+                    title="Check for Updates on Boot"
+                    description="Silently checks GitHub Releases on launch and only displays the update notice when you open the GUI window."
+                  />
                 </div>
 
                 {updateState.status === 'up_to_date' && (

@@ -370,6 +370,7 @@ struct AppConfig {
     start_with_windows: bool,
     #[serde(default = "default_server_override", alias = "shard_override")]
     server_override: String,
+    #[allow(dead_code)]
     #[serde(default = "default_true")]
     use_custom_toast_app_id: bool,
     #[serde(default = "default_true")]
@@ -378,6 +379,8 @@ struct AppConfig {
     skip_party_members: bool,
     #[serde(default)]
     enable_recommendations: bool,
+    #[serde(default = "default_true")]
+    check_updates_on_boot: bool,
 }
 
 fn default_true() -> bool {
@@ -400,6 +403,7 @@ impl Default for AppConfig {
             capture_in_game_chat: true,
             skip_party_members: true,
             enable_recommendations: false,
+            check_updates_on_boot: true,
         }
     }
 }
@@ -4593,7 +4597,7 @@ async fn scan_last_match(
                     if should_copy {
                         copied_primary = true;
                     }
-                    record_and_notify(&state, &ctx, entry, should_copy, config.use_custom_toast_app_id);
+                    record_and_notify(&state, &ctx, entry, should_copy, true);
                     found += 1;
                 }
             }
@@ -6022,9 +6026,11 @@ impl StreamerApp {
         self.cfg_draft.twitch_client_id = self.cfg_draft.twitch_client_id.trim().to_string();
         self.cfg_draft.twitch_client_secret = self.cfg_draft.twitch_client_secret.trim().to_string();
 
+        self.cfg_draft.use_custom_toast_app_id = true;
+
         save_json("config.json", &self.cfg_draft);
         set_autostart(self.cfg_draft.start_with_windows);
-        register_toast_app_id(self.cfg_draft.use_custom_toast_app_id);
+        register_toast_app_id(true);
         *lock(&TWITCH_TOKEN) = None; // reset cached token if Twitch keys changed
         {
             let mut s = lock(&self.state);
@@ -7887,13 +7893,6 @@ impl StreamerApp {
                         "Start Silently with Windows",
                         "Launches minimized in the system tray at Windows logon (HKCU Run).",
                     );
-                    ui.add_space(8.0);
-                    toggle_row(
-                        ui,
-                        &mut self.cfg_draft.use_custom_toast_app_id,
-                        "Custom Windows Toast App ID",
-                        "Shows 'Valorant Streamer Radar' as the sender on desktop notifications instead of PowerShell.",
-                    );
                 });
 
             ui.add_space(12.0);
@@ -8123,6 +8122,14 @@ impl StreamerApp {
                             }
                         });
                     });
+
+                    ui.add_space(12.0);
+                    toggle_row(
+                        ui,
+                        &mut self.cfg_draft.check_updates_on_boot,
+                        "Check for Updates on Boot",
+                        "Silently checks GitHub Releases on launch and only displays the update notice when you open the GUI window.",
+                    );
 
                     match update_state {
                         UpdateState::UpToDate(msg) => {
@@ -8533,15 +8540,16 @@ fn main() -> Result<()> {
         }
     };
 
-    let config = {
+    let mut config = {
         let path = data_dir().join("config.json");
         if !path.exists() && !exe_dir().join("config.json").exists() {
             save_json("config.json", &AppConfig::default());
         }
         load_json::<AppConfig>("config.json")
     };
+    config.use_custom_toast_app_id = true;
     set_autostart(config.start_with_windows);
-    register_toast_app_id(config.use_custom_toast_app_id);
+    register_toast_app_id(true);
 
     let saved_last_match: Option<LastMatchSummary> = load_json("last_match.json");
     let initial_last_match_id = saved_last_match.as_ref().map(|m| m.match_id.clone());
@@ -8831,8 +8839,11 @@ fn main() -> Result<()> {
                 }
             });
 
-            // Automatic silent update check once at startup (auto-hides if up to date)
-            let _ = bg_startup.send(BgTask::CheckForUpdates { silent: true });
+            // Optional silent update check on boot (ON by default; never pops a toast or forces window open,
+            // only appears inside the GUI when the user opens the window).
+            if lock(&state_bg).config.check_updates_on_boot {
+                let _ = bg_startup.send(BgTask::CheckForUpdates { silent: true });
+            }
 
             // Single worker serializes all scans (manual + post-match) and survives panics.
             let (st, cx, local_scan) = (state_bg.clone(), ctx_bg.clone(), local_client.clone());
@@ -9208,6 +9219,16 @@ mod tests {
         let cleaned = purge_seeded_sample_streamers(entries);
         assert_eq!(cleaned.len(), 1);
         assert_eq!(cleaned[0].id, "real-streamer-twitch");
+    }
+
+    #[test]
+    fn test_check_updates_on_boot_defaults_true_for_new_and_legacy_configs() {
+        assert!(AppConfig::default().check_updates_on_boot);
+        let legacy: AppConfig = serde_json::from_str("{}").expect("empty legacy config");
+        assert!(legacy.check_updates_on_boot);
+        let disabled: AppConfig =
+            serde_json::from_str(r#"{"check_updates_on_boot": false}"#).expect("disabled config");
+        assert!(!disabled.check_updates_on_boot);
     }
 }
 

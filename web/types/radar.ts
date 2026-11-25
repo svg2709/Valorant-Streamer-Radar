@@ -43,7 +43,7 @@ export interface ServerRegionInfo {
 
 export const COMMUNITY_REPO_OWNER = 'svg2709';
 export const COMMUNITY_REPO_NAME = 'Valorant-Streamer-Radar';
-export const APP_VERSION = '1.2.4';
+export const APP_VERSION = '1.2.6';
 
 export const SERVER_REGIONS: ServerRegionInfo[] = [
   {
@@ -220,6 +220,7 @@ export interface AppConfig {
   capture_in_game_chat: boolean;
   enable_recommendations: boolean;
   skip_party_members: boolean;
+  check_updates_on_boot: boolean;
 }
 
 export interface DirectoryStreamer {
@@ -351,4 +352,5 @@ export const DEFAULT_CONFIG: AppConfig = {
   capture_in_game_chat: true,
   enable_recommendations: false,
   skip_party_members: true,
+  check_updates_on_boot: true,
 };

@@ -3,6 +3,16 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.6] - 2026-11-25
+
+### Changed
+- **Default-On Custom Windows Toast App ID:** Hid the **Custom Windows Toast App ID** toggle from Settings and enforced it as always enabled by default so Windows desktop notifications always show `Valorant Streamer Radar` as the sender automatically.
+
+## [1.2.5] - 2026-11-25
+
+### Added
+- **Toggleable Boot Update Check (GUI-Only, ON by Default):** Added a **Check for Updates on Boot** ON/OFF toggle inside **Settings -> App Updates & Version** (`check_updates_on_boot`, enabled by default). When enabled, the app silently checks GitHub Releases at startup without sending desktop popups or opening the window, displaying the update banner strictly when you open the GUI; when turned off, no startup update requests are made.
+
 ## [1.2.4] - 2026-11-25
 
 ### Fixed

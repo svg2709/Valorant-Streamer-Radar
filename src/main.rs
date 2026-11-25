@@ -1198,7 +1198,7 @@ fn looks_like_valorant_stream(title: &str, channel: &str) -> bool {
     const VAL_HINTS: &[&str] = &[
         "valorant", "valo", "vct", "radiant", "immortal", "ascendant", "premier", "ranked", "comp",
         "ascent", "bind", "haven", "split", "icebox", "breeze", "fracture", "pearl", "lotus", "sunset",
-        "abyss", "corrode", "jett", "reyna", "clove", "omen", "sova", "cypher", "chamber", "raze",
+        "abyss", "corrode", "summit", "jett", "reyna", "clove", "omen", "sova", "cypher", "chamber", "raze",
     ];
     VAL_HINTS.iter().any(|k| has_ascii_word(&combined, k))
 }
@@ -1676,6 +1676,7 @@ fn map_name_from_id(map_id: &str) -> String {
         s if s.contains("juliett") => Some("Sunset"),
         s if s.contains("infinity") => Some("Abyss"),
         s if s.contains("rook") => Some("Corrode"),
+        s if s.contains("plummet") => Some("Summit"),
         s if s.contains("hurm_alley") => Some("District"),
         s if s.contains("hurm_bowl") => Some("Kasbah"),
         s if s.contains("hurm_yard") => Some("Piazza"),
@@ -3857,7 +3858,7 @@ async fn scan_player(
     let riot_id = format!("{}#{}", player.game_name, player.tag_line);
     let now = Local::now();
     let timestamp = now.format("%d %b %Y | %I:%M %p").to_string();
-    let detected_at_iso = now.format("%Y-%m-%d").to_string();
+    let detected_at_iso = now.to_rfc3339();
     let team_relation = player_info.team_relation;
     let agent_name = player_info.agent_name;
 
@@ -4792,6 +4793,7 @@ fn entry_within_date_range(entry: &StreamerEntry, range: DateRangeFilter, now_lo
         chrono::DateTime::parse_from_rfc3339(&entry.detected_at_iso)
             .ok()
             .map(|dt| dt.with_timezone(&Local).date_naive())
+            .or_else(|| chrono::NaiveDate::parse_from_str(&entry.detected_at_iso, "%Y-%m-%d").ok())
     } else {
         None
     }
@@ -5349,7 +5351,7 @@ impl StreamerApp {
         let slug = format!(
             "{}-{}",
             platform.to_lowercase(),
-            normalize_id(&cname.to_lowercase())
+            normalize(&cname)
         );
         let new_entry = DirectoryStreamer {
             id: slug,
@@ -6368,14 +6370,16 @@ impl StreamerApp {
             }
         }
 
+        let selected_match_type = self.match_type_filter.clone();
+        let selected_server = self.server_filter.clone();
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Match:").color(TEXT_MUTED).size(11.5));
             egui::ComboBox::from_id_salt("history_match_type_filter")
                 .width(126.0)
-                .selected_text(&self.match_type_filter)
+                .selected_text(selected_match_type)
                 .show_ui(ui, |ui| {
                     for opt in &queue_options {
-                        ui.selectable_value(&mut self.match_type_filter, opt.clone(), opt);
+                        ui.selectable_value(&mut self.match_type_filter, opt.clone(), opt.as_str());
                     }
                 });
 
@@ -6383,10 +6387,10 @@ impl StreamerApp {
             ui.label(RichText::new("Server:").color(TEXT_MUTED).size(11.5));
             egui::ComboBox::from_id_salt("history_server_filter")
                 .width(136.0)
-                .selected_text(&self.server_filter)
+                .selected_text(selected_server)
                 .show_ui(ui, |ui| {
                     for opt in &server_options {
-                        ui.selectable_value(&mut self.server_filter, opt.clone(), opt);
+                        ui.selectable_value(&mut self.server_filter, opt.clone(), opt.as_str());
                     }
                 });
 
@@ -7941,18 +7945,31 @@ mod tests {
             submitted_at: String::new(),
             source: "community".to_string(),
         };
-        assert_eq!(directory_entry_matches_player(&entry, "TenZ#0505"), Some("Exact Riot ID match"));
-        assert_eq!(directory_entry_matches_player(&entry, "SEN TenZ#NA1"), Some("Verified alias match"));
+        assert_eq!(
+            directory_entry_matches_player(&entry, "TenZ#0505"),
+            Some("Exact Riot ID in streamer database")
+        );
+        assert_eq!(
+            directory_entry_matches_player(&entry, "SEN TenZ#NA1"),
+            Some("Known streamer alias in database")
+        );
         assert_eq!(directory_entry_matches_player(&entry, "Random#IND"), None);
 
         let mumbai = server_region_by_code("ap-mumbai").expect("mumbai");
-        let (tier_mismatch, _, _, _) = evaluate_directory_server_match(&entry, mumbai, "Exact Riot ID match");
+        let (tier_mismatch, _, _, _) = evaluate_directory_server_match(&entry, mumbai, "Exact Riot ID in streamer database");
         assert_eq!(tier_mismatch, ConfidenceTier::Unverified);
 
         let us_east = server_region_by_code("na-us-east").expect("us-east");
-        let (tier_match, score, _, _) = evaluate_directory_server_match(&entry, us_east, "Exact Riot ID match");
+        let (tier_match, score, _, _) = evaluate_directory_server_match(&entry, us_east, "Exact Riot ID in streamer database");
         assert_eq!(tier_match, ConfidenceTier::Confirmed);
         assert_eq!(score, 100);
+    }
+
+    #[test]
+    fn test_map_name_from_id_maps_plummet_to_summit() {
+        assert_eq!(map_name_from_id("/Game/Maps/Plummet/Plummet"), "Summit");
+        assert_eq!(map_name_from_id("/Game/Maps/Rook/Rook"), "Corrode");
+        assert_eq!(map_name_from_id("/Game/Maps/Ascent/Ascent"), "Ascent");
     }
 
     #[test]

@@ -37,8 +37,8 @@ fn render_icon_rgba(size: u32) -> Vec<u8> {
                 let grad_t = if in_dot { 0.92 } else { u * 0.55 + (1.0 - v) * 0.45 };
                 pink_white_gradient(grad_t)
             } else {
-                // Deep dark obsidian with subtle plum-midnight depth (#0D111A -> #181326)
-                [lerp_u8(13, 24, v), lerp_u8(17, 19, v), lerp_u8(26, 38, v), 255]
+                // Pure AMOLED Black with subtle midnight depth (#000000 -> #0A080E)
+                [lerp_u8(0, 10, v), lerp_u8(0, 8, v), lerp_u8(0, 14, v), 255]
             };
             rgba[idx..idx + 4].copy_from_slice(&px);
         }

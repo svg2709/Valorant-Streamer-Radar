@@ -45,19 +45,20 @@ const MAX_HISTORY: usize = 300;
 const TOAST_TTL: Duration = Duration::from_secs(4);
 const RECOMMENDATIONS_CACHE_TTL: Duration = Duration::from_secs(300);
 
-const BG_DARK: Color32 = Color32::from_rgb(13, 17, 26);
-const HEADER_BG: Color32 = Color32::from_rgb(9, 13, 20);
-const CARD_BG: Color32 = Color32::from_rgb(20, 27, 39);
-const CARD_BORDER: Color32 = Color32::from_rgb(39, 49, 68);
-const BTN_SECONDARY: Color32 = Color32::from_rgb(29, 38, 54);
+const BG_DARK: Color32 = Color32::from_rgb(0, 0, 0);
+const HEADER_BG: Color32 = Color32::from_rgb(0, 0, 0);
+const CARD_BG: Color32 = Color32::from_rgb(11, 11, 14);
+const CARD_BORDER: Color32 = Color32::from_rgb(31, 31, 38);
+const BTN_SECONDARY: Color32 = Color32::from_rgb(18, 18, 22);
+const SURFACE_HOVER: Color32 = Color32::from_rgb(26, 26, 32);
 const ACCENT_PINK: Color32 = Color32::from_rgb(255, 92, 168);
 const ACCENT_BLUSH: Color32 = Color32::from_rgb(255, 166, 210);
 const ACCENT_PEARL: Color32 = Color32::from_rgb(255, 245, 250);
 const ERR_ROSE: Color32 = Color32::from_rgb(255, 102, 138);
 const TWITCH_PURPLE: Color32 = Color32::from_rgb(167, 112, 255);
 const KICK_GREEN: Color32 = Color32::from_rgb(83, 252, 24);
-const TEXT_PRIMARY: Color32 = Color32::from_rgb(243, 239, 244);
-const TEXT_MUTED: Color32 = Color32::from_rgb(152, 162, 184);
+const TEXT_PRIMARY: Color32 = Color32::from_rgb(244, 244, 246);
+const TEXT_MUTED: Color32 = Color32::from_rgb(142, 149, 165);
 const LIVE_GREEN: Color32 = Color32::from_rgb(34, 197, 94);
 const ALLY_TEAL: Color32 = Color32::from_rgb(45, 212, 191);
 const ENEMY_AMBER: Color32 = Color32::from_rgb(251, 146, 60);
@@ -222,7 +223,7 @@ fn radar_icon_rgba() -> Vec<u8> {
                 let grad_t = if in_dot { 0.92 } else { u * 0.55 + (1.0 - v) * 0.45 };
                 pink_white_rgba(grad_t)
             } else {
-                [lerp_u8(13, 24, v), lerp_u8(17, 19, v), lerp_u8(26, 38, v), 255]
+                [lerp_u8(0, 10, v), lerp_u8(0, 8, v), lerp_u8(0, 14, v), 255]
             };
             rgba[idx..idx + 4].copy_from_slice(&px);
         }
@@ -3686,7 +3687,7 @@ fn register_toast_app_id(enable: bool) {
     match hkcu.create_subkey(&subkey) {
         Ok((key, _)) => {
             let _ = key.set_value("DisplayName", &"Valorant Streamer Radar");
-            let _ = key.set_value("IconBackgroundColor", &"FF0D111A");
+            let _ = key.set_value("IconBackgroundColor", &"FF000000");
             if let Some(icon_path) = ensure_toast_icon_file() {
                 let _ = key.set_value("IconUri", &icon_path.to_string_lossy().to_string());
             }
@@ -4964,9 +4965,9 @@ fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     if ui.is_rect_visible(rect) {
         let radius = rect.height() * 0.5;
         let track_bg = Color32::from_rgb(
-            (29.0 + (255.0 - 29.0) * how_on) as u8,
-            (38.0 + (92.0 - 38.0) * how_on) as u8,
-            (54.0 + (168.0 - 54.0) * how_on) as u8,
+            (18.0 + (255.0 - 18.0) * how_on) as u8,
+            (18.0 + (92.0 - 18.0) * how_on) as u8,
+            (22.0 + (168.0 - 22.0) * how_on) as u8,
         );
         let border_col = if *on {
             ACCENT_BLUSH.linear_multiply(if response.hovered() { 0.95 } else { 0.7 })
@@ -4993,7 +4994,7 @@ fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
 fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> bool {
     let mut changed = false;
     Frame::none()
-        .fill(HEADER_BG)
+        .fill(BG_DARK)
         .stroke(Stroke::new(1.0, if *on { ACCENT_PINK.linear_multiply(0.35) } else { CARD_BORDER }))
         .rounding(Rounding::same(6.0))
         .inner_margin(Margin::symmetric(12.0, 9.0))
@@ -5018,6 +5019,103 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
             });
         });
     changed
+}
+
+/// Compact vector brand emblem for the custom AMOLED title bar.
+fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, Rounding::same(3.0), BG_DARK);
+    p.rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.2, ACCENT_PINK));
+    let w = rect.width();
+    let h = rect.height();
+    let l = egui::pos2(rect.left() + w * 0.24, rect.top() + h * 0.28);
+    let b = egui::pos2(rect.center().x, rect.bottom() - h * 0.22);
+    let r = egui::pos2(rect.right() - w * 0.24, rect.top() + h * 0.28);
+    let stroke = Stroke::new(1.8, ACCENT_PEARL);
+    p.line_segment([l, b], stroke);
+    p.line_segment([b, r], stroke);
+    p.circle_filled(egui::pos2(rect.center().x, rect.top() + h * 0.28), 1.4, ACCENT_PINK);
+}
+
+/// Custom frameless title bar Minimize button (vector-drawn dash).
+fn paint_minimize_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(38.0, 34.0), egui::Sense::click());
+    let hovered = resp.hovered();
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        ui.painter().rect_filled(rect, Rounding::ZERO, SURFACE_HOVER);
+    }
+    let col = if hovered { TEXT_PRIMARY } else { TEXT_MUTED };
+    let cy = rect.center().y + 1.0;
+    ui.painter().line_segment(
+        [egui::pos2(rect.center().x - 5.0, cy), egui::pos2(rect.center().x + 5.0, cy)],
+        Stroke::new(1.4, col),
+    );
+    resp.on_hover_text("Minimize")
+}
+
+/// Custom frameless title bar Close button (hides window to system tray).
+fn paint_close_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(38.0, 34.0), egui::Sense::click());
+    let hovered = resp.hovered();
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        ui.painter().rect_filled(rect, Rounding::ZERO, Color32::from_rgb(190, 24, 93));
+    }
+    let col = if hovered { Color32::WHITE } else { TEXT_MUTED };
+    let c = rect.center();
+    let d = 4.5;
+    let stroke = Stroke::new(1.4, col);
+    ui.painter().line_segment([egui::pos2(c.x - d, c.y - d), egui::pos2(c.x + d, c.y + d)], stroke);
+    ui.painter().line_segment([egui::pos2(c.x + d, c.y - d), egui::pos2(c.x - d, c.y + d)], stroke);
+    resp.on_hover_text("Hide to system tray")
+}
+
+/// Handles perimeter edge & corner resizing for the frameless custom Windows viewport.
+fn handle_frameless_resize(ctx: &egui::Context) {
+    let screen = ctx.screen_rect();
+    let edge = 5.0;
+    let corner = 10.0;
+    let (hover_pos, primary_pressed) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.primary_pressed()));
+    let Some(pos) = hover_pos else {
+        return;
+    };
+    let left = pos.x <= screen.left() + edge;
+    let right = pos.x >= screen.right() - edge;
+    let top = pos.y <= screen.top() + edge;
+    let bottom = pos.y >= screen.bottom() - edge;
+    let c_left = pos.x <= screen.left() + corner;
+    let c_right = pos.x >= screen.right() - corner;
+    let c_top = pos.y <= screen.top() + corner;
+    let c_bottom = pos.y >= screen.bottom() - corner;
+
+    let dir = if (top && c_left) || (left && c_top) {
+        Some((egui::ResizeDirection::NorthWest, egui::CursorIcon::ResizeNwSe))
+    } else if (top && c_right) || (right && c_top) {
+        Some((egui::ResizeDirection::NorthEast, egui::CursorIcon::ResizeNeSw))
+    } else if (bottom && c_left) || (left && c_bottom) {
+        Some((egui::ResizeDirection::SouthWest, egui::CursorIcon::ResizeNeSw))
+    } else if (bottom && c_right) || (right && c_bottom) {
+        Some((egui::ResizeDirection::SouthEast, egui::CursorIcon::ResizeNwSe))
+    } else if top {
+        Some((egui::ResizeDirection::North, egui::CursorIcon::ResizeVertical))
+    } else if bottom {
+        Some((egui::ResizeDirection::South, egui::CursorIcon::ResizeVertical))
+    } else if left {
+        Some((egui::ResizeDirection::West, egui::CursorIcon::ResizeHorizontal))
+    } else if right {
+        Some((egui::ResizeDirection::East, egui::CursorIcon::ResizeHorizontal))
+    } else {
+        None
+    };
+
+    if let Some((resize_dir, cursor)) = dir {
+        ctx.set_cursor_icon(cursor);
+        if primary_pressed {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(resize_dir));
+        }
+    }
 }
 
 fn paint_gradient_strip(ui: &mut egui::Ui, height: f32) {
@@ -5172,6 +5270,8 @@ struct StreamerApp {
     server_filter: String,
     date_filter: DateRangeFilter,
     status_filter: StatusFilter,
+    show_filters_popover: bool,
+    expanded_cards: HashSet<String>,
     // Update banner changelog viewer
     show_update_changelog: bool,
     // Directory manager state
@@ -5206,10 +5306,16 @@ impl StreamerApp {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = BG_DARK;
         visuals.window_fill = CARD_BG;
+        visuals.extreme_bg_color = BG_DARK;
+        visuals.faint_bg_color = CARD_BG;
         visuals.widgets.noninteractive.bg_fill = CARD_BG;
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, CARD_BORDER);
         visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(26, 35, 50);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(38, 49, 70);
+        visuals.widgets.inactive.bg_fill = BTN_SECONDARY;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CARD_BORDER);
+        visuals.widgets.hovered.bg_fill = SURFACE_HOVER;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.55));
+        visuals.widgets.active.bg_fill = Color32::from_rgb(34, 34, 42);
         visuals.selection.bg_fill = ACCENT_PINK;
         visuals.selection.stroke = Stroke::new(1.0, ACCENT_PEARL);
         cc.egui_ctx.set_visuals(visuals);
@@ -5228,7 +5334,9 @@ impl StreamerApp {
             server_filter: "All".to_string(),
             date_filter: DateRangeFilter::AllTime,
             status_filter: StatusFilter::All,
-            show_update_changelog: true,
+            show_filters_popover: false,
+            expanded_cards: HashSet::new(),
+            show_update_changelog: false,
             dir_source_tab: DirectorySourceTab::Custom,
             dir_search: String::new(),
             discover_platform: DiscoverPlatformFilter::All,
@@ -5247,13 +5355,28 @@ impl StreamerApp {
         }
     }
 
+    fn active_popover_filter_count(&self) -> usize {
+        let mut count = 0usize;
+        if self.team_filter != TeamFilter::All {
+            count += 1;
+        }
+        if !self.match_type_filter.eq_ignore_ascii_case("All") {
+            count += 1;
+        }
+        if !self.server_filter.eq_ignore_ascii_case("All") {
+            count += 1;
+        }
+        if self.date_filter != DateRangeFilter::AllTime {
+            count += 1;
+        }
+        if self.status_filter != StatusFilter::All {
+            count += 1;
+        }
+        count
+    }
+
     fn has_active_history_filters(&self) -> bool {
-        !self.search_query.trim().is_empty()
-            || self.team_filter != TeamFilter::All
-            || !self.match_type_filter.eq_ignore_ascii_case("All")
-            || !self.server_filter.eq_ignore_ascii_case("All")
-            || self.date_filter != DateRangeFilter::AllTime
-            || self.status_filter != StatusFilter::All
+        !self.search_query.trim().is_empty() || self.active_popover_filter_count() > 0
     }
 
     fn reset_history_filters(&mut self) {
@@ -5436,7 +5559,7 @@ impl StreamerApp {
 
 impl eframe::App for StreamerApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [13.0 / 255.0, 17.0 / 255.0, 26.0 / 255.0, 1.0]
+        [0.0, 0.0, 0.0, 1.0]
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -5461,7 +5584,7 @@ impl eframe::App for StreamerApp {
             return;
         }
 
-        // Never render a blank black screen if the OS window is actually focused/visible.
+        // Never render a blank screen if the OS window is actually focused/visible.
         if !WINDOW_VISIBLE.load(Ordering::Relaxed) {
             if ctx.input(|i| i.viewport().focused == Some(true)) {
                 WINDOW_VISIBLE.store(true, Ordering::Relaxed);
@@ -5469,6 +5592,8 @@ impl eframe::App for StreamerApp {
                 return;
             }
         }
+
+        handle_frameless_resize(ctx);
 
         let (
             status,
@@ -5518,159 +5643,236 @@ impl eframe::App for StreamerApp {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
 
-        // Top Pink-White Gradient Accent Strip
+        // Thin 2px Pink-to-Pearl top brand accent hairline
         egui::TopBottomPanel::top("accent_strip")
-            .exact_height(3.0)
-            .frame(Frame::none().fill(HEADER_BG))
+            .exact_height(2.0)
+            .frame(Frame::none().fill(BG_DARK))
             .show(ctx, |ui| {
-                paint_gradient_strip(ui, 3.0);
+                paint_gradient_strip(ui, 2.0);
             });
 
-        // Header
-        egui::TopBottomPanel::top("header")
+        // Custom 34px AMOLED Black draggable title bar (Minimize & Close-to-tray only)
+        egui::TopBottomPanel::top("custom_titlebar")
+            .exact_height(34.0)
             .frame(
                 Frame::none()
-                    .fill(HEADER_BG)
-                    .inner_margin(Margin::symmetric(22.0, 14.0))
+                    .fill(BG_DARK)
                     .stroke(Stroke::new(1.0, CARD_BORDER)),
             )
             .show(ctx, |ui| {
+                let bar_rect = ui.max_rect();
+                let drag_rect = egui::Rect::from_min_max(
+                    bar_rect.min,
+                    egui::pos2((bar_rect.right() - 78.0).max(bar_rect.left()), bar_rect.bottom()),
+                );
+                let drag_resp = ui.interact(drag_rect, egui::Id::new("custom_titlebar_drag"), egui::Sense::drag());
+                if drag_resp.drag_started_by(egui::PointerButton::Primary) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 5.0;
-                            ui.label(RichText::new("VALORANT").font(FontId::proportional(20.0)).strong().color(ACCENT_PINK));
-                            ui.label(RichText::new("STREAMER").font(FontId::proportional(20.0)).strong().color(ACCENT_BLUSH));
-                            ui.label(RichText::new("RADAR").font(FontId::proportional(20.0)).strong().color(ACCENT_PEARL));
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(format!("v{APP_VERSION}")).size(11.0).color(TEXT_MUTED));
-                        });
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            let (dot, glowing, text) = match riot_status {
-                                RiotStatus::ValorantActive => (
-                                    LIVE_GREEN,
-                                    true,
-                                    format!("Valorant Active ({})", active_region.label),
-                                ),
-                                RiotStatus::RiotClientOnly => (
-                                    ENEMY_AMBER,
-                                    true,
-                                    format!("Riot Client Open - Launch Valorant ({})", active_region.label),
-                                ),
-                                RiotStatus::Offline => (
-                                    TEXT_MUTED,
-                                    false,
-                                    format!("Waiting for Valorant ({})", active_region.label),
-                                ),
-                            };
-                            paint_status_dot(ui, dot, glowing);
-                            ui.label(RichText::new(text).color(TEXT_MUTED).size(12.5));
-                            ui.label(RichText::new("  |  ").color(CARD_BORDER));
-                            ui.label(RichText::new(&status).color(TEXT_MUTED).size(12.5));
-                        });
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(12.0);
+                    ui.horizontal_centered(|ui| {
+                        ui.spacing_mut().item_spacing.x = 7.0;
+                        paint_brand_mark(ui, 16.0);
+                        ui.label(
+                            RichText::new("VALORANT")
+                                .font(FontId::proportional(13.0))
+                                .strong()
+                                .color(ACCENT_PINK),
+                        );
+                        ui.label(
+                            RichText::new("RADAR")
+                                .font(FontId::proportional(13.0))
+                                .strong()
+                                .color(ACCENT_PEARL),
+                        );
+                        if let Some(msg) = &toast {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("/").color(CARD_BORDER).size(11.5));
+                            ui.label(RichText::new(short(msg, 56)).color(ACCENT_BLUSH).size(11.5));
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let label = if is_scanning { "Scanning..." } else { "Check Last Match" };
-                        if gradient_button(ui, label, Vec2::new(142.0, 36.0), !is_scanning, 13.0).clicked() {
-                            let _ = self.manual_scan_tx.send(ScanTrigger::Manual);
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        if paint_close_button(ui).clicked() {
+                            win32_window::cache_main_hwnd();
+                            WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                         }
-
-                        ui.add_space(8.0);
-
-                        let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(ACCENT_PEARL).strong().size(13.0))
-                            .fill(BTN_SECONDARY)
-                            .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.45)))
-                            .rounding(Rounding::same(6.0))
-                            .min_size(Vec2::new(125.0, 36.0));
-                        if ui.add(add_btn).clicked() {
-                            self.open_add_modal(None);
+                        if paint_minimize_button(ui).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                         }
                     });
                 });
+            });
 
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let discover_title = if recs_enabled {
-                        "Discover (Live)".to_string()
+        // Left Sidebar Navigation Rail (208px AMOLED Black)
+        egui::SidePanel::left("nav_sidebar")
+            .exact_width(208.0)
+            .resizable(false)
+            .frame(
+                Frame::none()
+                    .fill(BG_DARK)
+                    .inner_margin(Margin::symmetric(12.0, 14.0))
+                    .stroke(Stroke::new(1.0, CARD_BORDER)),
+            )
+            .show(ctx, |ui| {
+                // Navigation items
+                let dir_total = local_dir.len() + remote_dir.len();
+                let nav_items: [(ActiveTab, &str, String); 4] = [
+                    (ActiveTab::History, "History", history.len().to_string()),
+                    (ActiveTab::Directory, "Directory", dir_total.to_string()),
+                    (
+                        ActiveTab::Discover,
+                        "Discover",
+                        if recs_enabled { "Live".to_string() } else { "Off".to_string() },
+                    ),
+                    (ActiveTab::Settings, "Settings", String::new()),
+                ];
+
+                for (tab, label, meta) in nav_items {
+                    let selected = self.active_tab == tab;
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::click());
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let fill = if selected {
+                        BTN_SECONDARY
+                    } else if resp.hovered() {
+                        CARD_BG
                     } else {
-                        "Discover (Off)".to_string()
+                        Color32::TRANSPARENT
                     };
-                    for (tab, title) in [
-                        (ActiveTab::History, format!("History ({})", history.len())),
-                        (ActiveTab::Directory, format!("Directory ({})", local_dir.len() + remote_dir.len())),
-                        (ActiveTab::Discover, discover_title),
-                        (ActiveTab::Settings, "Settings".to_string()),
-                    ] {
-                        let selected = self.active_tab == tab;
-                        let btn = egui::Button::new(
-                            RichText::new(title)
-                                .size(12.5)
-                                .strong()
-                                .color(if selected { ACCENT_PEARL } else { TEXT_MUTED }),
-                        )
-                        .fill(if selected { BTN_SECONDARY } else { Color32::TRANSPARENT })
-                        .stroke(Stroke::new(1.0, if selected { ACCENT_PINK } else { Color32::TRANSPARENT }))
-                        .rounding(Rounding::same(5.0))
-                        .min_size(Vec2::new(96.0, 28.0));
-                        if ui.add(btn).clicked() {
-                            if tab == ActiveTab::Settings {
-                                self.cfg_draft = lock(&self.state).config.clone();
-                                self.settings_error = None;
-                            } else if tab == ActiveTab::Discover
-                                && recs_enabled
-                                && matches!(recommendations, RecommendationsState::Idle)
-                            {
-                                self.trigger_recommendations_fetch(active_region.code, false);
-                            }
-                            self.active_tab = tab;
+                    let stroke = if selected {
+                        Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.5))
+                    } else {
+                        Stroke::NONE
+                    };
+                    ui.painter().rect_filled(rect, Rounding::same(6.0), fill);
+                    ui.painter().rect_stroke(rect, Rounding::same(6.0), stroke);
+
+                    let text_col = if selected { ACCENT_PEARL } else { TEXT_MUTED };
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 12.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        label,
+                        FontId::proportional(13.0),
+                        text_col,
+                    );
+                    if !meta.is_empty() {
+                        let meta_col = if selected { ACCENT_BLUSH } else { Color32::from_rgb(100, 108, 124) };
+                        ui.painter().text(
+                            egui::pos2(rect.right() - 10.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            meta,
+                            FontId::proportional(11.0),
+                            meta_col,
+                        );
+                    }
+                    if resp.clicked() {
+                        if tab == ActiveTab::Settings {
+                            self.cfg_draft = lock(&self.state).config.clone();
+                            self.settings_error = None;
+                        } else if tab == ActiveTab::Discover
+                            && recs_enabled
+                            && matches!(recommendations, RecommendationsState::Idle)
+                        {
+                            self.trigger_recommendations_fetch(active_region.code, false);
                         }
-                        ui.add_space(4.0);
+                        self.active_tab = tab;
+                    }
+                    ui.add_space(4.0);
+                }
+
+                // Bottom-anchored actions, Riot status, and update check
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    // Version & update trigger
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("v{APP_VERSION}")).size(11.0).color(TEXT_MUTED));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let upd_busy = matches!(
+                                update_state,
+                                UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
+                            );
+                            let upd_avail = matches!(update_state, UpdateState::Available(_));
+                            let upd_lbl = match &update_state {
+                                UpdateState::Checking => "Checking...",
+                                UpdateState::Downloading(_) => "Downloading...",
+                                UpdateState::Installing(_) => "Restarting...",
+                                UpdateState::Available(_) => "Update Ready",
+                                _ => "Check Updates",
+                            };
+                            let upd_btn = egui::Button::new(
+                                RichText::new(upd_lbl)
+                                    .size(11.0)
+                                    .color(if upd_avail { ACCENT_PINK } else { TEXT_MUTED }),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::NONE);
+                            if ui.add_enabled(!upd_busy, upd_btn).clicked() {
+                                lock(&self.state).update_state = UpdateState::Checking;
+                                let _ = self.bg_tx.send(BgTask::CheckForUpdates { silent: false });
+                            }
+                        });
+                    });
+
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    // Quiet secondary action: + Add Streamer
+                    let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(TEXT_PRIMARY).size(12.5))
+                        .fill(BTN_SECONDARY)
+                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .rounding(Rounding::same(6.0))
+                        .min_size(Vec2::new(ui.available_width(), 32.0));
+                    if ui.add(add_btn).clicked() {
+                        self.open_add_modal(None);
                     }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let upd_busy = matches!(
-                            update_state,
-                            UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
-                        );
-                        let upd_available = matches!(update_state, UpdateState::Available(_));
-                        let upd_label = match &update_state {
-                            UpdateState::Checking => "Checking...",
-                            UpdateState::Downloading(_) => "Downloading...",
-                            UpdateState::Installing(_) => "Restarting...",
-                            UpdateState::Available(info) => {
-                                if !info.tag_name.is_empty() {
-                                    "Update Ready!"
-                                } else {
-                                    "Update Ready!"
-                                }
-                            }
-                            _ => "Check for Updates",
-                        };
-                        let upd_btn = egui::Button::new(
-                            RichText::new(upd_label)
-                                .size(11.5)
-                                .strong()
-                                .color(if upd_available { ACCENT_PEARL } else { TEXT_MUTED }),
-                        )
-                        .fill(if upd_available { ACCENT_PINK.linear_multiply(0.28) } else { BTN_SECONDARY })
-                        .stroke(Stroke::new(
-                            1.0,
-                            if upd_available { ACCENT_PINK } else { CARD_BORDER },
-                        ))
-                        .rounding(Rounding::same(5.0))
-                        .min_size(Vec2::new(118.0, 26.0));
-                        if ui.add_enabled(!upd_busy, upd_btn).clicked() {
-                            lock(&self.state).update_state = UpdateState::Checking;
-                            let _ = self.bg_tx.send(BgTask::CheckForUpdates { silent: false });
-                        }
+                    ui.add_space(6.0);
 
-                        if let Some(msg) = &toast {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new(msg).color(ACCENT_BLUSH).size(12.0));
-                        }
-                    });
+                    // Primary focal CTA: Check Last Match
+                    let scan_lbl = if is_scanning { "Scanning..." } else { "Check Last Match" };
+                    if gradient_button(ui, scan_lbl, Vec2::new(ui.available_width(), 34.0), !is_scanning, 12.5).clicked() {
+                        let _ = self.manual_scan_tx.send(ScanTrigger::Manual);
+                    }
+
+                    ui.add_space(10.0);
+
+                    // Compact live Riot & Server status block
+                    Frame::none()
+                        .fill(CARD_BG)
+                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .rounding(Rounding::same(6.0))
+                        .inner_margin(Margin::symmetric(10.0, 8.0))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            let (dot, glowing, riot_text) = match riot_status {
+                                RiotStatus::ValorantActive => (LIVE_GREEN, true, "Valorant Active"),
+                                RiotStatus::RiotClientOnly => (ENEMY_AMBER, true, "Riot Client Open"),
+                                RiotStatus::Offline => (TEXT_MUTED, false, "Waiting for Valorant"),
+                            };
+                            ui.horizontal(|ui| {
+                                paint_status_dot(ui, dot, glowing);
+                                ui.label(RichText::new(riot_text).size(11.5).strong().color(TEXT_PRIMARY));
+                            });
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!("Server: {}", active_region.short_label))
+                                    .size(11.0)
+                                    .color(ALLY_TEAL),
+                            );
+                            ui.label(
+                                RichText::new(short(&status, 30))
+                                    .size(10.5)
+                                    .color(TEXT_MUTED),
+                            )
+                            .on_hover_text(status.as_str());
+                        });
                 });
             });
 
@@ -5885,9 +6087,9 @@ impl eframe::App for StreamerApp {
             }
         }
 
-        // Main panel
+        // Main panel (AMOLED Black canvas)
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(BG_DARK).inner_margin(Margin::symmetric(22.0, 16.0)))
+            .frame(Frame::none().fill(BG_DARK).inner_margin(Margin::symmetric(20.0, 16.0)))
             .show(ctx, |ui| {
                 self.render_update_banner(ui, &update_state);
                 match self.active_tab {
@@ -5906,6 +6108,13 @@ impl eframe::App for StreamerApp {
                     ),
                 }
             });
+
+        // Subtle 1px perimeter border so the frameless AMOLED window remains crisp on dark desktops
+        ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("frameless_window_border"),
+        ))
+        .rect_stroke(ctx.screen_rect().shrink(0.5), Rounding::ZERO, Stroke::new(1.0, CARD_BORDER));
     }
 }
 
@@ -6051,7 +6260,7 @@ impl StreamerApp {
         }
     }
 
-    fn render_history_card(&self, ui: &mut egui::Ui, entry: &StreamerEntry) {
+    fn render_history_card(&mut self, ui: &mut egui::Ui, entry: &StreamerEntry) {
         let badge = match entry.platform.as_str() {
             "Twitch" => TWITCH_PURPLE,
             "Kick" => KICK_GREEN,
@@ -6063,137 +6272,101 @@ impl StreamerApp {
             "Probable" => ENEMY_AMBER,
             _ => TEXT_MUTED,
         };
+        let card_key = format!("{}|{}|{}", entry.match_id, entry.riot_id, entry.platform);
+        let has_details = !entry.chat_message.is_empty()
+            || !entry.match_reason.is_empty()
+            || !entry.server_match_status.is_empty()
+            || entry.candidates.len() > 1;
+        let is_expanded = self.expanded_cards.contains(&card_key);
 
         Frame::none()
             .fill(CARD_BG)
             .stroke(Stroke::new(
                 1.0,
                 if !entry.chat_message.is_empty() {
-                    ACCENT_PINK.linear_multiply(0.5)
+                    ACCENT_PINK.linear_multiply(0.4)
                 } else {
                     CARD_BORDER
                 },
             ))
             .rounding(Rounding::same(8.0))
-            .inner_margin(Margin::symmetric(16.0, 14.0))
+            .inner_margin(Margin::symmetric(14.0, 12.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.set_max_width((ui.available_width() - 220.0).max(160.0));
+                        ui.set_max_width((ui.available_width() - 168.0).max(160.0));
+                        // Line 1: Riot ID + Channel (clean typography, zero pill walls)
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new(&entry.riot_id).font(FontId::proportional(16.0)).strong().color(ACCENT_PEARL));
-                            Frame::none()
-                                .fill(badge.linear_multiply(0.18))
-                                .stroke(Stroke::new(1.0, badge))
-                                .rounding(Rounding::same(4.0))
-                                .inner_margin(Margin::symmetric(6.0, 2.0))
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new(&entry.platform).size(11.0).strong().color(badge));
-                                });
-                            if !entry.team_relation.is_empty() {
-                                let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
-                                Frame::none()
-                                    .fill(tc.linear_multiply(0.18))
-                                    .stroke(Stroke::new(1.0, tc))
-                                    .rounding(Rounding::same(4.0))
-                                    .inner_margin(Margin::symmetric(6.0, 2.0))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(&entry.team_relation).size(11.0).strong().color(tc));
-                                    });
-                            }
+                            ui.label(
+                                RichText::new(&entry.riot_id)
+                                    .font(FontId::proportional(15.0))
+                                    .strong()
+                                    .color(ACCENT_PEARL),
+                            );
+                            ui.label(RichText::new("/").color(CARD_BORDER).size(12.0));
+                            ui.label(
+                                RichText::new(&entry.channel)
+                                    .font(FontId::proportional(13.0))
+                                    .strong()
+                                    .color(badge),
+                            );
+                        });
+                        ui.add_space(3.0);
+
+                        // Line 2: Stream title
+                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(12.5));
+                        ui.add_space(5.0);
+
+                        // Line 3: Unboxed inline metadata
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            ui.label(RichText::new(&entry.platform).size(11.0).strong().color(badge));
+                            ui.label(RichText::new("/").size(10.5).color(CARD_BORDER));
                             let conf_label = if entry.confidence > 0 {
                                 format!("{tier} ({}%)", entry.confidence)
                             } else {
                                 tier.to_string()
                             };
-                            Frame::none()
-                                .fill(tier_color.linear_multiply(0.16))
-                                .stroke(Stroke::new(1.0, tier_color))
-                                .rounding(Rounding::same(4.0))
-                                .inner_margin(Margin::symmetric(6.0, 2.0))
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new(conf_label).size(10.5).strong().color(tier_color));
-                                });
-                            if !entry.server_region.is_empty() {
-                                Frame::none()
-                                    .fill(BTN_SECONDARY)
-                                    .stroke(Stroke::new(1.0, CARD_BORDER))
-                                    .rounding(Rounding::same(4.0))
-                                    .inner_margin(Margin::symmetric(6.0, 2.0))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(&entry.server_region).size(10.5).color(TEXT_MUTED));
-                                    });
-                            }
-                            if !entry.server_match_status.is_empty() {
-                                let sm_col = if entry.server_match_status.contains("Verified") {
-                                    ALLY_TEAL
-                                } else {
-                                    ENEMY_AMBER
-                                };
-                                ui.label(RichText::new(&entry.server_match_status).size(10.5).color(sm_col));
-                            }
-                            if !entry.chat_message.is_empty() {
-                                Frame::none()
-                                    .fill(ACCENT_PINK.linear_multiply(0.16))
-                                    .stroke(Stroke::new(1.0, ACCENT_BLUSH))
-                                    .rounding(Rounding::same(4.0))
-                                    .inner_margin(Margin::symmetric(6.0, 2.0))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new("In-Game Chat").size(10.5).strong().color(ACCENT_PEARL));
-                                    });
-                            }
-                            ui.label(RichText::new(&entry.channel).font(FontId::proportional(13.5)).strong().color(badge));
-                        });
-                        ui.add_space(4.0);
-                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(13.0));
-                        if !entry.match_reason.is_empty() {
-                            ui.add_space(2.0);
-                            ui.label(RichText::new(&entry.match_reason).color(TEXT_MUTED).size(11.0));
-                        }
-                        if !entry.chat_message.is_empty() {
-                            ui.add_space(5.0);
-                            Frame::none()
-                                .fill(HEADER_BG)
-                                .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.4)))
-                                .rounding(Rounding::same(5.0))
-                                .inner_margin(Margin::symmetric(8.0, 4.0))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        RichText::new(format!("Chat: \"{}\"", entry.chat_message))
-                                            .color(ACCENT_BLUSH)
-                                            .size(11.5),
-                                    );
-                                });
-                        }
-                        ui.add_space(6.0);
+                            ui.label(RichText::new(conf_label).size(11.0).strong().color(tier_color));
 
-                        let mut meta_parts: Vec<&str> = Vec::new();
-                        if !entry.map_name.is_empty() {
-                            meta_parts.push(&entry.map_name);
-                        }
-                        if !entry.agent_name.is_empty() {
-                            meta_parts.push(&entry.agent_name);
-                        }
-                        if !entry.queue_name.is_empty() {
-                            meta_parts.push(&entry.queue_name);
-                        }
-                        meta_parts.push(&entry.timestamp);
-                        ui.label(RichText::new(meta_parts.join("  |  ")).color(TEXT_MUTED).size(11.5));
+                            if !entry.team_relation.is_empty() {
+                                let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
+                                ui.label(RichText::new("/").size(10.5).color(CARD_BORDER));
+                                ui.label(RichText::new(&entry.team_relation).size(11.0).color(tc));
+                            }
+                            let mut tail: Vec<&str> = Vec::new();
+                            if !entry.agent_name.is_empty() {
+                                tail.push(&entry.agent_name);
+                            }
+                            if !entry.map_name.is_empty() {
+                                tail.push(&entry.map_name);
+                            }
+                            if !entry.queue_name.is_empty() {
+                                tail.push(&entry.queue_name);
+                            }
+                            if !entry.server_region.is_empty() {
+                                tail.push(&entry.server_region);
+                            }
+                            tail.push(&entry.timestamp);
+                            if !tail.is_empty() {
+                                ui.label(RichText::new("/").size(10.5).color(CARD_BORDER));
+                                ui.label(RichText::new(tail.join(" / ")).size(11.0).color(TEXT_MUTED));
+                            }
+                        });
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if gradient_button(ui, "Watch Stream", Vec2::new(114.0, 32.0), true, 12.5)
-                            .on_hover_text(&entry.url)
+                        if gradient_button(ui, "Watch", Vec2::new(78.0, 28.0), true, 12.0)
+                            .on_hover_text(entry.url.as_str())
                             .clicked()
                         {
                             let _ = open::that(&entry.url);
                         }
-
-                        let copy = egui::Button::new(RichText::new("Copy Link").color(TEXT_PRIMARY).size(12.5))
+                        let copy = egui::Button::new(RichText::new("Copy").color(TEXT_PRIMARY).size(12.0))
                             .fill(BTN_SECONDARY)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
                             .rounding(Rounding::same(6.0))
-                            .min_size(Vec2::new(84.0, 32.0));
+                            .min_size(Vec2::new(60.0, 28.0));
                         if ui.add(copy).clicked() {
                             if let Ok(mut cb) = Clipboard::new() {
                                 let _ = cb.set_text(entry.url.clone());
@@ -6203,25 +6376,71 @@ impl StreamerApp {
                     });
                 });
 
-                if entry.candidates.len() > 1 {
-                    ui.add_space(10.0);
-                    Frame::none()
-                        .fill(HEADER_BG)
-                        .stroke(Stroke::new(1.0, CARD_BORDER))
-                        .rounding(Rounding::same(6.0))
-                        .inner_margin(Margin::symmetric(10.0, 8.0))
-                        .show(ui, |ui| {
+                // Optional expandable details disclosure (keeps cards quiet by default)
+                if has_details {
+                    ui.add_space(6.0);
+                    let mut hints: Vec<String> = Vec::new();
+                    if !entry.chat_message.is_empty() {
+                        hints.push("In-game chat".to_string());
+                    }
+                    if entry.candidates.len() > 1 {
+                        hints.push(format!("{} ranked matches", entry.candidates.len()));
+                    }
+                    let toggle_label = if is_expanded {
+                        "Hide details".to_string()
+                    } else if hints.is_empty() {
+                        "Details".to_string()
+                    } else {
+                        format!("Details ({})", hints.join(" / "))
+                    };
+                    let toggle_btn = egui::Button::new(
+                        RichText::new(toggle_label)
+                            .size(11.0)
+                            .color(if is_expanded { ACCENT_BLUSH } else { TEXT_MUTED }),
+                    )
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::NONE);
+                    if ui.add(toggle_btn).clicked() {
+                        if is_expanded {
+                            self.expanded_cards.remove(&card_key);
+                        } else {
+                            self.expanded_cards.insert(card_key.clone());
+                        }
+                    }
+
+                    if is_expanded {
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        if !entry.chat_message.is_empty() {
                             ui.label(
-                                RichText::new(format!(
-                                    "RANKED CANDIDATES FOR {} ({} MATCHES)",
-                                    entry.riot_id,
-                                    entry.candidates.len()
-                                ))
-                                .size(10.0)
-                                .strong()
-                                .color(TEXT_MUTED),
+                                RichText::new(format!("In-game chat: \"{}\"", entry.chat_message))
+                                    .color(ACCENT_BLUSH)
+                                    .size(11.5),
                             );
-                            ui.add_space(5.0);
+                            ui.add_space(3.0);
+                        }
+                        if !entry.server_match_status.is_empty() || !entry.match_reason.is_empty() {
+                            let mut parts: Vec<&str> = Vec::new();
+                            if !entry.server_match_status.is_empty() {
+                                parts.push(&entry.server_match_status);
+                            }
+                            if !entry.match_reason.is_empty() {
+                                parts.push(&entry.match_reason);
+                            }
+                            ui.label(RichText::new(parts.join(" / ")).color(TEXT_MUTED).size(11.0));
+                        }
+
+                        if entry.candidates.len() > 1 {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new(format!("Other ranked candidates ({})", entry.candidates.len()))
+                                    .size(11.0)
+                                    .strong()
+                                    .color(TEXT_MUTED),
+                            );
+                            ui.add_space(4.0);
                             for (idx, cand) in entry.candidates.iter().enumerate() {
                                 let c_badge = match cand.platform.as_str() {
                                     "Twitch" => TWITCH_PURPLE,
@@ -6252,24 +6471,12 @@ impl StreamerApp {
                                     ui.label(
                                         RichText::new(format!("{}% {}", cand.confidence, c_tier))
                                             .size(11.0)
-                                            .strong()
                                             .color(c_conf_col),
                                     );
                                     ui.label(RichText::new(&cand.platform).size(11.0).strong().color(c_badge));
-                                    ui.label(RichText::new(&cand.channel).size(11.5).strong().color(TEXT_PRIMARY));
+                                    ui.label(RichText::new(&cand.channel).size(11.5).color(TEXT_PRIMARY));
                                     if !cand.region_hint.is_empty() {
-                                        ui.label(
-                                            RichText::new(format!("[{}]", cand.region_hint))
-                                                .size(10.5)
-                                                .color(ALLY_TEAL),
-                                        );
-                                    }
-                                    if !cand.match_reason.is_empty() {
-                                        ui.label(
-                                            RichText::new(format!("- {}", short(&cand.match_reason, 52)))
-                                                .size(10.5)
-                                                .color(TEXT_MUTED),
-                                        );
+                                        ui.label(RichText::new(&cand.region_hint).size(10.5).color(ALLY_TEAL));
                                     }
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         let open_cand = egui::Button::new(
@@ -6278,16 +6485,17 @@ impl StreamerApp {
                                         .fill(BTN_SECONDARY)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
                                         .rounding(Rounding::same(4.0));
-                                        if ui.add(open_cand).on_hover_text(&cand.url).clicked() {
+                                        if ui.add(open_cand).on_hover_text(cand.url.as_str()).clicked() {
                                             let _ = open::that(&cand.url);
                                         }
                                     });
                                 });
                                 if idx + 1 < entry.candidates.len() {
-                                    ui.add_space(3.0);
+                                    ui.add_space(2.0);
                                 }
                             }
-                        });
+                        }
+                    }
                 }
             });
     }
@@ -6298,135 +6506,186 @@ impl StreamerApp {
         history: &[StreamerEntry],
         last_match: Option<&LastMatchSummary>,
     ) {
-        // Row 1: Search + Team + Clear History
+        let active_filter_count = self.active_popover_filter_count();
+
+        // Single clean toolbar row: Search + Collapsible Filters trigger + Clear
         ui.horizontal(|ui| {
+            let reserved = if history.is_empty() { 112.0 } else { 172.0 };
+            let search_w = (ui.available_width() - reserved).max(180.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
-                    .hint_text("Search Riot ID, platform, channel, map, server, or stream title...")
-                    .desired_width(300.0)
+                    .hint_text("Search Riot ID, channel, map, server, or title...")
+                    .desired_width(search_w)
                     .margin(Margin::symmetric(10.0, 7.0)),
             );
-            ui.add_space(6.0);
-            for (f, label) in [
-                (TeamFilter::All, "All"),
-                (TeamFilter::Ally, "Ally"),
-                (TeamFilter::Enemy, "Enemy"),
-            ] {
-                ui.selectable_value(&mut self.team_filter, f, label);
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new(format!("{} total", history.len())).color(TEXT_MUTED).size(12.0));
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let clear = egui::Button::new(RichText::new("Clear History").color(TEXT_MUTED).size(12.0))
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::new(1.0, CARD_BORDER))
-                    .rounding(Rounding::same(5.0));
-                if !history.is_empty() && ui.add(clear).clicked() {
-                    let mut s = lock(&self.state);
-                    s.history.clear();
-                    save_json("streamer_history.json", &s.history);
-                }
-                if self.has_active_history_filters() {
-                    ui.add_space(6.0);
-                    let reset = egui::Button::new(RichText::new("Reset Filters").color(ACCENT_BLUSH).size(12.0))
-                        .fill(BTN_SECONDARY)
-                        .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.5)))
-                        .rounding(Rounding::same(5.0));
-                    if ui.add(reset).clicked() {
-                        self.reset_history_filters();
+                if !history.is_empty() {
+                    let clear = egui::Button::new(RichText::new("Clear").color(TEXT_MUTED).size(12.0))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .rounding(Rounding::same(6.0))
+                        .min_size(Vec2::new(54.0, 30.0));
+                    if ui.add(clear).clicked() {
+                        let mut s = lock(&self.state);
+                        s.history.clear();
+                        save_json("streamer_history.json", &s.history);
                     }
+                }
+
+                let filter_label = if active_filter_count > 0 {
+                    format!("Filters ({active_filter_count})")
+                } else {
+                    "Filters".to_string()
+                };
+                let filter_active = self.show_filters_popover || active_filter_count > 0;
+                let filter_btn = egui::Button::new(
+                    RichText::new(filter_label)
+                        .color(if filter_active { ACCENT_PEARL } else { TEXT_PRIMARY })
+                        .size(12.0),
+                )
+                .fill(BTN_SECONDARY)
+                .stroke(Stroke::new(
+                    1.0,
+                    if filter_active { ACCENT_PINK.linear_multiply(0.65) } else { CARD_BORDER },
+                ))
+                .rounding(Rounding::same(6.0))
+                .min_size(Vec2::new(88.0, 30.0));
+                if ui.add(filter_btn).clicked() {
+                    self.show_filters_popover = !self.show_filters_popover;
                 }
             });
         });
 
-        ui.add_space(8.0);
-
-        // Row 2: Combinable filters - Match Type, Server, Date Range, Detection Status
-        let mut queue_options: Vec<String> = vec!["All".to_string()];
-        for qn in ["Competitive", "Unrated", "Swiftplay", "Deathmatch", "Team Deathmatch", "Spike Rush", "Premier"] {
-            queue_options.push(qn.to_string());
-        }
-        for e in history {
-            if !e.queue_name.is_empty() && !queue_options.iter().any(|x| x.eq_ignore_ascii_case(&e.queue_name)) {
-                queue_options.push(e.queue_name.clone());
+        // Collapsible Filters Popover Panel
+        if self.show_filters_popover {
+            ui.add_space(8.0);
+            let mut queue_options: Vec<String> = vec!["All".to_string()];
+            for qn in ["Competitive", "Unrated", "Swiftplay", "Deathmatch", "Team Deathmatch", "Spike Rush", "Premier"] {
+                queue_options.push(qn.to_string());
             }
-        }
-
-        let mut server_options: Vec<String> = vec!["All".to_string()];
-        for e in history {
-            if !e.server_region.is_empty() && !server_options.iter().any(|x| x.eq_ignore_ascii_case(&e.server_region)) {
-                server_options.push(e.server_region.clone());
+            for e in history {
+                if !e.queue_name.is_empty() && !queue_options.iter().any(|x| x.eq_ignore_ascii_case(&e.queue_name)) {
+                    queue_options.push(e.queue_name.clone());
+                }
             }
-        }
-        if let Some(m) = last_match {
-            if !m.server_name.is_empty() && !server_options.iter().any(|x| x.eq_ignore_ascii_case(&m.server_name)) {
-                server_options.push(m.server_name.clone());
+
+            let mut server_options: Vec<String> = vec!["All".to_string()];
+            for e in history {
+                if !e.server_region.is_empty() && !server_options.iter().any(|x| x.eq_ignore_ascii_case(&e.server_region)) {
+                    server_options.push(e.server_region.clone());
+                }
             }
-        }
-        for reg in SERVER_REGIONS {
-            if !server_options.iter().any(|x| x.eq_ignore_ascii_case(reg.short_label)) {
-                server_options.push(reg.short_label.to_string());
+            if let Some(m) = last_match {
+                if !m.server_name.is_empty() && !server_options.iter().any(|x| x.eq_ignore_ascii_case(&m.server_name)) {
+                    server_options.push(m.server_name.clone());
+                }
             }
+            for reg in SERVER_REGIONS {
+                if !server_options.iter().any(|x| x.eq_ignore_ascii_case(reg.short_label)) {
+                    server_options.push(reg.short_label.to_string());
+                }
+            }
+
+            let selected_match_type = self.match_type_filter.clone();
+            let selected_server = self.server_filter.clone();
+
+            Frame::none()
+                .fill(CARD_BG)
+                .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.35)))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(Margin::symmetric(14.0, 12.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Team").color(TEXT_MUTED).size(11.5));
+                        ui.add_space(6.0);
+                        for (f, label) in [
+                            (TeamFilter::All, "All"),
+                            (TeamFilter::Ally, "Ally"),
+                            (TeamFilter::Enemy, "Enemy"),
+                        ] {
+                            ui.selectable_value(&mut self.team_filter, f, label);
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let done_btn = egui::Button::new(RichText::new("Done").color(TEXT_PRIMARY).size(11.5))
+                                .fill(BTN_SECONDARY)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(5.0));
+                            if ui.add(done_btn).clicked() {
+                                self.show_filters_popover = false;
+                            }
+                            if self.has_active_history_filters() {
+                                ui.add_space(6.0);
+                                let reset = egui::Button::new(RichText::new("Reset").color(ACCENT_BLUSH).size(11.5))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.45)))
+                                    .rounding(Rounding::same(5.0));
+                                if ui.add(reset).clicked() {
+                                    self.reset_history_filters();
+                                }
+                            }
+                        });
+                    });
+
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("Match").color(TEXT_MUTED).size(11.5));
+                        egui::ComboBox::from_id_salt("history_match_type_filter")
+                            .width(122.0)
+                            .selected_text(selected_match_type)
+                            .show_ui(ui, |ui| {
+                                for opt in &queue_options {
+                                    ui.selectable_value(&mut self.match_type_filter, opt.clone(), opt.as_str());
+                                }
+                            });
+
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("Server").color(TEXT_MUTED).size(11.5));
+                        egui::ComboBox::from_id_salt("history_server_filter")
+                            .width(126.0)
+                            .selected_text(selected_server)
+                            .show_ui(ui, |ui| {
+                                for opt in &server_options {
+                                    ui.selectable_value(&mut self.server_filter, opt.clone(), opt.as_str());
+                                }
+                            });
+
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("Date").color(TEXT_MUTED).size(11.5));
+                        egui::ComboBox::from_id_salt("history_date_filter")
+                            .width(100.0)
+                            .selected_text(self.date_filter.label())
+                            .show_ui(ui, |ui| {
+                                for opt in [
+                                    DateRangeFilter::AllTime,
+                                    DateRangeFilter::Today,
+                                    DateRangeFilter::Last7Days,
+                                    DateRangeFilter::Last30Days,
+                                ] {
+                                    ui.selectable_value(&mut self.date_filter, opt, opt.label());
+                                }
+                            });
+
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("Status").color(TEXT_MUTED).size(11.5));
+                        egui::ComboBox::from_id_salt("history_status_filter")
+                            .width(108.0)
+                            .selected_text(self.status_filter.label())
+                            .show_ui(ui, |ui| {
+                                for opt in [
+                                    StatusFilter::All,
+                                    StatusFilter::Confirmed,
+                                    StatusFilter::Probable,
+                                    StatusFilter::Unverified,
+                                    StatusFilter::ChatPlug,
+                                ] {
+                                    ui.selectable_value(&mut self.status_filter, opt, opt.label());
+                                }
+                            });
+                    });
+                });
         }
-
-        let selected_match_type = self.match_type_filter.clone();
-        let selected_server = self.server_filter.clone();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Match:").color(TEXT_MUTED).size(11.5));
-            egui::ComboBox::from_id_salt("history_match_type_filter")
-                .width(126.0)
-                .selected_text(selected_match_type)
-                .show_ui(ui, |ui| {
-                    for opt in &queue_options {
-                        ui.selectable_value(&mut self.match_type_filter, opt.clone(), opt.as_str());
-                    }
-                });
-
-            ui.add_space(6.0);
-            ui.label(RichText::new("Server:").color(TEXT_MUTED).size(11.5));
-            egui::ComboBox::from_id_salt("history_server_filter")
-                .width(136.0)
-                .selected_text(selected_server)
-                .show_ui(ui, |ui| {
-                    for opt in &server_options {
-                        ui.selectable_value(&mut self.server_filter, opt.clone(), opt.as_str());
-                    }
-                });
-
-            ui.add_space(6.0);
-            ui.label(RichText::new("Date:").color(TEXT_MUTED).size(11.5));
-            egui::ComboBox::from_id_salt("history_date_filter")
-                .width(104.0)
-                .selected_text(self.date_filter.label())
-                .show_ui(ui, |ui| {
-                    for opt in [
-                        DateRangeFilter::AllTime,
-                        DateRangeFilter::Today,
-                        DateRangeFilter::Last7Days,
-                        DateRangeFilter::Last30Days,
-                    ] {
-                        ui.selectable_value(&mut self.date_filter, opt, opt.label());
-                    }
-                });
-
-            ui.add_space(6.0);
-            ui.label(RichText::new("Status:").color(TEXT_MUTED).size(11.5));
-            egui::ComboBox::from_id_salt("history_status_filter")
-                .width(114.0)
-                .selected_text(self.status_filter.label())
-                .show_ui(ui, |ui| {
-                    for opt in [
-                        StatusFilter::All,
-                        StatusFilter::Confirmed,
-                        StatusFilter::Probable,
-                        StatusFilter::Unverified,
-                        StatusFilter::ChatPlug,
-                    ] {
-                        ui.selectable_value(&mut self.status_filter, opt, opt.label());
-                    }
-                });
-        });
 
         ui.add_space(12.0);
 
@@ -6457,73 +6716,38 @@ impl StreamerApp {
         let filters_active = self.has_active_history_filters();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // Subsection 1: LATEST MATCH
+            // Subsection 1: Latest Match (quiet single-line summary strip + cards)
             if let Some(m) = last_match {
-                let mode_color = match m.queue_name.as_str() {
-                    "Competitive" | "Premier" => ACCENT_PINK,
-                    "Deathmatch" | "Team Deathmatch" => ALLY_TEAL,
-                    "Swiftplay" | "Spike Rush" | "Escalation" => ENEMY_AMBER,
-                    _ => ACCENT_BLUSH,
-                };
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("LATEST MATCH").size(11.5).strong().color(ACCENT_PINK));
-                    ui.label(RichText::new("Most recently completed & scanned game").size(11.0).color(TEXT_MUTED));
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.label(RichText::new("Latest Match").size(12.5).strong().color(ACCENT_PEARL));
+                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                    ui.label(RichText::new(&m.map_name).size(12.0).strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                    ui.label(RichText::new(&m.queue_name).size(11.5).color(ACCENT_BLUSH));
+                    if !m.server_name.is_empty() {
+                        ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                        ui.label(RichText::new(&m.server_name).size(11.5).color(ALLY_TEAL));
+                    }
+                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                    let summary_counts = if m.party_skipped > 0 {
+                        format!("{} checked, {} party skipped", m.players_checked, m.party_skipped)
+                    } else {
+                        format!("{} checked", m.players_checked)
+                    };
+                    ui.label(RichText::new(summary_counts).size(11.5).color(TEXT_MUTED));
+                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                    if m.streamers_found > 0 {
+                        ui.label(
+                            RichText::new(format!("{} live", m.streamers_found))
+                                .size(11.5)
+                                .strong()
+                                .color(LIVE_GREEN),
+                        );
+                    } else {
+                        ui.label(RichText::new("0 live").size(11.5).color(TEXT_MUTED));
+                    }
                 });
-                ui.add_space(5.0);
-                Frame::none()
-                    .fill(HEADER_BG)
-                    .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.35)))
-                    .rounding(Rounding::same(7.0))
-                    .inner_margin(Margin::symmetric(14.0, 9.0))
-                    .show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            Frame::none()
-                                .fill(mode_color.linear_multiply(0.16))
-                                .stroke(Stroke::new(1.0, mode_color))
-                                .rounding(Rounding::same(4.0))
-                                .inner_margin(Margin::symmetric(6.0, 1.5))
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new(&m.queue_name).size(11.0).strong().color(mode_color));
-                                });
-                            ui.label(RichText::new(&m.map_name).size(12.5).strong().color(Color32::WHITE));
-                            if !m.server_name.is_empty() {
-                                ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                                ui.label(RichText::new(&m.server_name).color(ALLY_TEAL).size(11.5).strong());
-                            }
-                            if !m.my_agent.is_empty() {
-                                ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                                ui.label(RichText::new(format!("Agent: {}", m.my_agent)).color(TEXT_PRIMARY).size(12.0));
-                            }
-                            ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                            ui.label(
-                                RichText::new(format!("{} players checked", m.players_checked))
-                                    .color(TEXT_MUTED)
-                                    .size(12.0),
-                            );
-                            if m.party_skipped > 0 {
-                                ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                                ui.label(
-                                    RichText::new(format!("{} party skipped", m.party_skipped))
-                                        .color(ALLY_TEAL)
-                                        .size(11.5),
-                                );
-                            }
-                            ui.label(RichText::new("|").color(CARD_BORDER).size(11.5));
-                            if m.streamers_found > 0 {
-                                ui.label(
-                                    RichText::new(format!("{} live found", m.streamers_found))
-                                        .color(LIVE_GREEN)
-                                        .strong()
-                                        .size(12.0),
-                                );
-                            } else {
-                                ui.label(RichText::new("0 live").color(TEXT_MUTED).size(12.0));
-                            }
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(RichText::new(&m.scanned_at).color(TEXT_MUTED).size(11.0));
-                            });
-                        });
-                    });
 
                 ui.add_space(8.0);
                 if !latest_entries.is_empty() {
@@ -6541,17 +6765,17 @@ impl StreamerApp {
                     ui.add_space(6.0);
                 }
 
-                ui.add_space(6.0);
-                ui.separator();
                 ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(10.0);
             }
 
-            // Subsection 2: PREVIOUS HISTORY
+            // Subsection 2: Previous History
             ui.horizontal(|ui| {
-                ui.label(RichText::new("PREVIOUS HISTORY").size(11.5).strong().color(TEXT_PRIMARY));
+                ui.label(RichText::new("Previous History").size(12.5).strong().color(TEXT_PRIMARY));
                 ui.label(
-                    RichText::new(format!("({} matching entries)", previous_entries.len()))
-                        .size(11.0)
+                    RichText::new(format!("({})", previous_entries.len()))
+                        .size(11.5)
                         .color(TEXT_MUTED),
                 );
             });
@@ -6561,15 +6785,15 @@ impl StreamerApp {
                 ui.add_space(40.0);
                 ui.vertical_centered(|ui| {
                     if history.is_empty() {
-                        ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(17.0)).strong().color(TEXT_PRIMARY));
+                        ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(16.0)).strong().color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                         ui.label(
-                            RichText::new("Play a match or click '+ Add Streamer' to register a Riot ID & channel.")
+                            RichText::new("Play a match or click '+ Add Streamer' in the sidebar to link a Riot ID.")
                                 .color(TEXT_MUTED)
                                 .size(12.5),
                         );
                     } else {
-                        ui.label(RichText::new("No Records Match Your Active Filters").font(FontId::proportional(17.0)).strong().color(TEXT_PRIMARY));
+                        ui.label(RichText::new("No Records Match Your Filters").font(FontId::proportional(16.0)).strong().color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("Your saved history is intact. Adjust or reset filters to view older records.")
@@ -6587,7 +6811,7 @@ impl StreamerApp {
             } else {
                 for entry in previous_entries {
                     self.render_history_card(ui, entry);
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
                 }
             }
         });
@@ -6689,31 +6913,21 @@ impl StreamerApp {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(14.5));
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(14.0));
+                                    ui.label(RichText::new("/").color(CARD_BORDER).size(11.0));
                                     ui.label(RichText::new(&d.platform).strong().color(badge).size(12.0));
-                                    ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(13.0));
+                                    ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(12.5));
                                     if d.verified {
-                                        Frame::none()
-                                            .fill(LIVE_GREEN.linear_multiply(0.16))
-                                            .stroke(Stroke::new(1.0, LIVE_GREEN))
-                                            .rounding(Rounding::same(4.0))
-                                            .inner_margin(Margin::symmetric(5.0, 1.5))
-                                            .show(ui, |ui| {
-                                                ui.label(RichText::new("Verified").size(10.0).strong().color(LIVE_GREEN));
-                                            });
+                                        ui.label(RichText::new("/").color(CARD_BORDER).size(11.0));
+                                        ui.label(RichText::new("Verified").size(11.0).strong().color(LIVE_GREEN));
                                     }
                                     if !d.server_region.is_empty() {
                                         let reg_label = server_region_by_code(&d.server_region)
                                             .map(|r| r.short_label)
                                             .unwrap_or(&d.server_region);
-                                        Frame::none()
-                                            .fill(BTN_SECONDARY)
-                                            .stroke(Stroke::new(1.0, CARD_BORDER))
-                                            .rounding(Rounding::same(4.0))
-                                            .inner_margin(Margin::symmetric(5.0, 1.5))
-                                            .show(ui, |ui| {
-                                                ui.label(RichText::new(reg_label).size(10.5).color(ALLY_TEAL));
-                                            });
+                                        ui.label(RichText::new("/").color(CARD_BORDER).size(11.0));
+                                        ui.label(RichText::new(reg_label).size(11.0).color(ALLY_TEAL));
                                     }
                                 });
                                 if !d.aliases.is_empty() {
@@ -6723,7 +6937,7 @@ impl StreamerApp {
                                             .size(11.0),
                                     );
                                 }
-                                ui.label(RichText::new(&d.channel_url).color(TEXT_MUTED).size(11.5));
+                                ui.label(RichText::new(&d.channel_url).color(TEXT_MUTED).size(11.0));
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -6963,19 +7177,16 @@ impl StreamerApp {
                                     ui.vertical(|ui| {
                                         ui.set_max_width((ui.available_width() - 210.0).max(160.0));
                                         ui.horizontal_wrapped(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 6.0;
                                             paint_status_dot(ui, LIVE_GREEN, true);
-                                            ui.label(RichText::new(&rec.channel).strong().color(ACCENT_PEARL).size(14.5));
-                                            Frame::none()
-                                                .fill(badge.linear_multiply(0.18))
-                                                .stroke(Stroke::new(1.0, badge))
-                                                .rounding(Rounding::same(4.0))
-                                                .inner_margin(Margin::symmetric(6.0, 1.5))
-                                                .show(ui, |ui| {
-                                                    ui.label(RichText::new(&rec.platform).size(10.5).strong().color(badge));
-                                                });
+                                            ui.label(RichText::new(&rec.channel).strong().color(ACCENT_PEARL).size(14.0));
+                                            ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                                            ui.label(RichText::new(&rec.platform).size(11.5).strong().color(badge));
                                             if let Some(v) = rec.viewers {
+                                                ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
                                                 ui.label(RichText::new(format_viewers(v)).size(11.5).color(LIVE_GREEN));
                                             }
+                                            ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
                                             ui.label(RichText::new(&rec.region_label).size(11.0).color(TEXT_MUTED));
                                         });
                                         ui.add_space(3.0);
@@ -6983,8 +7194,8 @@ impl StreamerApp {
                                     });
 
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if gradient_button(ui, "Watch Live", Vec2::new(98.0, 30.0), true, 12.0)
-                                            .on_hover_text(&rec.url)
+                                        if gradient_button(ui, "Watch", Vec2::new(80.0, 28.0), true, 12.0)
+                                            .on_hover_text(rec.url.as_str())
                                             .clicked()
                                         {
                                             let _ = open::that(&rec.url);
@@ -7074,37 +7285,13 @@ impl StreamerApp {
                     });
 
                     ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new("Quick Select:").color(TEXT_MUTED).size(11.5));
-                        for (code, lbl) in [
-                            ("auto", "Auto"),
-                            ("ap-mumbai", "Mumbai"),
-                            ("ap-tokyo", "Tokyo"),
-                            ("ap-manila", "Manila"),
-                            ("ap-singapore", "Singapore"),
-                            ("na-austin", "Austin / TX"),
-                            ("na-us-east", "US East"),
-                            ("eu-frankfurt", "Frankfurt"),
-                            ("eu-london", "London"),
-                            ("kr-seoul", "Seoul"),
-                        ] {
-                            ui.selectable_value(&mut self.cfg_draft.server_override, code.to_string(), lbl);
-                        }
-                    });
-
-                    ui.add_space(8.0);
                     let detected_info = server_region_by_code(detected_server_code)
                         .map(|r| r.label)
                         .unwrap_or("Waiting for game server pod in ShooterGame.log");
                     ui.label(
-                        RichText::new(format!("Detected Server Pod: {detected_info}"))
+                        RichText::new(format!("Detected server pod: {detected_info}"))
                             .color(ALLY_TEAL)
                             .size(11.5),
-                    );
-                    ui.label(
-                        RichText::new("Community Streamer Database syncs automatically in the background (no Git setup required).")
-                            .color(TEXT_MUTED)
-                            .size(11.0),
                     );
                 });
 
@@ -7520,8 +7707,10 @@ fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Valorant Streamer Radar")
             .with_icon(window_icon)
-            .with_inner_size([880.0, 620.0])
-            .with_min_inner_size([680.0, 460.0])
+            .with_decorations(false)
+            .with_resizable(true)
+            .with_inner_size([920.0, 620.0])
+            .with_min_inner_size([720.0, 480.0])
             .with_visible(!start_hidden),
         ..Default::default()
     };

@@ -556,13 +556,13 @@ export default function App() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#090D14] text-[#F3EFF4] lg:flex-row">
+    <div className="flex min-h-screen flex-col bg-[#000000] text-[#F4F4F6] lg:flex-row">
       {/* Sidebar Navigation Rail */}
-      <aside className="w-full shrink-0 border-b border-[#273144] bg-[#070A10] lg:w-[248px] lg:border-r lg:border-b-0">
+      <aside className="w-full shrink-0 border-b border-[#1F1F26] bg-[#000000] lg:w-[240px] lg:border-r lg:border-b-0">
         <div className="flex h-full flex-col justify-between p-4">
           <div>
             <div className="flex items-center gap-2.5 px-2 py-1.5">
-              <RadarIcon size={26} className="shrink-0" />
+              <RadarIcon size={24} className="shrink-0" />
               <span
                 className="text-lg font-bold tracking-wide whitespace-nowrap"
                 style={{ fontFamily: 'var(--font-display)' }}
@@ -587,13 +587,13 @@ export default function App() {
                     onClick={() => setStudioView(id)}
                     className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
                       active
-                        ? 'border border-[#FF5CA8]/40 bg-[#141B27] text-[#FFF5FA]'
-                        : 'border border-transparent text-[#98A2B8] hover:bg-[#0D111A] hover:text-white'
+                        ? 'border border-[#FF5CA8]/40 bg-[#0B0B0E] text-[#FFF5FA]'
+                        : 'border border-transparent text-[#8E95A5] hover:bg-[#0B0B0E] hover:text-white'
                     }`}
                   >
                     <IconComp
                       className={`h-4 w-4 shrink-0 ${
-                        active ? 'text-[#FF5CA8]' : 'text-[#64748B]'
+                        active ? 'text-[#FF5CA8]' : 'text-[#5A6275]'
                       }`}
                     />
                     <span>{label}</span>
@@ -602,31 +602,31 @@ export default function App() {
               })}
             </nav>
 
-            <div className="mt-6 border-t border-[#273144] px-2 pt-5">
-              <p className="text-[11px] font-semibold text-[#98A2B8]">
+            <div className="mt-6 border-t border-[#1F1F26] px-2 pt-5">
+              <p className="text-[11px] font-semibold text-[#8E95A5]">
                 Active Radar Profile
               </p>
               <dl className="mt-2.5 space-y-2 text-xs">
                 <div>
-                  <dt className="text-[11px] text-[#64748B]">Active Server</dt>
+                  <dt className="text-[11px] text-[#5A6275]">Active Server</dt>
                   <dd className="font-mono text-[11px] text-[#2DD4BF]">
                     {effectiveRegion.label}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] text-[#64748B]">Party Member Skip</dt>
+                  <dt className="text-[11px] text-[#5A6275]">Party Member Skip</dt>
                   <dd className="font-mono text-[11px] text-[#38BDF8]">
                     {config.skip_party_members ? 'ON (Saves API Calls)' : 'OFF'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] text-[#64748B]">Recommendations</dt>
-                  <dd className="font-mono text-[11px] text-[#F3EFF4]">
+                  <dt className="text-[11px] text-[#5A6275]">Recommendations</dt>
+                  <dd className="font-mono text-[11px] text-[#F4F4F6]">
                     {config.enable_recommendations ? 'ON (Discover)' : 'OFF (Bandwidth Saver)'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] text-[#64748B]">In-Game Chat Reader</dt>
+                  <dt className="text-[11px] text-[#5A6275]">In-Game Chat Reader</dt>
                   <dd className="font-mono text-[11px] text-[#FFA6D2]">
                     {config.capture_in_game_chat ? 'ON (Post-Match)' : 'OFF'}
                   </dd>
@@ -640,7 +640,7 @@ export default function App() {
                   setDesktopTab('settings');
                   setWindowVisible(true);
                 }}
-                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[#273144] bg-[#141B27] px-3 py-1.5 text-xs font-medium text-[#F3EFF4] transition-colors hover:border-[#FF5CA8]"
+                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#0B0B0E] px-3 py-1.5 text-xs font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]"
               >
                 <Settings className="h-3.5 w-3.5 text-[#FFA6D2]" />
                 Open Settings
@@ -648,27 +648,27 @@ export default function App() {
             </div>
           </div>
 
-          <div className="mt-6 hidden border-t border-[#273144] px-2 pt-3 text-[11px] text-[#64748B] lg:block">
+          <div className="mt-6 hidden border-t border-[#1F1F26] px-2 pt-3 text-[11px] text-[#5A6275] lg:block">
             <p className="font-mono">v{APP_VERSION} · Post-Match Only</p>
-            <p className="mt-0.5 text-[10px] text-[#64748B]">Not a stream sniping tool</p>
+            <p className="mt-0.5 text-[10px] text-[#5A6275]">Not a stream sniping tool</p>
           </div>
         </div>
       </aside>
 
       {/* Main Content Area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-8 border-b border-[#273144] bg-[#090D14] px-6 py-3.5">
-          <div className="flex min-w-0 items-center gap-2 text-xs text-[#98A2B8] whitespace-nowrap">
+        <header className="flex items-center justify-between gap-8 border-b border-[#1F1F26] bg-[#000000] px-6 py-3.5">
+          <div className="flex min-w-0 items-center gap-2 text-xs text-[#8E95A5] whitespace-nowrap">
             <span className="font-medium text-[#FFF5FA]">Valorant Streamer Radar</span>
-            <span className="text-[#273144]">/</span>
-            <span className="truncate text-[#98A2B8]">{viewBreadcrumbs[studioView]}</span>
+            <span className="text-[#1F1F26]">/</span>
+            <span className="truncate text-[#8E95A5]">{viewBreadcrumbs[studioView]}</span>
           </div>
 
           <div className="flex shrink-0 items-center gap-3">
             <button
               type="button"
               onClick={handlePreviewToast}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#FF5CA8]/40 bg-[#1D2636] px-3.5 py-2 text-xs font-semibold text-[#FFF5FA] transition-colors hover:border-[#FF5CA8] hover:bg-[#253044] whitespace-nowrap"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#FF5CA8]/40 bg-[#121216] px-3.5 py-2 text-xs font-semibold text-[#FFF5FA] transition-colors hover:border-[#FF5CA8] hover:bg-[#1A1A20] whitespace-nowrap"
             >
               <Bell className="h-3.5 w-3.5 text-[#FFA6D2]" />
               Test Toast Notification

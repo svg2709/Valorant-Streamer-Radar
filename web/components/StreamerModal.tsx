@@ -241,13 +241,13 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="streamer-modal-title"
     >
-      <div className="w-full max-w-[490px] overflow-hidden rounded-[10px] border-[1.5px] border-[#FF5CA8] bg-[#141B27] text-[#F3EFF4] shadow-2xl">
-        <div className="h-[3px] w-full bg-pink-white-strip" />
+      <div className="w-full max-w-[490px] overflow-hidden rounded-lg border border-[#FF5CA8]/80 bg-[#0B0B0E] text-[#F4F4F6] shadow-2xl">
+        <div className="h-[2px] w-full bg-pink-white-strip" />
         <div className="max-h-[90vh] overflow-y-auto p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -259,14 +259,14 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                   ? 'Edit Custom Streamer Entry'
                   : 'Submit Streamer to Community Database'}
               </h2>
-              <p className="mt-0.5 text-xs text-[#98A2B8]">
+              <p className="mt-0.5 text-xs text-[#8E95A5]">
                 Submissions are reviewed before becoming verified in the shared streamer database
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="rounded p-1 text-[#98A2B8] transition-colors hover:bg-[#1D2636] hover:text-white"
+              className="rounded p-1 text-[#8E95A5] transition-colors hover:bg-[#1A1A20] hover:text-white"
               aria-label="Close modal"
             >
               <X className="h-4 w-4" />
@@ -275,11 +275,11 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
 
           {submittedIssueUrl ? (
             <div className="mt-4 space-y-4">
-              <div className="rounded-md border border-[#22C55E]/40 bg-[#0D111A] p-3.5 text-xs text-[#F3EFF4]">
+              <div className="rounded-md border border-[#22C55E]/40 bg-[#000000] p-3.5 text-xs text-[#F4F4F6]">
                 <p className="font-semibold text-[#22C55E]">
                   Saved locally &amp; ready for moderated review
                 </p>
-                <p className="mt-1.5 text-[#98A2B8]">
+                <p className="mt-1.5 text-[#8E95A5]">
                   In the Windows app, your browser opens the pre-filled submission form automatically.
                   User submissions are never treated as verified until a maintainer reviews and approves them.
                 </p>
@@ -287,7 +287,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                   href={submittedIssueUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-3 inline-flex items-center gap-1.5 rounded bg-pink-white-gradient bg-pink-white-gradient-hover px-3 py-1.5 text-xs font-bold text-[#0D111A]"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded bg-pink-white-gradient bg-pink-white-gradient-hover px-3 py-1.5 text-xs font-bold text-[#000000]"
                 >
                   Open Submission Form
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -297,7 +297,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-md border border-[#273144] bg-[#1D2636] px-4 py-2 text-xs font-medium text-[#F3EFF4] hover:bg-[#253044]"
+                  className="rounded-md border border-[#1F1F26] bg-[#121216] px-4 py-2 text-xs font-medium text-[#F4F4F6] hover:bg-[#1A1A20]"
                 >
                   Done
                 </button>
@@ -306,7 +306,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
           ) : (
             <div className="mt-4 space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                <label className="mb-1 block text-xs font-semibold text-[#F4F4F6]">
                   Primary Riot ID (IGN#TAG)
                 </label>
                 <input
@@ -318,29 +318,29 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                     setVerifyResult(null);
                   }}
                   placeholder="e.g. RohanYT#IND"
-                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                  className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 font-mono text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                <label className="mb-1 block text-xs font-semibold text-[#F4F4F6]">
                   Known Aliases / Alt Riot IDs{' '}
-                  <span className="font-normal text-[#98A2B8]">(Optional, comma-separated)</span>
+                  <span className="font-normal text-[#8E95A5]">(Optional, comma-separated)</span>
                 </label>
                 <input
                   type="text"
                   value={aliasesInput}
                   onChange={(e) => setAliasesInput(e.target.value)}
                   placeholder="e.g. RohanAlt#MUM, RohanLive#IND"
-                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                  className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 font-mono text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                <label className="mb-1 block text-xs font-semibold text-[#F4F4F6]">
                   Platform
                 </label>
-                <div className="flex items-center gap-1.5 rounded-md bg-[#0D111A] p-1">
+                <div className="flex items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#000000] p-1">
                   {PLATFORMS.map((plat) => (
                     <button
                       key={plat}
@@ -352,8 +352,8 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                       }}
                       className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
                         platform === plat
-                          ? 'border border-[#FF5CA8]/60 bg-[#1D2636] text-[#FFF5FA]'
-                          : 'border border-transparent text-[#98A2B8] hover:text-white'
+                          ? 'border border-[#FF5CA8]/60 bg-[#121216] text-[#FFF5FA]'
+                          : 'border border-transparent text-[#8E95A5] hover:text-white'
                       }`}
                     >
                       {plat}
@@ -363,16 +363,16 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                <label className="mb-1 block text-xs font-semibold text-[#F4F4F6]">
                   Primary Valorant Server{' '}
-                  <span className="font-normal text-[#98A2B8]">
+                  <span className="font-normal text-[#8E95A5]">
                     (Prevents cross-server false positives)
                   </span>
                 </label>
                 <select
                   value={serverRegion}
                   onChange={(e) => setServerRegion(e.target.value)}
-                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
+                  className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
                 >
                   <option value="">Unknown / Unverified Server</option>
                   {SERVER_REGIONS.map((reg) => (
@@ -384,9 +384,9 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                <label className="mb-1 block text-xs font-semibold text-[#F4F4F6]">
                   Channel Display Name{' '}
-                  <span className="font-normal text-[#98A2B8]">
+                  <span className="font-normal text-[#8E95A5]">
                     (or leave blank &amp; click Verify)
                   </span>
                 </label>
@@ -399,12 +399,12 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                     setVerifyResult(null);
                   }}
                   placeholder="e.g. Rohan Gaming"
-                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                  className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-[#F3EFF4]">
+                <label className="mb-1 block text-xs font-semibold text-[#F4F4F6]">
                   Channel URL
                 </label>
                 <input
@@ -422,7 +422,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                       ? 'https://www.twitch.tv/vexfps'
                       : 'https://kick.com/kairoclutch'
                   }
-                  className="w-full rounded border border-[#273144] bg-[#0D111A] px-3 py-2 font-mono text-xs text-white placeholder-[#64748B] focus:border-[#FF5CA8] focus:outline-none"
+                  className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 font-mono text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                 />
               </div>
 
@@ -430,7 +430,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 <button
                   type="button"
                   onClick={handleVerify}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-[#FFA6D2]/60 bg-[#1D2636] px-3 py-1.5 text-xs font-semibold text-[#FFF5FA] transition-colors hover:border-[#FF5CA8] hover:bg-[#253044] whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[#FFA6D2]/50 bg-[#121216] px-3 py-1.5 text-xs font-semibold text-[#FFF5FA] transition-colors hover:border-[#FF5CA8] hover:bg-[#1A1A20] whitespace-nowrap"
                 >
                   <ShieldCheck className="h-3.5 w-3.5 text-[#FFA6D2]" />
                   Verify Link &amp; Name
@@ -440,13 +440,13 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                     href={trimmedUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md border border-[#273144] bg-[#1D2636] px-2.5 py-1.5 text-xs font-medium text-[#F3EFF4] transition-colors hover:bg-[#253044] whitespace-nowrap"
+                    className="inline-flex items-center gap-1 rounded-md border border-[#1F1F26] bg-[#121216] px-2.5 py-1.5 text-xs font-medium text-[#F4F4F6] transition-colors hover:bg-[#1A1A20] whitespace-nowrap"
                   >
                     Open Link
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 ) : (
-                  <span className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border border-[#273144]/60 bg-[#0D111A] px-2.5 py-1.5 text-xs text-[#64748B] whitespace-nowrap">
+                  <span className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border border-[#1F1F26]/60 bg-[#000000] px-2.5 py-1.5 text-xs text-[#5A6275] whitespace-nowrap">
                     Open Link
                     <ExternalLink className="h-3 w-3" />
                   </span>
@@ -480,7 +480,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                             setPlatform(verifyResult.suggestedPlatform!);
                             setVerifyResult(null);
                           }}
-                          className="rounded border border-[#FF5CA8] bg-[#1D2636] px-2 py-0.5 text-[11px] font-semibold text-[#FFF5FA] hover:bg-[#253044]"
+                          className="rounded border border-[#FF5CA8] bg-[#121216] px-2 py-0.5 text-[11px] font-semibold text-[#FFF5FA] hover:bg-[#1A1A20]"
                         >
                           Switch Platform to {verifyResult.suggestedPlatform}
                         </button>
@@ -495,7 +495,7 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                               msg: `Channel name updated to "${verifyResult.suggestedName}" and verified.`,
                             });
                           }}
-                          className="rounded border border-[#FB923C] bg-[#1D2636] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#253044]"
+                          className="rounded border border-[#FB923C] bg-[#121216] px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-[#1A1A20]"
                         >
                           Use detected name: {verifyResult.suggestedName}
                         </button>
@@ -515,21 +515,21 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleAction(true)}
-                  className="rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-4 py-2 text-xs font-bold text-[#0D111A] whitespace-nowrap"
+                  className="rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-4 py-2 text-xs font-bold text-[#000000] whitespace-nowrap"
                 >
                   Save &amp; Submit for Review
                 </button>
                 <button
                   type="button"
                   onClick={() => handleAction(false)}
-                  className="rounded-md border border-[#273144] bg-[#1D2636] px-3.5 py-2 text-xs font-medium text-[#F3EFF4] transition-colors hover:bg-[#253044] whitespace-nowrap"
+                  className="rounded-md border border-[#1F1F26] bg-[#121216] px-3.5 py-2 text-xs font-medium text-[#F4F4F6] transition-colors hover:bg-[#1A1A20] whitespace-nowrap"
                 >
                   Save Local
                 </button>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="ml-auto rounded-md px-3 py-2 text-xs font-medium text-[#98A2B8] transition-colors hover:text-white whitespace-nowrap"
+                  className="ml-auto rounded-md px-3 py-2 text-xs font-medium text-[#8E95A5] transition-colors hover:text-white whitespace-nowrap"
                 >
                   Cancel
                 </button>

@@ -39,10 +39,10 @@ export const RadarIcon: React.FC<RadarIconProps> = ({ size = 28, className = '' 
       <rect width="32" height="32" rx="3" fill={`url(#${bgId})`} />
       <rect x="1" y="1" width="30" height="30" rx="2.2" stroke={`url(#${gradId})`} strokeWidth="2" />
       <path
-        d="M7.5 8.5H11.6L16 20.4L20.4 8.5H24.5L17.9 24.8H14.1L7.5 8.5Z"
+        d="M8 8.2H11.9L16 19.6L20.1 8.2H24L17.8 23.8H14.2L8 8.2Z"
         fill={`url(#${gradId})`}
       />
-      <circle cx="16" cy="9" r="2.2" fill="#FFF5FA" />
+      <circle cx="16" cy="9.6" r="2.1" fill="#FFF5FA" />
     </svg>
   );
 };

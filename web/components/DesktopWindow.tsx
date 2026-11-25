@@ -249,6 +249,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
 
   // Discover state (cached 5 min TTL, zero fetches when OFF)
   const [discoverPlatform, setDiscoverPlatform] = useState<'All' | 'Twitch' | 'YouTube'>('All');
+  const [discoverServer, setDiscoverServer] = useState<ServerRegionOverride>('auto');
   const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [recsLastFetchedMs, setRecsLastFetchedMs] = useState<number | null>(null);
   const [recsUpdatedAt, setRecsUpdatedAt] = useState<string>('Not fetched yet');
@@ -395,6 +396,8 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   }, [config]);
 
   const effectiveRegion = resolveEffectiveRegion(config, detectedRegion);
+  const discoverRegion =
+    discoverServer === 'auto' ? effectiveRegion : getServerRegionInfo(discoverServer);
   const detectedRegionInfo = getServerRegionInfo(detectedRegion);
 
   const handleRefreshRecs = useCallback(
@@ -555,19 +558,19 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   const visibleRecommendations = useMemo(() => {
     if (!config.enable_recommendations) return [];
     const regional = REGIONAL_RECOMMENDATIONS.filter(
-      (r) => r.server_region === effectiveRegion.code
+      (r) => r.server_region === discoverRegion.code
     );
     const base =
       regional.length > 0
         ? regional
         : REGIONAL_RECOMMENDATIONS.filter(
-            (r) => getServerRegionInfo(r.server_region).apiRegion === effectiveRegion.apiRegion
+            (r) => getServerRegionInfo(r.server_region).apiRegion === discoverRegion.apiRegion
           );
     const pool = base.length > 0 ? base : REGIONAL_RECOMMENDATIONS.slice(0, 6);
     return pool.filter(
       (r) => discoverPlatform === 'All' || r.platform === discoverPlatform
     );
-  }, [config.enable_recommendations, effectiveRegion, discoverPlatform]);
+  }, [config.enable_recommendations, discoverRegion, discoverPlatform]);
 
   const cleanedIgnResult = cleanIgn(testIgn);
   const testedHost = hostOf(testUrl.trim());
@@ -853,9 +856,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
       {/* Custom Frameless 38px AMOLED Title Bar (Minimize & Close-to-tray ONLY) */}
       <div className="flex h-[38px] items-center justify-between border-b border-[#1F1F26] bg-[#000000] pl-3.5 pr-1 select-none">
         <div className="flex min-w-0 items-center gap-2.5">
-          <RadarIcon size={18} className="shrink-0" />
+          <div className="flex h-[20px] w-[20px] shrink-0 items-center justify-center">
+            <RadarIcon size={18} className="block shrink-0" />
+          </div>
           <span
-            className="text-[15px] font-bold tracking-wider whitespace-nowrap"
+            className="text-[15px] leading-none font-bold tracking-wider whitespace-nowrap"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <span className="text-pink-white-gradient">VALORANT</span>{' '}
@@ -1635,8 +1640,9 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       </h3>
                       <p className="mt-1 text-[13px] leading-relaxed text-[#8E95A5]">
                         Disabled by default to conserve bandwidth and API quota. Enabling fetches
-                        cached live Valorant creators near{' '}
-                        <span className="font-semibold text-[#2DD4BF]">{effectiveRegion.label}</span>.
+                        cached live Valorant creators for{' '}
+                        <span className="font-semibold text-[#2DD4BF]">{discoverRegion.label}</span>{' '}
+                        (or any Valorant server you choose).
                       </p>
                     </div>
                   </div>
@@ -1672,10 +1678,26 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           </button>
                         ))}
                       </div>
-                      <span className="font-mono text-xs text-[#2DD4BF]">
-                        {effectiveRegion.shortLabel}
-                      </span>
-                      <span className="text-[#1F1F26]">·</span>
+
+                      <select
+                        aria-label="Discover Server"
+                        value={discoverServer}
+                        onChange={(e) => {
+                          setDiscoverServer(e.target.value as ServerRegionOverride);
+                          handleRefreshRecs(true);
+                        }}
+                        className="h-9 rounded-md border border-[#1F1F26] bg-[#0B0B0E] px-2.5 text-[13px] font-medium text-[#2DD4BF] focus:border-[#FF5CA8] focus:outline-none"
+                      >
+                        <option value="auto">
+                          Active Server ({effectiveRegion.shortLabel})
+                        </option>
+                        {SERVER_REGIONS.map((reg) => (
+                          <option key={reg.code} value={reg.code}>
+                            {reg.label}
+                          </option>
+                        ))}
+                      </select>
+
                       <span className="font-mono text-xs text-[#8E95A5]">
                         Updated {recsUpdatedAt}
                       </span>
@@ -1702,7 +1724,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   <div className="flex items-center gap-2 text-xs text-[#8E95A5]">
                     <Info className="h-4 w-4 shrink-0 text-[#38BDF8]" />
                     <span>
-                      Discovery suggestions near {effectiveRegion.shortLabel} — not matched to your lobby.
+                      Discovery suggestions for <span className="text-[#2DD4BF]">{discoverRegion.label}</span> — does not change your in-game detection server.
                     </span>
                   </div>
 
@@ -2025,32 +2047,92 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       />
                     </button>
                     {showApiGuide && (
-                      <div className="space-y-3 border-t border-[#1F1F26] px-4 py-3.5 text-xs leading-relaxed text-[#F4F4F6]">
+                      <div className="space-y-4 border-t border-[#1F1F26] px-4 py-4 text-xs leading-relaxed text-[#F4F4F6]">
                         <div>
-                          <p className="font-semibold text-[#FF5CA8]">
-                            YouTube Data API v3 (Free — 10,000 units/day)
+                          <p className="text-[13px] font-semibold text-[#FF5CA8]">
+                            1. YouTube Data API v3 (Free — 10,000 units/day, no credit card needed)
                           </p>
-                          <ol className="mt-1 list-decimal space-y-1 pl-4 text-[#D8DCE6]">
-                            <li>Click <strong className="text-white">Get Key</strong> above to open Google Cloud Console.</li>
-                            <li>Create a new project (e.g. <span className="font-mono text-white">Valorant-Radar</span>).</li>
-                            <li>Enable <span className="font-mono text-white">YouTube Data API v3</span> under Library.</li>
-                            <li>Create an API key under <strong className="text-white">Credentials</strong> and paste it above.</li>
+                          <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-[#D8DCE6]">
+                            <li>
+                              Click <strong className="text-white">Get Key</strong> above to open Google Cloud Console and sign in with any Google account.
+                            </li>
+                            <li>
+                              Click the project picker at the top-left &rarr; <strong className="text-white">New Project</strong> &rarr; name it{' '}
+                              <span className="font-mono text-white">Valorant-Radar</span> &rarr; click <strong className="text-white">Create</strong>, then make sure it is selected.
+                            </li>
+                            <li>
+                              Open the left sidebar &rarr; <strong className="text-white">APIs &amp; Services</strong> &rarr; <strong className="text-white">Library</strong>, search{' '}
+                              <span className="font-mono text-white">YouTube Data API v3</span>, click it, and press <strong className="text-white">Enable</strong>.
+                            </li>
+                            <li>
+                              Go to <strong className="text-white">APIs &amp; Services</strong> &rarr; <strong className="text-white">Credentials</strong> &rarr;{' '}
+                              <strong className="text-white">+ CREATE CREDENTIALS</strong> &rarr; <strong className="text-white">API key</strong>.
+                            </li>
+                            <li>
+                              <em>(Recommended)</em> Click <strong className="text-white">Edit API key</strong> &rarr; under <strong className="text-white">API restrictions</strong> choose{' '}
+                              <strong className="text-white">Restrict key</strong> &rarr; select <span className="font-mono text-white">YouTube Data API v3</span> &rarr; Save.
+                            </li>
+                            <li>
+                              Copy the <span className="font-mono text-white">AIza...</span> key, paste it above, click <strong className="text-white">Test Key</strong>, then click{' '}
+                              <strong className="text-white">Save Settings</strong> below.
+                            </li>
                           </ol>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-[#A770FF]">
-                            Twitch Helix API (Free — requires 2FA)
+                          <p className="mt-1.5 text-[11.5px] text-[#8E95A5]">
+                            Tip: If Test Key says the API is not enabled yet, wait 1–2 minutes after pressing Enable and test again.
                           </p>
-                          <ol className="mt-1 list-decimal space-y-1 pl-4 text-[#D8DCE6]">
-                            <li>Click <strong className="text-white">Get Keys</strong> above to open Twitch Developer Console.</li>
-                            <li>Register an application with redirect URL <span className="font-mono text-white">http://localhost</span>.</li>
-                            <li>Copy <strong className="text-white">Client ID</strong> and generate a <strong className="text-white">Client Secret</strong>.</li>
-                          </ol>
                         </div>
-                        <p className="flex items-center gap-1.5 text-xs text-[#8E95A5]">
-                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#FB923C]" />
-                          Kick needs no API key. Leaving all keys blank still works keyless.
-                        </p>
+
+                        <div className="border-t border-[#1F1F26] pt-3">
+                          <p className="text-[13px] font-semibold text-[#A770FF]">
+                            2. Twitch Helix API (Free — requires 2FA on your Twitch account)
+                          </p>
+                          <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-[#D8DCE6]">
+                            <li>
+                              Make sure Two-Factor Authentication (2FA) is enabled in your Twitch Security settings (Twitch requires 2FA to register developer apps).
+                            </li>
+                            <li>
+                              Click <strong className="text-white">Get Keys</strong> above to open Twitch Developer Console and click{' '}
+                              <strong className="text-white">+ Register Your Application</strong>.
+                            </li>
+                            <li>
+                              Fill in <strong className="text-white">Name</strong>: <span className="font-mono text-white">Valorant Streamer Radar</span> (add numbers if taken),{' '}
+                              <strong className="text-white">OAuth Redirect URLs</strong>: <span className="font-mono text-white">http://localhost</span> (click <strong className="text-white">Add</strong>),{' '}
+                              <strong className="text-white">Category</strong>: <span className="font-mono text-white">Application Integration</span>, and{' '}
+                              <strong className="text-white">Client Type</strong>: <span className="font-mono text-white">Confidential</span>.
+                            </li>
+                            <li>
+                              Click <strong className="text-white">Create</strong>, then click <strong className="text-white">Manage</strong> next to your app.
+                            </li>
+                            <li>
+                              Copy the <strong className="text-white">Client ID</strong> and paste it into <strong className="text-white">Client ID</strong> above.
+                            </li>
+                            <li>
+                              Click <strong className="text-white">New Secret</strong> &rarr; confirm &rarr; copy the secret right away <em>(Twitch only displays it once)</em> and paste it into{' '}
+                              <strong className="text-white">Client Secret</strong> above.
+                            </li>
+                            <li>
+                              Click <strong className="text-white">Test Twitch</strong> to verify live OAuth works, then click <strong className="text-white">Save Settings</strong> below.
+                            </li>
+                          </ol>
+                          <p className="mt-1.5 text-[11.5px] text-[#8E95A5]">
+                            Common mistake: Choosing &ldquo;Public&rdquo; instead of &ldquo;Confidential&rdquo; hides the New Secret button.
+                          </p>
+                        </div>
+
+                        <div className="space-y-1 border-t border-[#1F1F26] pt-3 text-xs text-[#8E95A5]">
+                          <p className="flex items-center gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#FB923C]" />
+                            <span>
+                              <strong className="text-[#F4F4F6]">Kick needs no API key</strong> — and leaving all keys blank still works via keyless checks.
+                            </span>
+                          </p>
+                          <p className="flex items-center gap-1.5">
+                            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-[#22C55E]" />
+                            <span>
+                              Keys are stored strictly locally on your PC (<span className="font-mono text-[#D8DCE6]">%APPDATA%\ValorantStreamerRadar\config.json</span>) and are never uploaded.
+                            </span>
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>

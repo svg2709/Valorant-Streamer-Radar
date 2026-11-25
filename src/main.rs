@@ -2051,13 +2051,75 @@ fn extract_chat_stream_plug(body: &str) -> Option<ChatStreamPlug> {
     None
 }
 
-async fn probe_riot_session(local: &Client) -> RiotStatus {
-    if read_riot_lockfile().is_err() {
-        return RiotStatus::Offline;
+/// Pure classifier used to determine live Valorant vs Riot Client status without false positives.
+/// Valorant is only reported Active when the actual game process (or active Valorant product session)
+/// is running - never when Riot Client is simply open in the tray or running another Riot title.
+fn classify_riot_status(valorant_running: bool, riot_client_running: bool, has_lockfile: bool) -> RiotStatus {
+    if valorant_running {
+        RiotStatus::ValorantActive
+    } else if riot_client_running && has_lockfile {
+        RiotStatus::RiotClientOnly
+    } else {
+        RiotStatus::Offline
     }
-    match fetch_local_entitlements(local).await {
-        Ok(_) => RiotStatus::ValorantActive,
-        Err(_) => RiotStatus::RiotClientOnly,
+}
+
+/// Checks Riot's local product-session API for an active `valorant` session (non-Windows fallback).
+#[cfg(not(windows))]
+async fn has_active_valorant_session(local: &Client) -> bool {
+    let Ok((port, password, protocol)) = read_riot_lockfile() else {
+        return false;
+    };
+    let auth = format!("Basic {}", BASE64.encode(format!("riot:{password}")));
+    let url = format!("{protocol}://127.0.0.1:{port}/product-session/v1/external-sessions");
+    let Ok(resp) = local
+        .get(url)
+        .header("Authorization", auth)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+    else {
+        return false;
+    };
+    if !resp.status().is_success() {
+        return false;
+    }
+    let Ok(val) = resp.json::<Value>().await else {
+        return false;
+    };
+    if let Some(map) = val.as_object() {
+        for (_id, sess) in map {
+            let prod = sess["productId"].as_str().unwrap_or("");
+            let state = sess["launchConfiguration"]["arguments"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(true);
+            if prod.eq_ignore_ascii_case("valorant") && state {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+async fn probe_riot_session(local: &Client) -> RiotStatus {
+    let has_lockfile = read_riot_lockfile().is_ok();
+    #[cfg(windows)]
+    {
+        let _ = local;
+        // Direct kernel32 process snapshot: instant, zero network calls, zero false positives
+        // when Riot Client is idling in the tray or running League/TFT, or after a stale lockfile.
+        let (valorant_running, riot_client_running) = win32_window::detect_riot_processes();
+        classify_riot_status(valorant_running, riot_client_running, has_lockfile)
+    }
+    #[cfg(not(windows))]
+    {
+        if !has_lockfile {
+            return RiotStatus::Offline;
+        }
+        let valorant_running = has_active_valorant_session(local).await;
+        let riot_client_running = valorant_running || fetch_local_entitlements(local).await.is_ok();
+        classify_riot_status(valorant_running, riot_client_running, has_lockfile)
     }
 }
 
@@ -4429,19 +4491,14 @@ async fn watch_log(
 
     loop {
         let has_lockfile = read_riot_lockfile().is_ok();
-        let should_probe = match (has_lockfile, last_riot_status, last_probe) {
-            (false, _, _) => false,
-            (true, None, _) | (true, Some(RiotStatus::Offline), _) => true,
-            (true, _, Some(at)) => at.elapsed() >= Duration::from_secs(5),
-            (true, _, None) => true,
-        };
-        let next_status = if !has_lockfile {
-            RiotStatus::Offline
-        } else if should_probe {
+        let should_probe = last_probe
+            .map(|at| at.elapsed() >= Duration::from_secs(2))
+            .unwrap_or(true);
+        let next_status = if should_probe {
             last_probe = Some(Instant::now());
             probe_riot_session(&local_client).await
         } else {
-            last_riot_status.unwrap_or(RiotStatus::RiotClientOnly)
+            last_riot_status.unwrap_or(RiotStatus::Offline)
         };
         if last_riot_status != Some(next_status) {
             last_riot_status = Some(next_status);
@@ -4653,6 +4710,72 @@ mod win32_window {
             BringWindowToTop(hwnd);
             SetForegroundWindow(hwnd);
             InvalidateRect(hwnd, std::ptr::null(), 0);
+        }
+    }
+
+    const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    #[repr(C)]
+    struct ProcessEntry32W {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateToolhelp32Snapshot(dw_flags: u32, th32_process_id: u32) -> isize;
+        fn Process32FirstW(h_snapshot: isize, lppe: *mut ProcessEntry32W) -> i32;
+        fn Process32NextW(h_snapshot: isize, lppe: *mut ProcessEntry32W) -> i32;
+        fn CloseHandle(h_object: isize) -> i32;
+    }
+
+    /// Inspects active Windows processes via Toolhelp32 without spawning any child processes.
+    /// Returns `(valorant_game_running, riot_client_running)`.
+    pub fn detect_riot_processes() -> (bool, bool) {
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == INVALID_HANDLE_VALUE || snap == 0 {
+                return (false, false);
+            }
+            let mut entry: ProcessEntry32W = std::mem::zeroed();
+            entry.dw_size = std::mem::size_of::<ProcessEntry32W>() as u32;
+            let mut valorant_running = false;
+            let mut riot_client_running = false;
+
+            if Process32FirstW(snap, &mut entry) != 0 {
+                loop {
+                    let nul = entry
+                        .sz_exe_file
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.sz_exe_file.len());
+                    let exe = String::from_utf16_lossy(&entry.sz_exe_file[..nul]);
+                    if exe.eq_ignore_ascii_case("VALORANT-Win64-Shipping.exe") {
+                        valorant_running = true;
+                    } else if exe.eq_ignore_ascii_case("RiotClientServices.exe")
+                        || exe.eq_ignore_ascii_case("RiotClientUx.exe")
+                    {
+                        riot_client_running = true;
+                    }
+                    if valorant_running && riot_client_running {
+                        break;
+                    }
+                    if Process32NextW(snap, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snap);
+            (valorant_running, riot_client_running)
         }
     }
 
@@ -5021,21 +5144,24 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
     changed
 }
 
-/// Compact vector brand emblem for the custom AMOLED title bar.
+/// Compact vector brand emblem for the custom AMOLED title bar (pixel-centered).
 fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, Rounding::same(3.0), BG_DARK);
-    p.rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.2, ACCENT_PINK));
-    let w = rect.width();
-    let h = rect.height();
-    let l = egui::pos2(rect.left() + w * 0.24, rect.top() + h * 0.28);
-    let b = egui::pos2(rect.center().x, rect.bottom() - h * 0.22);
-    let r = egui::pos2(rect.right() - w * 0.24, rect.top() + h * 0.28);
-    let stroke = Stroke::new(1.9, ACCENT_PEARL);
+    let box_rect = rect.shrink(0.5);
+    p.rect_filled(box_rect, Rounding::same(3.5), BG_DARK);
+    p.rect_stroke(box_rect, Rounding::same(3.5), Stroke::new(1.2, ACCENT_PINK));
+    let cx = box_rect.center().x;
+    let cy = box_rect.center().y;
+    let half_w = box_rect.width() * 0.25;
+    let half_h = box_rect.height() * 0.24;
+    let l = egui::pos2(cx - half_w, cy - half_h);
+    let b = egui::pos2(cx, cy + half_h);
+    let r = egui::pos2(cx + half_w, cy - half_h);
+    let stroke = Stroke::new(1.85, ACCENT_PEARL);
     p.line_segment([l, b], stroke);
     p.line_segment([b, r], stroke);
-    p.circle_filled(egui::pos2(rect.center().x, rect.top() + h * 0.28), 1.5, ACCENT_PINK);
+    p.circle_filled(egui::pos2(cx, cy - half_h + 0.5), 1.4, ACCENT_PINK);
 }
 
 /// Custom frameless title bar Minimize button (vector-drawn dash).
@@ -5279,6 +5405,7 @@ struct StreamerApp {
     dir_search: String,
     // Discover / Recommendations filter
     discover_platform: DiscoverPlatformFilter,
+    discover_server_override: String,
     // Add / Edit modal state
     show_add_modal: bool,
     editing_original: Option<(String, String)>,
@@ -5349,6 +5476,7 @@ impl StreamerApp {
             dir_source_tab: DirectorySourceTab::Custom,
             dir_search: String::new(),
             discover_platform: DiscoverPlatformFilter::All,
+            discover_server_override: "auto".to_string(),
             show_add_modal: false,
             editing_original: None,
             input_riot_id: String::new(),
@@ -5395,6 +5523,14 @@ impl StreamerApp {
         self.server_filter = "All".to_string();
         self.date_filter = DateRangeFilter::AllTime;
         self.status_filter = StatusFilter::All;
+    }
+
+    fn discover_region(&self, active_region: &'static ServerRegionInfo) -> &'static ServerRegionInfo {
+        if self.discover_server_override.eq_ignore_ascii_case("auto") {
+            active_region
+        } else {
+            server_region_by_code(&self.discover_server_override).unwrap_or(active_region)
+        }
     }
 
     fn trigger_recommendations_fetch(&self, region_code: &str, force: bool) {
@@ -5679,30 +5815,30 @@ impl eframe::App for StreamerApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                 }
 
-                ui.horizontal(|ui| {
+                ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.add_space(14.0);
-                    ui.horizontal_centered(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        paint_brand_mark(ui, 18.0);
-                        ui.label(
-                            RichText::new("VALORANT")
-                                .font(FontId::proportional(14.5))
-                                .strong()
-                                .color(ACCENT_PINK),
-                        );
-                        ui.label(
-                            RichText::new("RADAR")
-                                .font(FontId::proportional(14.5))
-                                .strong()
-                                .color(ACCENT_PEARL),
-                        );
-                        if let Some(msg) = &toast {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
-                            ui.label(RichText::new(short(msg, 64)).color(ACCENT_BLUSH).size(12.5));
-                        }
-                    });
+                    ui.add_space(12.0);
+                    paint_brand_mark(ui, 18.0);
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("VALORANT")
+                            .font(FontId::proportional(14.5))
+                            .strong()
+                            .color(ACCENT_PINK),
+                    );
+                    ui.add_space(5.0);
+                    ui.label(
+                        RichText::new("RADAR")
+                            .font(FontId::proportional(14.5))
+                            .strong()
+                            .color(ACCENT_PEARL),
+                    );
+                    if let Some(msg) = &toast {
+                        ui.add_space(10.0);
+                        ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(short(msg, 64)).color(ACCENT_BLUSH).size(12.5));
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
@@ -5789,7 +5925,8 @@ impl eframe::App for StreamerApp {
                             && recs_enabled
                             && matches!(recommendations, RecommendationsState::Idle)
                         {
-                            self.trigger_recommendations_fetch(active_region.code, false);
+                            let target = self.discover_region(active_region);
+                            self.trigger_recommendations_fetch(target.code, false);
                         }
                         self.active_tab = tab;
                     }
@@ -6998,8 +7135,10 @@ impl StreamerApp {
         ui: &mut egui::Ui,
         recs_enabled: bool,
         recommendations: &RecommendationsState,
-        active_region: &ServerRegionInfo,
+        active_region: &'static ServerRegionInfo,
     ) {
+        let target_region = self.discover_region(active_region);
+
         if !recs_enabled {
             ui.add_space(36.0);
             Frame::none()
@@ -7019,8 +7158,8 @@ impl StreamerApp {
                             ui.add_space(6.0);
                             ui.label(
                                 RichText::new(format!(
-                                    "Disabled by default to save internet bandwidth and external API quota (zero background requests while OFF). Enable to browse optional Twitch and YouTube Valorant streams for {}.",
-                                    active_region.label
+                                    "Disabled by default to save internet bandwidth and external API quota (zero background requests while OFF). Enable to browse optional Twitch and YouTube Valorant streams for {} (or any Valorant server you choose).",
+                                    target_region.label
                                 ))
                                 .color(TEXT_MUTED)
                                 .size(14.0),
@@ -7048,11 +7187,18 @@ impl StreamerApp {
                             s.config.enable_recommendations = true;
                             save_json("config.json", &s.config);
                         }
-                        self.trigger_recommendations_fetch(active_region.code, false);
+                        self.trigger_recommendations_fetch(target_region.code, false);
                     }
                 });
             return;
         }
+
+        let prev_server = self.discover_server_override.clone();
+        let discover_selected_label = if self.discover_server_override.eq_ignore_ascii_case("auto") {
+            format!("Active Server ({})", active_region.short_label)
+        } else {
+            target_region.label.to_string()
+        };
 
         ui.horizontal(|ui| {
             for (plat, lbl) in [
@@ -7063,13 +7209,23 @@ impl StreamerApp {
                 ui.selectable_value(&mut self.discover_platform, plat, lbl);
             }
             ui.add_space(8.0);
-            Frame::none()
-                .fill(BTN_SECONDARY)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(4.0))
-                .inner_margin(Margin::symmetric(9.0, 4.0))
-                .show(ui, |ui| {
-                    ui.label(RichText::new(format!("Server: {}", active_region.label)).size(13.0).color(ALLY_TEAL));
+            ui.label(RichText::new("Server").size(13.0).color(TEXT_MUTED));
+            egui::ComboBox::from_id_salt("discover_server_region_combo")
+                .width(210.0)
+                .selected_text(RichText::new(discover_selected_label).color(ALLY_TEAL))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.discover_server_override,
+                        "auto".to_string(),
+                        format!("Active Server ({})", active_region.short_label),
+                    );
+                    for reg in SERVER_REGIONS {
+                        ui.selectable_value(
+                            &mut self.discover_server_override,
+                            reg.code.to_string(),
+                            reg.label,
+                        );
+                    }
                 });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -7089,16 +7245,28 @@ impl StreamerApp {
                 let busy = matches!(recommendations, RecommendationsState::Loading);
                 let ref_lbl = if busy { "Refreshing..." } else { "Refresh Live" };
                 if gradient_button(ui, ref_lbl, Vec2::new(124.0, 32.0), !busy, 13.5).clicked() {
-                    self.trigger_recommendations_fetch(active_region.code, true);
+                    let chosen = self.discover_region(active_region);
+                    self.trigger_recommendations_fetch(chosen.code, true);
                 }
             });
         });
 
+        let target_region = if self.discover_server_override != prev_server {
+            let next_target = self.discover_region(active_region);
+            self.trigger_recommendations_fetch(next_target.code, false);
+            next_target
+        } else {
+            target_region
+        };
+
         ui.add_space(6.0);
         ui.label(
-            RichText::new("Discovery Suggestions (Not Matched to Your Lobby)  |  Cached for 5 minutes to reduce bandwidth & API usage.")
-                .color(TEXT_MUTED)
-                .size(12.5),
+            RichText::new(format!(
+                "Discovery Suggestions for {} (Not Matched to Your Lobby)  |  Changing server here does not affect match detection.",
+                target_region.label
+            ))
+            .color(TEXT_MUTED)
+            .size(12.5),
         );
         ui.add_space(10.0);
 
@@ -7115,7 +7283,7 @@ impl StreamerApp {
                     ui.spinner();
                     ui.add_space(8.0);
                     ui.label(
-                        RichText::new(format!("Fetching live Twitch & YouTube Valorant streamers for {}...", active_region.short_label))
+                        RichText::new(format!("Fetching live Twitch & YouTube Valorant streamers for {}...", target_region.short_label))
                             .color(TEXT_MUTED)
                             .size(14.5),
                     );
@@ -7148,7 +7316,7 @@ impl StreamerApp {
                     RichText::new(format!(
                         "Showing {} recommended streams for {}  |  Updated {}",
                         filtered.len(),
-                        active_region.short_label,
+                        target_region.short_label,
                         fetched_at
                     ))
                     .color(TEXT_MUTED)
@@ -7160,7 +7328,7 @@ impl StreamerApp {
                     ui.add_space(40.0);
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            RichText::new("No live Valorant streams found for this platform filter. Try 'All Platforms' or Refresh.")
+                            RichText::new("No live Valorant streams found for this server/platform filter. Try another server or Refresh.")
                                 .color(TEXT_MUTED)
                                 .size(14.5),
                         );
@@ -7225,7 +7393,7 @@ impl StreamerApp {
                 });
 
                 if let Some(rec) = prefill_rec {
-                    self.open_add_modal_from_rec(&rec, active_region.code);
+                    self.open_add_modal_from_rec(&rec, target_region.code);
                 }
             }
         }
@@ -7487,25 +7655,38 @@ impl StreamerApp {
                             .fill(BG_DARK)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
                             .rounding(Rounding::same(6.0))
-                            .inner_margin(Margin::same(12.0))
+                            .inner_margin(Margin::same(14.0))
                             .show(ui, |ui| {
-                                ui.label(RichText::new("YouTube Data API v3 (Free - 10,000 units/day, no card needed)").strong().color(ACCENT_PINK).size(13.5));
-                                ui.label(RichText::new("1. Click 'Get YouTube Key' above to open Google Cloud Console.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("2. Create a new project (e.g. Valorant-Radar) from the top-left selector.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("3. Open APIs & Services -> Library, search 'YouTube Data API v3', click Enable.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("4. Open APIs & Services -> Credentials -> + CREATE CREDENTIALS -> API key.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("5. Paste the AIza... key above, click 'Test Key', then 'Save Settings'.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("1. YouTube Data API v3 (Free - 10,000 units/day, no credit card needed)").strong().color(ACCENT_PINK).size(13.5));
+                                ui.add_space(3.0);
+                                ui.label(RichText::new("1) Click 'Get YouTube Key' above to open Google Cloud Console and sign in.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("2) Click the project picker (top-left) -> New Project -> name it 'Valorant-Radar' -> Create, then select it.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("3) Open left menu -> APIs & Services -> Library -> search 'YouTube Data API v3' -> click Enable.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("4) Open APIs & Services -> Credentials -> + CREATE CREDENTIALS -> API key.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("5) (Recommended) Click Edit API key -> API restrictions -> Restrict key -> YouTube Data API v3 -> Save.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("6) Copy the AIza... key, paste it above, click 'Test Key', then click 'Save Settings' below.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("Tip: If Test Key says the API is not enabled, wait 1-2 minutes after pressing Enable and retry.").color(TEXT_MUTED).size(12.5));
 
+                                ui.add_space(10.0);
+                                ui.separator();
                                 ui.add_space(8.0);
-                                ui.label(RichText::new("Twitch Helix API (Free - requires 2FA on your Twitch account)").strong().color(TWITCH_PURPLE).size(13.5));
-                                ui.label(RichText::new("1. Click 'Get Twitch Keys' above to open Twitch Developer Console.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("2. Click 'Register Your Application', name it 'Valorant Radar'.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("3. Set OAuth Redirect URL to http://localhost and Category to Application Integration.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("4. Open Manage -> copy Client ID, click 'New Secret' -> copy Client Secret.").color(TEXT_PRIMARY).size(13.0));
-                                ui.label(RichText::new("5. Paste both above, click 'Test Twitch', then 'Save Settings'.").color(TEXT_PRIMARY).size(13.0));
 
+                                ui.label(RichText::new("2. Twitch Helix API (Free - requires 2FA on your Twitch account)").strong().color(TWITCH_PURPLE).size(13.5));
+                                ui.add_space(3.0);
+                                ui.label(RichText::new("1) Enable Two-Factor Authentication (2FA) at twitch.tv/settings/security (required by Twitch).").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("2) Click 'Get Twitch Keys' above to open Twitch Developer Console -> + Register Your Application.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("3) Fill in: Name = 'Valorant Streamer Radar' (add numbers if taken), OAuth Redirect URL = http://localhost (click Add).").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("4) Set Category = 'Application Integration' and Client Type = 'Confidential' (important!), then click Create.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("5) Click Manage -> copy Client ID into the box above.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("6) Click 'New Secret' -> confirm -> copy the secret immediately (shown once!) into Client Secret above.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("7) Click 'Test Twitch' to verify live OAuth works, then click 'Save Settings' below.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("Common mistake: Picking 'Public' instead of 'Confidential' hides the New Secret button.").color(TEXT_MUTED).size(12.5));
+
+                                ui.add_space(10.0);
+                                ui.separator();
                                 ui.add_space(6.0);
-                                ui.label(RichText::new("Kick does not need an API key. Leaving keys empty still works via keyless fallbacks.").color(TEXT_MUTED).size(12.5));
+                                ui.label(RichText::new("Kick does not need an API key. Leaving all keys blank still works via keyless lookups.").color(TEXT_MUTED).size(12.5));
+                                ui.label(RichText::new("Privacy: API keys are stored strictly locally in %APPDATA%\\ValorantStreamerRadar\\config.json and are never uploaded.").color(ALLY_TEAL).size(12.5));
                             });
                     });
                 });
@@ -8045,6 +8226,19 @@ mod tests {
         assert!(has_newer_release("1.0.1", "v1.2.0", None, None, None, "abc1234"));
         assert!(!has_newer_release("1.2.0", "v1.2.0", None, None, None, "abc1234"));
         assert!(!has_newer_release("1.2.0", "v1.0.1", None, None, None, "abc1234"));
+    }
+
+    #[test]
+    fn test_riot_status_avoids_valorant_active_false_positives() {
+        // Riot Client open in tray or playing another Riot game must NOT report ValorantActive
+        assert_eq!(classify_riot_status(false, true, true), RiotStatus::RiotClientOnly);
+        // Stale lockfile with neither process running must report Offline
+        assert_eq!(classify_riot_status(false, false, true), RiotStatus::Offline);
+        // Everything closed must report Offline
+        assert_eq!(classify_riot_status(false, false, false), RiotStatus::Offline);
+        // Only actual VALORANT-Win64-Shipping.exe running reports ValorantActive
+        assert_eq!(classify_riot_status(true, true, true), RiotStatus::ValorantActive);
+        assert_eq!(classify_riot_status(true, false, false), RiotStatus::ValorantActive);
     }
 
     #[test]

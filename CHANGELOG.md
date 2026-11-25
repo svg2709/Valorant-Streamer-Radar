@@ -3,6 +3,16 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.2] - 2026-11-25
+
+### Added
+- **Discover Server Selector:** Added a dedicated server picker directly in the **Discover** tab so users can browse live Valorant streams for any supported server without changing their in-game detection server in Settings.
+- **Improved API Key Setup Guide:** Expanded the collapsible **Settings** guide with detailed step-by-step instructions, common pitfalls, and local storage notes for both YouTube Data API v3 and Twitch Helix API.
+
+### Fixed
+- **Accurate "Valorant Active" Detection:** Switched Windows status checks to inspect active processes (`VALORANT-Win64-Shipping.exe` vs. `RiotClientServices.exe`), eliminating false "Valorant Active" reports when Riot Client is idling in the tray, another Riot game is running, or a stale lockfile remains.
+- **Centered Top-Left App Logo:** Centered the brand emblem inside its frame and aligned it vertically within the custom title bar.
+
 ## [1.2.1] - 2026-11-25
 
 ### Changed

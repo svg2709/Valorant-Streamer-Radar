@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.7%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.7 for Windows" />
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.8%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.8 for Windows" />
   </a>
   &nbsp;
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest/download/ValorantStreamerRadar.exe">
@@ -20,7 +20,7 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v1.2.7-fff5fa?style=flat-square&labelColor=141b27)
+![Version](https://img.shields.io/badge/Version-v1.2.8-fff5fa?style=flat-square&labelColor=141b27)
 ![Mode](https://img.shields.io/badge/Scan%20Mode-Post--Match%20Only-10b981?style=flat-square)
 
 <br />
@@ -31,16 +31,16 @@
 
 ---
 
-## Not a Stream Sniping Tool
+## Is This Bannable? (Not a Cheat or Stream Sniping Tool)
 
-**Valorant Streamer Radar is strictly a post-match discovery tool and is NOT designed for, nor intended to enable, stream sniping.**
+**Short answer: NO — Valorant Streamer Radar is NOT a cheat, NOT a stream-sniping tool, and is specifically built NOT to interfere with Valorant or Vanguard.**
 
-- **Never scans live lobbies or active matches:** The application intentionally waits until a match has completely ended (`InGame -> MainMenu` in `ShooterGame.log`) or until you manually click **Check Last Match** after finishing a game.
-- **No mid-match notifications:** Desktop notifications never fire while a match is in progress, and the app never draws overlays or inspects live agent-select rosters.
-- **Zero gameplay interference:** Runs 100% in user space—never reads/writes game memory, never injects DLLs, and never hooks DirectX/Vulkan.
+- **Strictly post-match only (zero competitive advantage):** Never scans live lobbies, agent select, or active matches. The app intentionally waits until your match has completely ended (`InGame -> MainMenu` in `ShooterGame.log`) or until you manually click **Check Last Match** after finishing a game.
+- **No mid-match notifications or overlays:** Desktop notifications never fire while a match is in progress, and the app never draws over your game or inspects live rosters.
+- **Zero gameplay, memory, or GPU interference:** Runs 100% in user space—never reads/writes game memory, never injects DLLs, never modifies game files, and never hooks DirectX, OpenGL, or Vulkan.
 - **Intended purpose:** Help players find VODs, review matches from another perspective, say GG after a game, and discover creators playing on the same Valorant servers.
 
-> **Disclaimer:** Riot Games does not officially endorse third-party tools that interact with the local Riot Client API, and Vanguard or Terms of Service policies can change at any time. By downloading, building, or running this software, you acknowledge that you use it **at your own risk**.
+> **Is it bannable? (Required Disclaimer):** While **Valorant Streamer Radar is NOT designed to break Riot's fair-play rules and does not touch Valorant's game process or Vanguard**, Riot Games does not officially endorse third-party tools that read the local Riot Client API (`lockfile`), and Vanguard or Terms of Service policies can change at any time. In short: it is **not** a cheat or stream-sniping tool and provides **zero** in-game advantage, but as with any unofficial Riot API tool, you use it **at your own risk**.
 
 ---
 
@@ -51,7 +51,7 @@
 Please keep the following limitations in mind:
 
 - **False positives & missed detections:** Live-stream matching cannot guarantee that a live channel belongs to a specific player in your lobby, and streamers whose channel names differ completely from their Riot ID (and who are not in the database) may not be detected.
-- **Username & alias changes:** Players frequently change Riot IDs, play on alternate accounts, or useStreamer Mode / hidden names, which can reduce matching accuracy unless those aliases are recorded in the streamer database.
+- **Username & alias changes:** Players frequently change Riot IDs, play on alternate accounts, or use Streamer Mode / hidden names, which can reduce matching accuracy unless those aliases are recorded in the streamer database.
 - **Server / region verification limits:** Many Twitch, YouTube, and Kick streams do not expose which exact Valorant server the creator is queued on. When a streamer's in-game server cannot be verified, Valorant Streamer Radar marks the match as **Unverified** rather than reporting it as a confirmed detection.
 - **API quotas, rate limits, & network availability:** YouTube, Twitch, Kick (Cloudflare), and GitHub APIs impose rate limits or intermittent blocks. Failed checks are reported gracefully rather than treated as confirmed results.
 - **Community database coverage:** Exact high-confidence matches rely heavily on verified entries in `streamers.json` and your local custom list. Unlisted creators fall back to lower-confidence heuristic matching.
@@ -59,7 +59,7 @@ Please keep the following limitations in mind:
 
 ---
 
-## Key Features (v1.2.7)
+## Key Features (v1.2.8)
 
 ### 1. Server-Aware, Confidence-Tiered Streamer Detection
 - **Three clear confidence tiers:** Every match is classified as **Confirmed**, **Probable**, or **Unverified**—never treating weak display-name similarity as a confirmed streamer.
@@ -87,7 +87,7 @@ Please keep the following limitations in mind:
 - **Cached discovery:** When enabled in **Settings**, unlocks the **Discover** tab to fetch regional live Valorant streams on Twitch/YouTube with a **5-minute local cache** and clearly labels them as **Discovery Suggestions — Not Matched to Your Lobby**.
 
 ### 6. Automatic Version Update Detection & Synced Changelog
-- Compares the installed version (`v1.2.7`) against the latest published GitHub Release (toggleable in Settings, ON by default, and shown only inside the GUI when opened).
+- Compares the installed version (`v1.2.8`) against the latest published GitHub Release (toggleable in Settings, ON by default, and shown only inside the GUI when opened).
 - Displays the latest version number, release changelog (synced directly from [`CHANGELOG.md`](CHANGELOG.md)), and download/install action when a newer version is available.
 - **Automatically hides** the update notification when no newer version is pending—no manual dismissal needed.
 - Gracefully handles network errors, missing releases, and GitHub API rate limits without falsely claiming the app is up to date.

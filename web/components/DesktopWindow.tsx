@@ -598,30 +598,28 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
       entry.map_name,
       entry.agent_name,
       entry.queue_name,
+      entry.server_region,
       entry.timestamp,
     ].filter(Boolean);
-
-    const hasExpandableDetails = Boolean(
-      entry.chat_message ||
-        entry.server_match_status ||
-        entry.match_reason ||
-        (entry.candidates && entry.candidates.length > 1)
-    );
     const isExpanded = Boolean(expandedCards[cardKey]);
 
     return (
       <article
         key={cardKey}
-        className={`rounded-lg border bg-[#0B0B0E] px-4 py-3 transition-colors ${
-          entry.chat_message
-            ? 'border-[#FF5CA8]/40'
+        onClick={() => toggleCardDetails(cardKey)}
+        title={isExpanded ? 'Click card to hide details' : 'Click card to view details'}
+        className={`cursor-pointer rounded-lg border bg-[#0B0B0E] px-4 py-3 transition-colors ${
+          isExpanded
+            ? 'border-[#FF5CA8]/45'
+            : entry.chat_message
+            ? 'border-[#FF5CA8]/35 hover:border-[#FF5CA8]/55'
             : 'border-[#1F1F26] hover:border-[#2B2B36]'
         }`}
       >
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
-            {/* Primary typographic line: zero boxed pill clutter */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+            {/* Collapsed card face: Riot ID, Platform, Channel, Confidence tier only */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13.5px]">
               <span className="font-mono text-[15.5px] font-bold text-[#FFF5FA]">
                 {entry.riot_id}
               </span>
@@ -630,19 +628,6 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                 {entry.platform}
               </span>
               <span className="font-medium text-[#F4F4F6]">{entry.channel}</span>
-              {entry.team_relation && (
-                <>
-                  <span className="text-[#1F1F26]" aria-hidden="true">/</span>
-                  <span
-                    className="font-semibold"
-                    style={{
-                      color: entry.team_relation === 'Ally' ? '#2DD4BF' : '#FB923C',
-                    }}
-                  >
-                    {entry.team_relation}
-                  </span>
-                </>
-              )}
               <span className="text-[#1F1F26]" aria-hidden="true">/</span>
               <span
                 className="font-mono text-xs font-semibold tabular-nums"
@@ -651,57 +636,33 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                 {tier}
                 {entry.confidence ? ` · ${entry.confidence}%` : ''}
               </span>
-              {entry.server_region && (
-                <span className="text-xs font-medium text-[#2DD4BF]">
-                  · {entry.server_region}
-                </span>
-              )}
-              {entry.chat_message && (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#FFA6D2]">
-                  · <MessageSquareQuote className="h-3.5 w-3.5" /> Chat
-                </span>
-              )}
-            </div>
-
-            <p className="mt-1 truncate text-sm text-[#D8DCE6]">{entry.title}</p>
-
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="font-mono text-xs text-[#8E95A5] tabular-nums">
-                {metaItems.join('  ·  ')}
-              </span>
-              {hasExpandableDetails && (
-                <button
-                  type="button"
-                  onClick={() => toggleCardDetails(cardKey)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[#8E95A5] transition-colors hover:text-[#FFA6D2]"
-                >
-                  <span>
-                    {isExpanded
-                      ? 'Hide details'
-                      : entry.candidates && entry.candidates.length > 1
-                      ? `Details (${entry.candidates.length})`
-                      : 'Details'}
-                  </span>
-                  <ChevronDown
-                    className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                  />
-                </button>
-              )}
+              <ChevronDown
+                className={`ml-0.5 h-3.5 w-3.5 text-[#5A6275] transition-transform ${
+                  isExpanded ? 'rotate-180 text-[#FFA6D2]' : ''
+                }`}
+              />
             </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => onCopyLink(entry.url)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-[13px] font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/45 hover:bg-[#1A1A20] whitespace-nowrap"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCopyLink(entry.url);
+              }}
+              title="Copy stream link"
+              aria-label="Copy stream link"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#1F1F26] bg-[#121216] text-[#8E95A5] transition-colors hover:border-[#FF5CA8]/45 hover:bg-[#1A1A20] hover:text-[#FFF5FA]"
             >
-              <Copy className="h-3.5 w-3.5 text-[#8E95A5]" />
-              Copy
+              <Copy className="h-4 w-4" />
             </button>
             <button
               type="button"
-              onClick={() => onWatchStream(entry)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onWatchStream(entry);
+              }}
               title={entry.url}
               className="inline-flex h-9 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3.5 text-[13px] font-bold text-[#000000] transition-opacity whitespace-nowrap"
             >
@@ -711,12 +672,38 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
           </div>
         </div>
 
-        {/* Expandable Details Disclosure (chat plug, match rationale, alternate candidates) */}
-        {hasExpandableDetails && isExpanded && (
+        {/* Expandable Details Disclosure (stream title, match metadata, chat plug, rationale, candidates) */}
+        {isExpanded && (
           <div className="mt-3 space-y-2 border-t border-[#1F1F26] pt-2.5">
+            {entry.title && (
+              <p className="text-sm text-[#D8DCE6]">{entry.title}</p>
+            )}
+
+            {(entry.team_relation || metaItems.length > 0) && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-[#8E95A5] tabular-nums">
+                {entry.team_relation && (
+                  <span
+                    className="font-sans font-semibold"
+                    style={{
+                      color: entry.team_relation === 'Ally' ? '#2DD4BF' : '#FB923C',
+                    }}
+                  >
+                    {entry.team_relation}
+                  </span>
+                )}
+                {entry.team_relation && metaItems.length > 0 && (
+                  <span className="text-[#5A6275]" aria-hidden="true">·</span>
+                )}
+                {metaItems.length > 0 && <span>{metaItems.join('  ·  ')}</span>}
+              </div>
+            )}
+
             {entry.chat_message && (
               <div className="rounded border border-[#FF5CA8]/30 bg-[#000000] px-3 py-2 text-[13px] text-[#FFA6D2]">
-                <span className="font-semibold text-[#FFF5FA]">In-Game Chat:</span>{' '}
+                <span className="inline-flex items-center gap-1 font-semibold text-[#FFF5FA]">
+                  <MessageSquareQuote className="h-3.5 w-3.5 text-[#FFA6D2]" />
+                  In-Game Chat:
+                </span>{' '}
                 &ldquo;{entry.chat_message}&rdquo;
               </div>
             )}
@@ -784,6 +771,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           href={cand.url}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
                           className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#FFA6D2] hover:text-[#FFF5FA]"
                         >
                           Open
@@ -1967,7 +1955,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           href="https://dev.twitch.tv/console/apps"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-xs font-medium text-[#A770FF] hover:border-[#A770FF]/60 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-xs font-medium text-[#FFA6D2] hover:border-[#FF5CA8]/50 whitespace-nowrap"
                         >
                           Get Keys
                           <ExternalLink className="h-3 w-3" />

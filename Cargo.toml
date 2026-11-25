@@ -1,6 +1,6 @@
 [package]
 name = "valorant-streamer-radar"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2021"
 rust-version = "1.80" # std::sync::LazyLock
 
@@ -9,8 +9,8 @@ name = "ValorantStreamerRadar"
 path = "src/main.rs"
 
 [dependencies]
-# Trimmed feature sets keep RAM / binary size down (no accesskit, no wgpu, no image decoding).
-eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+# Trimmed feature sets keep RAM / binary size down; wgpu DX12 WARP avoids NVIDIA G-SYNC hooks on Windows.
+eframe = { version = "0.30", default-features = false, features = ["default_fonts", "wgpu"] }
 tray-icon = "0.19"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 reqwest = { version = "0.12", features = ["json"] }
@@ -25,13 +25,15 @@ anyhow = "1"
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
+# Enable wgpu's DX12 backend on Windows so the app can render via Microsoft Basic Render Driver (WARP).
+wgpu = { version = "23", default-features = false, features = ["dx12", "wgsl"] }
 # notify-rust cannot do click actions on Windows (`.action()` / `wait_for_action` are XDG-only),
 # so toasts use the WinRT API directly.
 tauri-winrt-notification = "0.7"
 winreg = "0.52"
 
 [target.'cfg(windows)'.build-dependencies]
-# Embeds the dark obsidian & pink-to-white gradient "V" multi-resolution icon into ValorantStreamerRadar.exe.
+# Embeds the AMOLED black & pink-to-pearl gradient rounded-square "V" multi-resolution icon into ValorantStreamerRadar.exe.
 winres = "0.1"
 
 [profile.release]
@@ -39,4 +41,4 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-# NOTE: Do NOT set panic = "abort" — the background scan worker catches task panics via JoinHandle.
+# NOTE: Do NOT set panic = "abort" - the background scan worker catches task panics via JoinHandle.

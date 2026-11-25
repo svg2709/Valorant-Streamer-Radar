@@ -3,6 +3,20 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.3] - 2026-11-25
+
+### Fixed
+- **Complete Post-Match Player Scanning:** Fixed match scanning leaving players out by reading the full roster directly from Riot's `match-details` payload, treating `name-service/v2/players` as best-effort enrichment (never dropping players on partial or failed responses), matching UUIDs case-insensitively, and hardening party exclusion to ignore nil/shared dummy `partyId` values, enemy players, and free-for-all modes.
+- **Disabled NVIDIA G-SYNC Activation (`NORMAL` Overlay):** Switched the Windows desktop renderer from hardware OpenGL (`glow`) to DX12 software WARP (`Microsoft Basic Render Driver`) via `eframe` + `wgpu` fallback adapter selection so NVIDIA's display driver no longer triggers G-SYNC or displays the top-right `NORMAL` indicator on the app window.
+- **Cleared Seeded Sample Streamers:** Emptied `streamers.json` and added automatic startup/sync cleanup to purge legacy seeded sample streamer IDs from local `directory_cache.json`.
+- **Consistent "Get Twitch Keys" Button Styling:** Updated the Twitch API key button in Settings to match the AMOLED Black & Pink-to-Pearl secondary button theme used across the app.
+
+### Changed
+- **Desktop-to-Preview AMOLED Black Parity:** Unified the native Windows sidebar navigation (active `#121216` fill, 2px `#FF5CA8` left indicator, vector tab icons), surface hierarchy, and button styling to mirror the AMOLED Black preview.
+- **Minimal Collapsed Cards & Click-Anywhere Details:** Simplified collapsed detection cards to show only Riot ID, Platform, Channel, and Confidence tier; moved stream title, team, agent, map, queue, server, timestamp, chat quotes, and ranked candidates into the expandable Details drawer, which now opens by clicking anywhere on the card outside action buttons.
+- **Icon-Only Copy Button:** Replaced the text `Copy` button on detection cards with a compact square copy-icon button with a hover tooltip.
+- **Unified Executable, Tray & In-App Icon:** Rebuilt the multi-resolution Windows `.exe` icon (`16px`–`256px` with anti-aliased transparent rounded corners), runtime window/tray/toast icons, and in-app emblem from a single rounded-square AMOLED Black + Pink-to-Pearl `V` design.
+
 ## [1.2.2] - 2026-11-25
 
 ### Added

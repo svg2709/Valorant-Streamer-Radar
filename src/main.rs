@@ -201,31 +201,93 @@ fn pink_white_color(t: f32) -> Color32 {
     Color32::from_rgb(px[0], px[1], px[2])
 }
 
-/// Generates the 32x32 RGBA pixel buffer (Obsidian fill with diagonal Pink-to-White gradient border, "V", and radar dot).
+fn icon_dist_to_segment(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
+    let abx = bx - ax;
+    let aby = by - ay;
+    let len_sq = abx * abx + aby * aby;
+    if len_sq <= 1e-8 {
+        return ((px - ax).powi(2) + (py - ay).powi(2)).sqrt();
+    }
+    let t = (((px - ax) * abx + (py - ay) * aby) / len_sq).clamp(0.0, 1.0);
+    let cx = ax + t * abx;
+    let cy = ay + t * aby;
+    ((px - cx).powi(2) + (py - cy).powi(2)).sqrt()
+}
+
+fn icon_rounded_box_sdf(u: f32, v: f32, half: f32, radius: f32) -> f32 {
+    let qx = (u - 0.5).abs() - (half - radius);
+    let qy = (v - 0.5).abs() - (half - radius);
+    let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+    let inside = qx.max(qy).min(0.0);
+    outside + inside - radius
+}
+
+/// Samples a single normalized (u, v) point of the unified AMOLED rounded-square brand emblem
+/// (matches build.rs .exe icon, paint_brand_mark, and RadarIcon.tsx).
+fn sample_radar_icon_rgba(u: f32, v: f32) -> [u8; 4] {
+    let outer_half = 0.47;
+    let radius = 0.16;
+    let border_w = 0.068;
+    let sdf = icon_rounded_box_sdf(u, v, outer_half, radius);
+
+    if sdf > 0.0 {
+        return [0, 0, 0, 0];
+    }
+
+    let in_border = sdf >= -border_w;
+    let d_left = icon_dist_to_segment(u, v, 0.27, 0.27, 0.50, 0.74);
+    let d_right = icon_dist_to_segment(u, v, 0.50, 0.74, 0.73, 0.27);
+    let in_v = d_left.min(d_right) <= 0.058;
+
+    let dot_dist = ((u - 0.50).powi(2) + (v - 0.30).powi(2)).sqrt();
+    let in_dot = dot_dist <= 0.072;
+
+    if in_border {
+        let grad_t = u * 0.55 + (1.0 - v) * 0.45;
+        pink_white_rgba(grad_t)
+    } else if in_dot {
+        [255, 92, 168, 255]
+    } else if in_v {
+        let grad_t = 0.78 + (1.0 - v) * 0.22;
+        pink_white_rgba(grad_t)
+    } else {
+        [lerp_u8(0, 10, v), lerp_u8(0, 8, v), lerp_u8(0, 14, v), 255]
+    }
+}
+
+/// Generates the 32x32 RGBA pixel buffer with 2x2 anti-aliasing matching the .exe and in-app brand emblem.
 fn radar_icon_rgba() -> Vec<u8> {
     let size = 32u32;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let border = 2.0 / 32.0;
+    let offsets = [0.25f32, 0.75f32];
     for y in 0..size {
         for x in 0..size {
+            let mut r_acc = 0.0f32;
+            let mut g_acc = 0.0f32;
+            let mut b_acc = 0.0f32;
+            let mut a_acc = 0.0f32;
+            for &oy in &offsets {
+                for &ox in &offsets {
+                    let u = (x as f32 + ox) / size as f32;
+                    let v = (y as f32 + oy) / size as f32;
+                    let s = sample_radar_icon_rgba(u, v);
+                    let a = s[3] as f32 / 255.0;
+                    r_acc += s[0] as f32 * a;
+                    g_acc += s[1] as f32 * a;
+                    b_acc += s[2] as f32 * a;
+                    a_acc += a;
+                }
+            }
             let idx = ((y * size + x) * 4) as usize;
-            let u = (x as f32 + 0.5) / size as f32;
-            let v = (y as f32 + 0.5) / size as f32;
-
-            let in_border = u < border || u > 1.0 - border || v < border || v > 1.0 - border;
-            let du = (u - 0.5).abs();
-            let arm_x = (0.78 - v) * 0.46;
-            let in_v = (0.24..=0.78).contains(&v) && (du - arm_x).abs() <= 0.078;
-            let dot_dist = ((u - 0.5).powi(2) + (v - 0.28).powi(2)).sqrt();
-            let in_dot = dot_dist <= 0.075;
-
-            let px: [u8; 4] = if in_border || in_v || in_dot {
-                let grad_t = if in_dot { 0.92 } else { u * 0.55 + (1.0 - v) * 0.45 };
-                pink_white_rgba(grad_t)
+            let avg_a = a_acc / 4.0;
+            if avg_a <= 0.001 {
+                rgba[idx..idx + 4].copy_from_slice(&[0, 0, 0, 0]);
             } else {
-                [lerp_u8(0, 10, v), lerp_u8(0, 8, v), lerp_u8(0, 14, v), 255]
-            };
-            rgba[idx..idx + 4].copy_from_slice(&px);
+                rgba[idx] = (r_acc / a_acc).round().clamp(0.0, 255.0) as u8;
+                rgba[idx + 1] = (g_acc / a_acc).round().clamp(0.0, 255.0) as u8;
+                rgba[idx + 2] = (b_acc / a_acc).round().clamp(0.0, 255.0) as u8;
+                rgba[idx + 3] = (avg_a * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
         }
     }
     rgba
@@ -238,7 +300,8 @@ fn ensure_toast_icon_file() -> Option<PathBuf> {
     let rgba = radar_icon_rgba();
     let size: u32 = 32;
     let xor_len: u32 = size * size * 4;
-    let and_len: u32 = size * 4; // 32-bit aligned 1bpp mask
+    let and_row_bytes: u32 = ((size + 31) / 32) * 4;
+    let and_len: u32 = and_row_bytes * size;
     let dib_size: u32 = 40 + xor_len + and_len;
 
     let mut ico = Vec::with_capacity((22 + dib_size) as usize);
@@ -272,8 +335,17 @@ fn ensure_toast_icon_file() -> Option<PathBuf> {
             ico.push(rgba[idx + 3]); // A
         }
     }
-    // AND mask (all 0 = opaque, alpha channel controls visibility)
-    ico.resize(ico.len() + and_len as usize, 0u8);
+    // 1bpp AND mask matching transparent rounded corners
+    for y in (0..size).rev() {
+        let mut row = vec![0u8; and_row_bytes as usize];
+        for x in 0..size {
+            let idx = ((y * size + x) * 4) as usize;
+            if rgba[idx + 3] == 0 {
+                row[(x / 8) as usize] |= 1u8 << (7 - (x % 8));
+            }
+        }
+        ico.extend_from_slice(&row);
+    }
 
     fs::write(&path, &ico).ok()?;
     Some(path)
@@ -1408,6 +1480,146 @@ struct MatchPlayerInfo {
     is_party_member: bool,
 }
 
+/// Returns true only for real Riot party UUIDs (rejects blank strings and nil all-zero UUIDs
+/// such as `00000000-0000-0000-0000-000000000000` that solo/FFA players can share).
+fn is_valid_party_id(party_id: &str) -> bool {
+    let trimmed = party_id.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.chars().any(|c| c != '0' && c != '-')
+}
+
+/// Builds the complete match roster from `match-details["players"]` first, enriching names from
+/// `name-service/v2/players` as best-effort so partial or failed name-service responses NEVER drop
+/// players, and enforces strict same-team + non-nil + <=5-member party verification.
+fn resolve_match_players(
+    details_players: &[Value],
+    name_records: &[RiotNameRecord],
+    my_subject: &str,
+) -> (String, Vec<MatchPlayerInfo>) {
+    let my_sub_low = my_subject.trim().to_ascii_lowercase();
+
+    let mut name_by_sub: HashMap<String, &RiotNameRecord> = HashMap::new();
+    for rec in name_records {
+        let key = rec.subject.trim().to_ascii_lowercase();
+        if !key.is_empty() {
+            name_by_sub.insert(key, rec);
+        }
+    }
+
+    struct RawPlayer {
+        subject: String,
+        sub_low: String,
+        game_name: String,
+        tag_line: String,
+        team: String,
+        agent: String,
+        party_id: String,
+    }
+
+    let mut raw_players: Vec<RawPlayer> = Vec::with_capacity(details_players.len());
+    for p in details_players {
+        let Some(subj) = p["subject"].as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let sub_low = subj.to_ascii_lowercase();
+        let details_name = p["gameName"].as_str().unwrap_or("").trim().to_string();
+        let details_tag = p["tagLine"].as_str().unwrap_or("").trim().to_string();
+        let (game_name, tag_line) = match name_by_sub.get(&sub_low) {
+            Some(rec) => {
+                let gn = if !rec.game_name.trim().is_empty() {
+                    rec.game_name.trim().to_string()
+                } else {
+                    details_name
+                };
+                let tl = if !rec.tag_line.trim().is_empty() {
+                    rec.tag_line.trim().to_string()
+                } else {
+                    details_tag
+                };
+                (gn, tl)
+            }
+            None => (details_name, details_tag),
+        };
+        let team = p["teamId"].as_str().unwrap_or("").trim().to_string();
+        let agent = agent_name_from_id(p["characterId"].as_str().unwrap_or(""));
+        let party_id = p["partyId"].as_str().unwrap_or("").trim().to_string();
+
+        raw_players.push(RawPlayer {
+            subject: subj.to_string(),
+            sub_low,
+            game_name,
+            tag_line,
+            team,
+            agent,
+            party_id,
+        });
+    }
+
+    let (my_team, my_agent, my_party_id) = raw_players
+        .iter()
+        .find(|p| p.sub_low == my_sub_low)
+        .map(|p| (p.team.clone(), p.agent.clone(), p.party_id.clone()))
+        .unwrap_or_default();
+
+    // Guard against dummy server-wide partyIds: a real Valorant party has at most 5 players.
+    let my_party_valid = is_valid_party_id(&my_party_id);
+    let same_party_count = if my_party_valid {
+        raw_players
+            .iter()
+            .filter(|p| p.party_id.eq_ignore_ascii_case(&my_party_id))
+            .count()
+    } else {
+        0
+    };
+    let party_check_active = my_party_valid
+        && same_party_count <= 5
+        && !my_team.is_empty()
+        && !my_team.eq_ignore_ascii_case("Neutral");
+
+    let players = raw_players
+        .into_iter()
+        .map(|p| {
+            let same_team = !my_team.is_empty()
+                && !p.team.is_empty()
+                && !p.team.eq_ignore_ascii_case("Neutral")
+                && p.team.eq_ignore_ascii_case(&my_team);
+            let team_relation = if !my_team.is_empty()
+                && !p.team.is_empty()
+                && !p.team.eq_ignore_ascii_case("Neutral")
+            {
+                if same_team {
+                    "Ally".to_string()
+                } else {
+                    "Enemy".to_string()
+                }
+            } else {
+                String::new()
+            };
+            // Only mark as party member if partyId is valid non-nil, party size <= 5,
+            // player is not self, and player is on the same non-Neutral team.
+            let is_party_member = party_check_active
+                && same_team
+                && p.sub_low != my_sub_low
+                && p.party_id.eq_ignore_ascii_case(&my_party_id);
+            MatchPlayerInfo {
+                record: RiotNameRecord {
+                    subject: p.subject,
+                    game_name: p.game_name,
+                    tag_line: p.tag_line,
+                },
+                team_relation,
+                agent_name: p.agent,
+                party_id: p.party_id,
+                is_party_member,
+            }
+        })
+        .collect();
+
+    (my_agent, players)
+}
+
 /// Excludes self, blank names, duplicates, and (when enabled) party members before external scans.
 fn filter_scannable_players(
     players: Vec<MatchPlayerInfo>,
@@ -1417,10 +1629,12 @@ fn filter_scannable_players(
     let mut seen = HashSet::new();
     let mut scannable = Vec::new();
     let mut party_skipped = 0usize;
+    let my_low = my_puuid.trim().to_ascii_lowercase();
     for player_info in players {
-        if player_info.record.subject == my_puuid
+        let sub_low = player_info.record.subject.trim().to_ascii_lowercase();
+        if sub_low == my_low
             || player_info.record.game_name.trim().is_empty()
-            || !seen.insert(player_info.record.subject.clone())
+            || !seen.insert(sub_low)
         {
             continue;
         }
@@ -2161,54 +2375,50 @@ async fn fetch_match_context(
         .and_then(parse_game_pod_to_server)
         .map(String::from);
 
-    // Extract team, agent, and partyId directly from match-details (zero extra Riot API calls).
-    let mut player_meta: HashMap<String, (String, String, String)> = HashMap::new();
-    let mut puuids: Vec<String> = Vec::new();
-    if let Some(arr) = details["players"].as_array() {
-        for p in arr {
-            if let Some(subj) = p["subject"].as_str() {
-                let team = p["teamId"].as_str().unwrap_or("").to_string();
-                let agent = agent_name_from_id(p["characterId"].as_str().unwrap_or(""));
-                let party_id = p["partyId"].as_str().unwrap_or("").trim().to_string();
-                player_meta.insert(subj.to_string(), (team, agent, party_id));
-                puuids.push(subj.to_string());
-            }
-        }
-    }
+    let details_players = details["players"]
+        .as_array()
+        .filter(|arr| !arr.is_empty())
+        .ok_or_else(|| anyhow!("Match details contained no players yet"))?;
+
+    let puuids: Vec<String> = details_players
+        .iter()
+        .filter_map(|p| p["subject"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from))
+        .collect();
     if puuids.is_empty() {
-        return Err(anyhow!("Match details contained no players yet"));
+        return Err(anyhow!("Match details contained no player subjects yet"));
     }
 
-    let (my_team, my_agent, my_party_id) = player_meta.get(&auth.subject).cloned().unwrap_or_default();
-
-    let names_val = riot_json(riot_headers(
+    // Best-effort name-service enrichment: match-details["players"] already contains gameName/tagLine,
+    // so partial responses or transient name-service errors never drop players from the scan.
+    let records: Vec<RiotNameRecord> = match riot_json(riot_headers(
         public.put(format!("https://pd.{api_region}.a.pvp.net/name-service/v2/players")).json(&puuids),
         auth,
     ))
-    .await?;
-    let records: Vec<RiotNameRecord> =
-        serde_json::from_value(names_val).context("Unexpected name-service response")?;
-
-    let players = records
-        .into_iter()
-        .map(|rec| {
-            let (team, agent, party_id) = player_meta.get(&rec.subject).cloned().unwrap_or_default();
-            let team_relation = if !my_team.is_empty() && !team.is_empty() && team != "Neutral" {
-                if team == my_team { "Ally".to_string() } else { "Enemy".to_string() }
-            } else {
-                String::new()
-            };
-            let is_party_member =
-                !my_party_id.is_empty() && !party_id.is_empty() && party_id == my_party_id && rec.subject != auth.subject;
-            MatchPlayerInfo {
-                record: rec,
-                team_relation,
-                agent_name: agent,
-                party_id,
-                is_party_member,
+    .await
+    {
+        Ok(names_val) => match serde_json::from_value::<Vec<RiotNameRecord>>(names_val) {
+            Ok(recs) => {
+                if recs.len() < puuids.len() {
+                    log(format!(
+                        "name-service returned {}/{} players; filling remaining names directly from match-details",
+                        recs.len(),
+                        puuids.len()
+                    ));
+                }
+                recs
             }
-        })
-        .collect();
+            Err(e) => {
+                log(format!("name-service parse fallback to match-details: {e}"));
+                Vec::new()
+            }
+        },
+        Err(e) => {
+            log(format!("name-service unavailable ({e}); using match-details player names directly"));
+            Vec::new()
+        }
+    };
+
+    let (my_agent, players) = resolve_match_players(details_players, &records, &auth.subject);
 
     Ok(MatchContext {
         match_id: match_id.to_string(),
@@ -3665,9 +3875,41 @@ async fn fetch_live_recommendations(
 // DIRECTORY, NOTIFICATIONS & SCANNER
 // ============================================================================
 
+/// Previously seeded placeholder streamer IDs removed in v1.2.3; auto-purged from local caches.
+const SEEDED_SAMPLE_STREAMER_IDS: &[&str] = &[
+    "rohan-gaming-yt",
+    "vexfps-twitch",
+    "kairoclutch-kick",
+    "harujp-twitch",
+    "kuyamnl-yt",
+    "lonestarval-twitch",
+];
+
+fn purge_seeded_sample_streamers(entries: Vec<DirectoryStreamer>) -> Vec<DirectoryStreamer> {
+    entries
+        .into_iter()
+        .filter(|e| {
+            let id_low = e.id.trim().to_ascii_lowercase();
+            !SEEDED_SAMPLE_STREAMER_IDS.iter().any(|&seeded| id_low == seeded)
+        })
+        .collect()
+}
+
+fn load_clean_remote_directory_cache() -> Vec<DirectoryStreamer> {
+    let raw: Vec<DirectoryStreamer> = load_json("directory_cache.json");
+    let raw_len = raw.len();
+    let cleaned = purge_seeded_sample_streamers(
+        raw.iter().filter_map(sanitize_directory_entry).collect(),
+    );
+    if cleaned.len() != raw_len {
+        save_json("directory_cache.json", &cleaned);
+    }
+    cleaned
+}
+
 async fn fetch_remote_directory(public: &Client, owner: &str, repo: &str) -> (Vec<DirectoryStreamer>, bool) {
     if !valid_github_segment(owner) || !valid_github_segment(repo) {
-        return (load_json::<Vec<DirectoryStreamer>>("directory_cache.json"), false);
+        return (load_clean_remote_directory_cache(), false);
     }
     let gh_url = format!(
         "https://raw.githubusercontent.com/{}/{}/main/streamers.json",
@@ -3687,17 +3929,15 @@ async fn fetch_remote_directory(public: &Client, owner: &str, repo: &str) -> (Ve
 
     match remote {
         Some(list) => {
-            let clean: Vec<DirectoryStreamer> = list.iter().filter_map(sanitize_directory_entry).collect();
+            let clean = purge_seeded_sample_streamers(
+                list.iter().filter_map(sanitize_directory_entry).collect(),
+            );
             save_json("directory_cache.json", &clean);
             (clean, true)
         }
         None => {
             log("GitHub directory unavailable; using cached copy");
-            let cached: Vec<DirectoryStreamer> = load_json::<Vec<DirectoryStreamer>>("directory_cache.json")
-                .iter()
-                .filter_map(sanitize_directory_entry)
-                .collect();
-            (cached, false)
+            (load_clean_remote_directory_cache(), false)
         }
     }
 }
@@ -4273,9 +4513,17 @@ async fn scan_last_match(
         get_twitch_app_token(&public_client, &config.twitch_client_id, &config.twitch_client_secret).await;
 
     // Exclude self, blank/duplicate entries, and (when enabled) party members before external platform calls
+    let total_roster = players.len();
+    let missing_names = players
+        .iter()
+        .filter(|p| !p.record.subject.eq_ignore_ascii_case(&my_puuid) && p.record.game_name.trim().is_empty())
+        .count();
     let (scannable_players, party_skipped) =
         filter_scannable_players(players, &my_puuid, config.skip_party_members);
     let players_checked = scannable_players.len();
+    log(format!(
+        "Match roster {match_id}: total={total_roster}, checked={players_checked}, party_skipped={party_skipped}, missing_names={missing_names}"
+    ));
 
     let sem = Arc::new(Semaphore::new(4));
     let mut set = JoinSet::new();
@@ -5144,24 +5392,93 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
     changed
 }
 
-/// Compact vector brand emblem for the custom AMOLED title bar (pixel-centered).
+/// Compact vector brand emblem for the custom AMOLED title bar (matches build.rs .exe & RadarIcon.tsx).
 fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
     let p = ui.painter();
     let box_rect = rect.shrink(0.5);
-    p.rect_filled(box_rect, Rounding::same(3.5), BG_DARK);
-    p.rect_stroke(box_rect, Rounding::same(3.5), Stroke::new(1.2, ACCENT_PINK));
+    let r = (box_rect.width() * 0.18).max(3.0);
+    p.rect_filled(box_rect, Rounding::same(r), BG_DARK);
+    p.rect_stroke(box_rect, Rounding::same(r), Stroke::new(1.3, ACCENT_PINK));
     let cx = box_rect.center().x;
     let cy = box_rect.center().y;
-    let half_w = box_rect.width() * 0.25;
+    let half_w = box_rect.width() * 0.24;
     let half_h = box_rect.height() * 0.24;
     let l = egui::pos2(cx - half_w, cy - half_h);
     let b = egui::pos2(cx, cy + half_h);
-    let r = egui::pos2(cx + half_w, cy - half_h);
-    let stroke = Stroke::new(1.85, ACCENT_PEARL);
+    let r_pt = egui::pos2(cx + half_w, cy - half_h);
+    let stroke = Stroke::new(1.9, ACCENT_PEARL);
     p.line_segment([l, b], stroke);
-    p.line_segment([b, r], stroke);
-    p.circle_filled(egui::pos2(cx, cy - half_h + 0.5), 1.4, ACCENT_PINK);
+    p.line_segment([b, r_pt], stroke);
+    p.circle_filled(egui::pos2(cx, cy - half_h + 0.8), 1.45, ACCENT_PINK);
+}
+
+/// Square icon-only Copy button (overlapping-sheets clipboard glyph) with hover tooltip.
+fn paint_copy_icon_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::click());
+    let hovered = resp.hovered();
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let fill = if hovered { SURFACE_HOVER } else { BTN_SECONDARY };
+    let border = if hovered { ACCENT_PINK.linear_multiply(0.55) } else { CARD_BORDER };
+    let icon_col = if hovered { ACCENT_PEARL } else { TEXT_MUTED };
+    let p = ui.painter();
+    p.rect_filled(rect, Rounding::same(6.0), fill);
+    p.rect_stroke(rect, Rounding::same(6.0), Stroke::new(1.0, border));
+
+    let c = rect.center();
+    let stroke = Stroke::new(1.4, icon_col);
+    // Front sheet (bottom-right)
+    let front = egui::Rect::from_min_size(egui::pos2(c.x - 2.5, c.y - 2.5), Vec2::new(8.5, 9.5));
+    p.rect_stroke(front, Rounding::same(1.5), stroke);
+    // Back sheet outline (top-left L-edge)
+    let bx = c.x - 5.5;
+    let by = c.y - 6.0;
+    p.line_segment([egui::pos2(bx, by + 7.5), egui::pos2(bx, by)], stroke);
+    p.line_segment([egui::pos2(bx, by), egui::pos2(bx + 6.5, by)], stroke);
+
+    resp.on_hover_text("Copy stream link")
+}
+
+/// Minimal chevron cue indicating expandable card details.
+fn paint_chevron_icon(ui: &mut egui::Ui, expanded: bool, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
+    let c = rect.center();
+    let s = Stroke::new(1.5, color);
+    if expanded {
+        ui.painter().line_segment([egui::pos2(c.x - 4.0, c.y + 2.0), egui::pos2(c.x, c.y - 2.0)], s);
+        ui.painter().line_segment([egui::pos2(c.x, c.y - 2.0), egui::pos2(c.x + 4.0, c.y + 2.0)], s);
+    } else {
+        ui.painter().line_segment([egui::pos2(c.x - 4.0, c.y - 2.0), egui::pos2(c.x, c.y + 2.0)], s);
+        ui.painter().line_segment([egui::pos2(c.x, c.y + 2.0), egui::pos2(c.x + 4.0, c.y - 2.0)], s);
+    }
+}
+
+/// Minimal vector sidebar icons matching the preview (Clock, Book, Compass, Gear).
+fn paint_nav_icon(p: &egui::Painter, c: egui::Pos2, tab: ActiveTab, color: Color32) {
+    let s = Stroke::new(1.4, color);
+    match tab {
+        ActiveTab::History => {
+            p.circle_stroke(c, 5.8, s);
+            p.line_segment([c, egui::pos2(c.x, c.y - 3.2)], s);
+            p.line_segment([c, egui::pos2(c.x + 2.6, c.y + 1.4)], s);
+        }
+        ActiveTab::Directory => {
+            let r = egui::Rect::from_center_size(c, Vec2::new(11.0, 10.5));
+            p.rect_stroke(r, Rounding::same(1.5), s);
+            p.line_segment([egui::pos2(c.x, r.top() + 1.0), egui::pos2(c.x, r.bottom() - 1.0)], s);
+        }
+        ActiveTab::Discover => {
+            p.circle_stroke(c, 5.8, s);
+            p.line_segment([egui::pos2(c.x - 2.5, c.y + 2.5), egui::pos2(c.x + 2.5, c.y - 2.5)], s);
+            p.circle_filled(egui::pos2(c.x + 2.2, c.y - 2.2), 1.1, color);
+        }
+        ActiveTab::Settings => {
+            p.circle_stroke(c, 2.3, s);
+            p.circle_stroke(c, 5.4, Stroke::new(1.3, color));
+        }
+    }
 }
 
 /// Custom frameless title bar Minimize button (vector-drawn dash).
@@ -5891,24 +6208,47 @@ impl eframe::App for StreamerApp {
                     } else {
                         Color32::TRANSPARENT
                     };
-                    let stroke = if selected {
-                        Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.5))
-                    } else {
-                        Stroke::NONE
-                    };
                     ui.painter().rect_filled(rect, Rounding::same(6.0), fill);
-                    ui.painter().rect_stroke(rect, Rounding::same(6.0), stroke);
+                    // Match preview: crisp 2px vertical pink indicator on the left edge of the active tab
+                    if selected {
+                        let bar = egui::Rect::from_min_max(
+                            egui::pos2(rect.left(), rect.top() + 6.0),
+                            egui::pos2(rect.left() + 2.5, rect.bottom() - 6.0),
+                        );
+                        ui.painter().rect_filled(bar, Rounding::same(1.2), ACCENT_PINK);
+                    }
 
-                    let text_col = if selected { ACCENT_PEARL } else { TEXT_MUTED };
+                    let icon_col = if selected {
+                        ACCENT_PINK
+                    } else if resp.hovered() {
+                        TEXT_PRIMARY
+                    } else {
+                        Color32::from_rgb(90, 98, 117)
+                    };
+                    paint_nav_icon(ui.painter(), egui::pos2(rect.left() + 18.0, rect.center().y), tab, icon_col);
+
+                    let text_col = if selected {
+                        ACCENT_PEARL
+                    } else if resp.hovered() {
+                        TEXT_PRIMARY
+                    } else {
+                        TEXT_MUTED
+                    };
                     ui.painter().text(
-                        egui::pos2(rect.left() + 12.0, rect.center().y),
+                        egui::pos2(rect.left() + 34.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
-                        FontId::proportional(14.5),
+                        FontId::proportional(14.0),
                         text_col,
                     );
                     if !meta.is_empty() {
-                        let meta_col = if selected { ACCENT_BLUSH } else { Color32::from_rgb(108, 116, 134) };
+                        let meta_col = if tab == ActiveTab::Discover && recs_enabled {
+                            LIVE_GREEN
+                        } else if selected {
+                            ACCENT_BLUSH
+                        } else {
+                            Color32::from_rgb(90, 98, 117)
+                        };
                         ui.painter().text(
                             egui::pos2(rect.right() - 10.0, rect.center().y),
                             egui::Align2::RIGHT_CENTER,
@@ -6419,231 +6759,238 @@ impl StreamerApp {
             _ => TEXT_MUTED,
         };
         let card_key = format!("{}|{}|{}", entry.match_id, entry.riot_id, entry.platform);
-        let has_details = !entry.chat_message.is_empty()
-            || !entry.match_reason.is_empty()
-            || !entry.server_match_status.is_empty()
-            || entry.candidates.len() > 1;
         let is_expanded = self.expanded_cards.contains(&card_key);
+        let mut button_rects: Vec<egui::Rect> = Vec::with_capacity(4);
+        let mut button_clicked = false;
 
-        Frame::none()
+        let border_col = if is_expanded {
+            ACCENT_PINK.linear_multiply(0.55)
+        } else if !entry.chat_message.is_empty() {
+            ACCENT_PINK.linear_multiply(0.4)
+        } else {
+            CARD_BORDER
+        };
+
+        let frame_resp = Frame::none()
             .fill(CARD_BG)
-            .stroke(Stroke::new(
-                1.0,
-                if !entry.chat_message.is_empty() {
-                    ACCENT_PINK.linear_multiply(0.4)
-                } else {
-                    CARD_BORDER
-                },
-            ))
+            .stroke(Stroke::new(1.0, border_col))
             .rounding(Rounding::same(8.0))
-            .inner_margin(Margin::symmetric(16.0, 14.0))
+            .inner_margin(Margin::symmetric(16.0, 12.0))
             .show(ui, |ui| {
+                // Collapsed primary row: Riot ID, Platform, Channel, Confidence tier ONLY + icon Copy + Watch
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_max_width((ui.available_width() - 188.0).max(180.0));
-                        // Line 1: Riot ID + Channel (clean typography, zero pill walls)
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(
-                                RichText::new(&entry.riot_id)
-                                    .font(FontId::proportional(16.5))
-                                    .strong()
-                                    .color(ACCENT_PEARL),
-                            );
-                            ui.label(RichText::new("/").color(CARD_BORDER).size(13.5));
-                            ui.label(
-                                RichText::new(&entry.channel)
-                                    .font(FontId::proportional(14.5))
-                                    .strong()
-                                    .color(badge),
-                            );
-                        });
-                        ui.add_space(4.0);
-
-                        // Line 2: Stream title
-                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(14.0));
-                        ui.add_space(6.0);
-
-                        // Line 3: Unboxed inline metadata
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            ui.label(RichText::new(&entry.platform).size(12.5).strong().color(badge));
-                            ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                            let conf_label = if entry.confidence > 0 {
-                                format!("{tier} ({}%)", entry.confidence)
-                            } else {
-                                tier.to_string()
-                            };
-                            ui.label(RichText::new(conf_label).size(12.5).strong().color(tier_color));
-
-                            if !entry.team_relation.is_empty() {
-                                let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
-                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                                ui.label(RichText::new(&entry.team_relation).size(12.5).color(tc));
-                            }
-                            let mut tail: Vec<&str> = Vec::new();
-                            if !entry.agent_name.is_empty() {
-                                tail.push(&entry.agent_name);
-                            }
-                            if !entry.map_name.is_empty() {
-                                tail.push(&entry.map_name);
-                            }
-                            if !entry.queue_name.is_empty() {
-                                tail.push(&entry.queue_name);
-                            }
-                            if !entry.server_region.is_empty() {
-                                tail.push(&entry.server_region);
-                            }
-                            tail.push(&entry.timestamp);
-                            if !tail.is_empty() {
-                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                                ui.label(RichText::new(tail.join(" / ")).size(12.5).color(TEXT_MUTED));
-                            }
-                        });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width((ui.available_width() - 156.0).max(180.0));
+                        ui.spacing_mut().item_spacing.x = 7.0;
+                        ui.label(
+                            RichText::new(&entry.riot_id)
+                                .font(FontId::proportional(15.5))
+                                .strong()
+                                .color(ACCENT_PEARL),
+                        );
+                        ui.label(RichText::new("/").color(CARD_BORDER).size(13.0));
+                        ui.label(RichText::new(&entry.platform).size(13.0).strong().color(badge));
+                        ui.label(RichText::new(&entry.channel).size(13.5).color(TEXT_PRIMARY));
+                        ui.label(RichText::new("/").color(CARD_BORDER).size(13.0));
+                        let conf_label = if entry.confidence > 0 {
+                            format!("{tier} ({}%)", entry.confidence)
+                        } else {
+                            tier.to_string()
+                        };
+                        ui.label(RichText::new(conf_label).size(12.5).strong().color(tier_color));
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if gradient_button(ui, "Watch", Vec2::new(88.0, 32.0), true, 13.5)
-                            .on_hover_text(entry.url.as_str())
-                            .clicked()
-                        {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let watch_resp = gradient_button(ui, "Watch", Vec2::new(82.0, 32.0), true, 13.0)
+                            .on_hover_text(entry.url.as_str());
+                        button_rects.push(watch_resp.rect);
+                        if watch_resp.clicked() {
+                            button_clicked = true;
                             let _ = open::that(&entry.url);
                         }
-                        let copy = egui::Button::new(RichText::new("Copy").color(TEXT_PRIMARY).size(13.0))
-                            .fill(BTN_SECONDARY)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
-                            .rounding(Rounding::same(6.0))
-                            .min_size(Vec2::new(68.0, 32.0));
-                        if ui.add(copy).clicked() {
+
+                        let copy_resp = paint_copy_icon_button(ui);
+                        button_rects.push(copy_resp.rect);
+                        if copy_resp.clicked() {
+                            button_clicked = true;
                             if let Ok(mut cb) = Clipboard::new() {
                                 let _ = cb.set_text(entry.url.clone());
                             }
                             set_toast(&self.state, "Copied link to clipboard!");
                         }
+
+                        paint_chevron_icon(ui, is_expanded, if is_expanded { ACCENT_BLUSH } else { TEXT_MUTED });
                     });
                 });
 
-                // Optional expandable details disclosure (keeps cards quiet by default)
-                if has_details {
-                    ui.add_space(7.0);
-                    let mut hints: Vec<String> = Vec::new();
-                    if !entry.chat_message.is_empty() {
-                        hints.push("In-game chat".to_string());
-                    }
-                    if entry.candidates.len() > 1 {
-                        hints.push(format!("{} ranked matches", entry.candidates.len()));
-                    }
-                    let toggle_label = if is_expanded {
-                        "Hide details".to_string()
-                    } else if hints.is_empty() {
-                        "Details".to_string()
-                    } else {
-                        format!("Details ({})", hints.join(" / "))
-                    };
-                    let toggle_btn = egui::Button::new(
-                        RichText::new(toggle_label)
-                            .size(12.5)
-                            .color(if is_expanded { ACCENT_BLUSH } else { TEXT_MUTED }),
-                    )
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::NONE);
-                    if ui.add(toggle_btn).clicked() {
-                        if is_expanded {
-                            self.expanded_cards.remove(&card_key);
-                        } else {
-                            self.expanded_cards.insert(card_key.clone());
-                        }
-                    }
+                // Expanded Details drawer (all secondary match & verification metadata tucked cleanly here)
+                if is_expanded {
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(8.0);
 
-                    if is_expanded {
-                        ui.add_space(5.0);
-                        ui.separator();
+                    if !entry.title.is_empty() {
+                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(13.5));
                         ui.add_space(6.0);
+                    }
 
-                        if !entry.chat_message.is_empty() {
-                            ui.label(
-                                RichText::new(format!("In-game chat: \"{}\"", entry.chat_message))
-                                    .color(ACCENT_BLUSH)
-                                    .size(13.0),
-                            );
-                            ui.add_space(4.0);
+                    // Match metadata: Team, Agent, Map, Queue, Server, Timestamp
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let mut wrote_any = false;
+                        if !entry.team_relation.is_empty() {
+                            let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
+                            ui.label(RichText::new(&entry.team_relation).size(12.5).strong().color(tc));
+                            wrote_any = true;
                         }
-                        if !entry.server_match_status.is_empty() || !entry.match_reason.is_empty() {
-                            let mut parts: Vec<&str> = Vec::new();
-                            if !entry.server_match_status.is_empty() {
-                                parts.push(&entry.server_match_status);
-                            }
-                            if !entry.match_reason.is_empty() {
-                                parts.push(&entry.match_reason);
-                            }
-                            ui.label(RichText::new(parts.join(" / ")).color(TEXT_MUTED).size(12.5));
+                        let mut meta: Vec<&str> = Vec::new();
+                        if !entry.agent_name.is_empty() {
+                            meta.push(&entry.agent_name);
                         }
+                        if !entry.map_name.is_empty() {
+                            meta.push(&entry.map_name);
+                        }
+                        if !entry.queue_name.is_empty() {
+                            meta.push(&entry.queue_name);
+                        }
+                        if !entry.server_region.is_empty() {
+                            meta.push(&entry.server_region);
+                        }
+                        if !entry.timestamp.is_empty() {
+                            meta.push(&entry.timestamp);
+                        }
+                        if !meta.is_empty() {
+                            if wrote_any {
+                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                            }
+                            ui.label(RichText::new(meta.join("  /  ")).size(12.5).color(TEXT_MUTED));
+                        }
+                    });
 
-                        if entry.candidates.len() > 1 {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(format!("Other ranked candidates ({})", entry.candidates.len()))
-                                    .size(12.5)
-                                    .strong()
-                                    .color(TEXT_MUTED),
-                            );
-                            ui.add_space(4.0);
-                            for (idx, cand) in entry.candidates.iter().enumerate() {
-                                let c_badge = match cand.platform.as_str() {
-                                    "Twitch" => TWITCH_PURPLE,
-                                    "Kick" => KICK_GREEN,
-                                    _ => ACCENT_PINK,
-                                };
-                                let c_tier = if !cand.confidence_tier.is_empty() {
-                                    cand.confidence_tier.as_str()
-                                } else if cand.confidence >= 85 {
-                                    "Confirmed"
-                                } else if cand.confidence >= 65 {
-                                    "Probable"
-                                } else {
-                                    "Unverified"
-                                };
-                                let c_conf_col = match c_tier {
-                                    "Confirmed" => LIVE_GREEN,
-                                    "Probable" => ENEMY_AMBER,
-                                    _ => TEXT_MUTED,
-                                };
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format!("#{}", idx + 1))
-                                            .size(12.5)
-                                            .strong()
-                                            .color(if idx == 0 { ACCENT_BLUSH } else { TEXT_MUTED }),
-                                    );
-                                    ui.label(
-                                        RichText::new(format!("{}% {}", cand.confidence, c_tier))
-                                            .size(12.5)
-                                            .color(c_conf_col),
-                                    );
-                                    ui.label(RichText::new(&cand.platform).size(12.5).strong().color(c_badge));
-                                    ui.label(RichText::new(&cand.channel).size(13.0).color(TEXT_PRIMARY));
-                                    if !cand.region_hint.is_empty() {
-                                        ui.label(RichText::new(&cand.region_hint).size(12.0).color(ALLY_TEAL));
-                                    }
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        let open_cand = egui::Button::new(
-                                            RichText::new("Open").size(12.0).color(ACCENT_PEARL),
-                                        )
-                                        .fill(BTN_SECONDARY)
-                                        .stroke(Stroke::new(1.0, CARD_BORDER))
-                                        .rounding(Rounding::same(4.0));
-                                        if ui.add(open_cand).on_hover_text(cand.url.as_str()).clicked() {
-                                            let _ = open::that(&cand.url);
+                    if !entry.chat_message.is_empty() {
+                        ui.add_space(6.0);
+                        Frame::none()
+                            .fill(BG_DARK)
+                            .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.3)))
+                            .rounding(Rounding::same(5.0))
+                            .inner_margin(Margin::symmetric(10.0, 6.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(format!("In-Game Chat: \"{}\"", entry.chat_message))
+                                        .color(ACCENT_BLUSH)
+                                        .size(12.5),
+                                );
+                            });
+                    }
+
+                    if !entry.server_match_status.is_empty() || !entry.match_reason.is_empty() {
+                        ui.add_space(6.0);
+                        let mut parts: Vec<&str> = Vec::new();
+                        if !entry.server_match_status.is_empty() {
+                            parts.push(&entry.server_match_status);
+                        }
+                        if !entry.match_reason.is_empty() {
+                            parts.push(&entry.match_reason);
+                        }
+                        ui.label(RichText::new(parts.join(" - ")).color(TEXT_MUTED).size(12.5));
+                    }
+
+                    if entry.candidates.len() > 1 {
+                        ui.add_space(8.0);
+                        Frame::none()
+                            .fill(BG_DARK)
+                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .rounding(Rounding::same(6.0))
+                            .inner_margin(Margin::symmetric(10.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(format!("RANKED CANDIDATES ({})", entry.candidates.len()))
+                                        .size(11.5)
+                                        .strong()
+                                        .color(TEXT_MUTED),
+                                );
+                                ui.add_space(4.0);
+                                for (idx, cand) in entry.candidates.iter().enumerate() {
+                                    let c_badge = match cand.platform.as_str() {
+                                        "Twitch" => TWITCH_PURPLE,
+                                        "Kick" => KICK_GREEN,
+                                        _ => ACCENT_PINK,
+                                    };
+                                    let c_tier = if !cand.confidence_tier.is_empty() {
+                                        cand.confidence_tier.as_str()
+                                    } else if cand.confidence >= 85 {
+                                        "Confirmed"
+                                    } else if cand.confidence >= 65 {
+                                        "Probable"
+                                    } else {
+                                        "Unverified"
+                                    };
+                                    let c_conf_col = match c_tier {
+                                        "Confirmed" => LIVE_GREEN,
+                                        "Probable" => ENEMY_AMBER,
+                                        _ => TEXT_MUTED,
+                                    };
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(format!("#{}", idx + 1))
+                                                .size(12.0)
+                                                .strong()
+                                                .color(if idx == 0 { ACCENT_BLUSH } else { TEXT_MUTED }),
+                                        );
+                                        ui.label(
+                                            RichText::new(format!("{c_tier} ({}%)", cand.confidence))
+                                                .size(12.0)
+                                                .color(c_conf_col),
+                                        );
+                                        ui.label(RichText::new(&cand.platform).size(12.0).strong().color(c_badge));
+                                        ui.label(RichText::new(&cand.channel).size(12.5).color(TEXT_PRIMARY));
+                                        if !cand.region_hint.is_empty() {
+                                            ui.label(RichText::new(&cand.region_hint).size(12.0).color(ALLY_TEAL));
                                         }
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let open_cand = egui::Button::new(
+                                                RichText::new("Open").size(12.0).color(ACCENT_BLUSH),
+                                            )
+                                            .fill(BTN_SECONDARY)
+                                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                                            .rounding(Rounding::same(4.0));
+                                            let open_resp = ui.add(open_cand).on_hover_text(cand.url.as_str());
+                                            button_rects.push(open_resp.rect);
+                                            if open_resp.clicked() {
+                                                button_clicked = true;
+                                                let _ = open::that(&cand.url);
+                                            }
+                                        });
                                     });
-                                });
-                                if idx + 1 < entry.candidates.len() {
-                                    ui.add_space(3.0);
+                                    if idx + 1 < entry.candidates.len() {
+                                        ui.add_space(3.0);
+                                    }
                                 }
-                            }
-                        }
+                            });
                     }
                 }
             });
+
+        // Allow clicking anywhere on the card body outside action buttons to toggle Details
+        let card_rect = frame_resp.response.rect;
+        let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+        let pointer_on_button = pointer_pos
+            .map(|pos| button_rects.iter().any(|r| r.contains(pos)))
+            .unwrap_or(false);
+        if ui.rect_contains_pointer(card_rect) && !pointer_on_button {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            if !is_expanded {
+                ui.painter().rect_stroke(card_rect, Rounding::same(8.0), Stroke::new(1.0, Color32::from_rgb(43, 43, 54)));
+            }
+            if !button_clicked && ui.input(|i| i.pointer.primary_clicked()) {
+                if is_expanded {
+                    self.expanded_cards.remove(&card_key);
+                } else {
+                    self.expanded_cards.insert(card_key);
+                }
+            }
+        }
     }
 
     fn render_history_tab(
@@ -7558,7 +7905,13 @@ impl StreamerApp {
                                 lock(&self.state).yt_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestYouTubeKey(self.cfg_draft.youtube_api_key.clone()));
                             }
-                            if gradient_button(ui, "Get YouTube Key", Vec2::new(134.0, 28.0), true, 13.0)
+                            let get_yt = egui::Button::new(RichText::new("Get YouTube Key").color(ACCENT_BLUSH).size(13.0))
+                                .fill(BTN_SECONDARY)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(5.0))
+                                .min_size(Vec2::new(124.0, 28.0));
+                            if ui
+                                .add(get_yt)
                                 .on_hover_text("Opens Google Cloud Console -> Credentials")
                                 .clicked()
                             {
@@ -7593,7 +7946,7 @@ impl StreamerApp {
                             let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(4.0));
+                                .rounding(Rounding::same(5.0));
                             if ui.add_enabled(!tw_busy, test_tw).clicked() {
                                 lock(&self.state).twitch_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestTwitchKeys {
@@ -7601,9 +7954,11 @@ impl StreamerApp {
                                     client_secret: self.cfg_draft.twitch_client_secret.clone(),
                                 });
                             }
-                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(Color32::WHITE).strong().size(13.0))
-                                .fill(TWITCH_PURPLE)
-                                .rounding(Rounding::same(4.0));
+                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(ACCENT_BLUSH).size(13.0))
+                                .fill(BTN_SECONDARY)
+                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .rounding(Rounding::same(5.0))
+                                .min_size(Vec2::new(124.0, 28.0));
                             if ui.add(get_tw).on_hover_text("Opens Twitch Developer Console -> Applications").clicked() {
                                 let _ = open::that("https://dev.twitch.tv/console/apps");
                             }
@@ -7645,7 +8000,7 @@ impl StreamerApp {
                     ui.add_space(12.0);
                     egui::CollapsingHeader::new(
                         RichText::new("How to get free API keys (Step-by-Step Guide)")
-                            .color(ALLY_TEAL)
+                            .color(ACCENT_BLUSH)
                             .strong()
                             .size(13.5),
                     )
@@ -7806,6 +8161,87 @@ impl StreamerApp {
 // ENTRY POINT
 // ============================================================================
 
+/// Configures wgpu on Windows to render via Microsoft Basic Render Driver (WARP software DX12)
+/// so NVIDIA's driver never hooks the window, never activates G-SYNC, never draws the top-right
+/// "NORMAL" visual indicator, and consumes zero GPU VRAM while Valorant is running.
+fn build_non_gsync_wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::wgpu;
+
+    #[cfg(windows)]
+    {
+        if let Ok(rt) = tokio::runtime::Builder::new_current_thread().build() {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::DX12,
+                ..Default::default()
+            });
+            let maybe_warp = rt.block_on(async {
+                let adapter = instance
+                    .request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::LowPower,
+                        compatible_surface: None,
+                        force_fallback_adapter: true,
+                    })
+                    .await?;
+                let (device, queue) = adapter
+                    .request_device(
+                        &wgpu::DeviceDescriptor {
+                            label: Some("radar-warp-device"),
+                            required_features: wgpu::Features::default(),
+                            required_limits: wgpu::Limits {
+                                max_texture_dimension_2d: 8192,
+                                ..wgpu::Limits::default()
+                            },
+                            memory_hints: wgpu::MemoryHints::MemoryUsage,
+                        },
+                        None,
+                    )
+                    .await
+                    .ok()?;
+                Some((adapter, device, queue))
+            });
+
+            if let Some((adapter, device, queue)) = maybe_warp {
+                let info = adapter.get_info();
+                log(format!(
+                    "Using non-GSYNC Windows software adapter: {} ({:?}, {:?})",
+                    info.name, info.backend, info.device_type
+                ));
+                return eframe::egui_wgpu::WgpuConfiguration {
+                    wgpu_setup: eframe::egui_wgpu::WgpuSetup::Existing {
+                        instance: Arc::new(instance),
+                        adapter: Arc::new(adapter),
+                        device: Arc::new(device),
+                        queue: Arc::new(queue),
+                    },
+                    ..Default::default()
+                };
+            }
+            log("Windows WARP software adapter unavailable; falling back to LowPower DX12");
+        }
+    }
+
+    eframe::egui_wgpu::WgpuConfiguration {
+        wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew {
+            supported_backends: if cfg!(windows) {
+                wgpu::Backends::DX12
+            } else {
+                wgpu::Backends::PRIMARY
+            },
+            power_preference: wgpu::PowerPreference::LowPower,
+            device_descriptor: Arc::new(|_adapter| wgpu::DeviceDescriptor {
+                label: Some("radar-wgpu-device"),
+                required_features: wgpu::Features::default(),
+                required_limits: wgpu::Limits {
+                    max_texture_dimension_2d: 8192,
+                    ..wgpu::Limits::default()
+                },
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
+            }),
+        },
+        ..Default::default()
+    }
+}
+
 fn main() -> Result<()> {
     std::panic::set_hook(Box::new(|info| log(format!("PANIC: {info}"))));
 
@@ -7850,7 +8286,7 @@ fn main() -> Result<()> {
         config: config.clone(),
         history: load_json("streamer_history.json"),
         local_directory: load_json("custom_streamers.json"),
-        remote_directory: load_json("directory_cache.json"),
+        remote_directory: load_clean_remote_directory_cache(),
         toast: None,
         last_scanned_match: initial_last_match_id,
         last_match_summary: saved_last_match,
@@ -7902,6 +8338,8 @@ fn main() -> Result<()> {
             .with_inner_size([1120.0, 740.0])
             .with_min_inner_size([860.0, 560.0])
             .with_visible(!start_hidden),
+        renderer: eframe::Renderer::Wgpu,
+        wgpu_options: build_non_gsync_wgpu_options(),
         ..Default::default()
     };
 
@@ -8421,5 +8859,81 @@ mod tests {
         assert!(cfg.skip_party_members, "skip_party_members should default to true");
         assert!(!cfg.enable_recommendations, "recommendations must default to OFF");
     }
+
+    #[test]
+    fn test_resolve_match_players_keeps_all_players_when_name_service_is_partial() {
+        let details_players = vec![
+            serde_json::json!({"subject": "ME-UUID", "gameName": "LocalPlayer", "tagLine": "IND", "teamId": "Blue", "characterId": "", "partyId": "party-real-1"}),
+            serde_json::json!({"subject": "p1", "gameName": "DuoMate", "tagLine": "IND", "teamId": "Blue", "characterId": "", "partyId": "party-real-1"}),
+            serde_json::json!({"subject": "p2", "gameName": "SoloAlly", "tagLine": "AP", "teamId": "Blue", "characterId": "", "partyId": "party-other"}),
+            serde_json::json!({"subject": "p3", "gameName": "MissingFromNameService", "tagLine": "TTV", "teamId": "Red", "characterId": "", "partyId": "party-enemy"}),
+            serde_json::json!({"subject": "p4", "gameName": "EnemyWithSamePartyId", "tagLine": "YT", "teamId": "Red", "characterId": "", "partyId": "party-real-1"}),
+        ];
+        // Simulate name-service returning only 2 records and one with a blank GameName
+        let name_records = vec![
+            RiotNameRecord { subject: "me-uuid".to_string(), game_name: "LocalPlayer".to_string(), tag_line: "IND".to_string() },
+            RiotNameRecord { subject: "p2".to_string(), game_name: String::new(), tag_line: String::new() },
+        ];
+        let (_, players) = resolve_match_players(&details_players, &name_records, "me-uuid");
+        let (scannable, party_skipped) = filter_scannable_players(players, "me-uuid", true);
+
+        assert_eq!(party_skipped, 1, "Only true same-team duo mate should be skipped");
+        assert_eq!(scannable.len(), 3, "All 3 non-party players (including omitted name-service and enemy) must be scanned");
+        assert!(scannable.iter().any(|p| p.record.game_name == "SoloAlly"));
+        assert!(scannable.iter().any(|p| p.record.game_name == "MissingFromNameService"));
+        assert!(scannable.iter().any(|p| p.record.game_name == "EnemyWithSamePartyId"));
+    }
+
+    #[test]
+    fn test_nil_party_id_and_ffa_never_skip_non_party_players() {
+        let nil = "00000000-0000-0000-0000-000000000000";
+        assert!(!is_valid_party_id(""));
+        assert!(!is_valid_party_id(nil));
+        assert!(is_valid_party_id("a1b2c3d4-0000-0000-0000-000000000001"));
+
+        let dm_players: Vec<Value> = (0..10)
+            .map(|i| {
+                serde_json::json!({
+                    "subject": format!("sub-{i}"),
+                    "gameName": format!("Player{i}"),
+                    "tagLine": "IND",
+                    "teamId": "Blue",
+                    "characterId": "",
+                    "partyId": nil
+                })
+            })
+            .collect();
+        let (_, players) = resolve_match_players(&dm_players, &[], "sub-0");
+        let (scannable, party_skipped) = filter_scannable_players(players, "sub-0", true);
+        assert_eq!(party_skipped, 0, "Nil partyId must never skip any players");
+        assert_eq!(scannable.len(), 9, "All 9 other players must be checked");
+    }
+
+    #[test]
+    fn test_purge_seeded_sample_streamers_removes_legacy_entries() {
+        let mk = |id: &str, riot: &str| DirectoryStreamer {
+            id: id.to_string(),
+            display_name: riot.to_string(),
+            riot_id: riot.to_string(),
+            aliases: Vec::new(),
+            platform: "Twitch".to_string(),
+            channel_id: id.to_string(),
+            channel_name: riot.to_string(),
+            channel_url: format!("https://www.twitch.tv/{id}"),
+            server_region: "ap-mumbai".to_string(),
+            verified: true,
+            submitted_at: String::new(),
+            source: "community-verified".to_string(),
+        };
+        let entries = vec![
+            mk("rohan-gaming-yt", "RohanYT#IND"),
+            mk("vexfps-twitch", "VexFPS#MUM"),
+            mk("real-streamer-twitch", "RealStreamer#IND"),
+        ];
+        let cleaned = purge_seeded_sample_streamers(entries);
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].id, "real-streamer-twitch");
+    }
 }
+
 

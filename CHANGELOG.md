@@ -3,6 +3,12 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.8] - 2026-11-25
+
+### Changed
+- **Curved Window Corners:** Applied native Windows 11 DWM rounded window corners (`DWMWA_WINDOW_CORNER_PREFERENCE` + `#1F1F26` rounded border) with an 8px-radius Windows 10 GDI fallback so the frameless AMOLED desktop window curves smoothly like the preview.
+- **Exact Preview Fonts & True Font Weights:** Embedded **Plus Jakarta Sans** (Regular, Medium, SemiBold, Bold), **Barlow Condensed** (Bold for the `VALORANT RADAR` brand lockup), and **JetBrains Mono** (Regular & SemiBold for monospace stats, scores, and metadata) directly into the Windows executable, replacing egui's single-weight default font so headings, the **LATEST MATCH** summary strip, detection cards, sidebar items, and buttons match the exact typography and boldness of the preview.
+
 ## [1.2.7] - 2026-11-25
 
 ### Changed

@@ -4885,6 +4885,11 @@ mod win32_window {
     const SW_SHOW: i32 = 5;
     const SW_RESTORE: i32 = 9;
     const WM_CLOSE: u32 = 0x0010;
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
+    const DWMWA_BORDER_COLOR: u32 = 34;
+    // COLORREF is 0x00BBGGRR -> matches CARD_BORDER (#1F1F26)
+    const DWM_BORDER_COLORREF: u32 = 0x0026_1F1F;
     const WINDOW_TITLE: &str = "Valorant Streamer Radar";
 
     static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -4904,6 +4909,22 @@ mod win32_window {
         fn SetForegroundWindow(h_wnd: isize) -> i32;
         fn InvalidateRect(h_wnd: isize, lp_rect: *const c_void, b_erase: i32) -> i32;
         fn PostMessageW(h_wnd: isize, msg: u32, w_param: usize, l_param: isize) -> i32;
+        fn SetWindowRgn(h_wnd: isize, h_rgn: isize, b_redraw: i32) -> i32;
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: isize,
+            dw_attribute: u32,
+            pv_attribute: *const c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+
+    #[link(name = "gdi32")]
+    extern "system" {
+        fn CreateRoundRectRgn(x1: i32, y1: i32, x2: i32, y2: i32, cx: i32, cy: i32) -> isize;
     }
 
     struct SearchCtx {
@@ -4950,6 +4971,45 @@ mod win32_window {
 
     pub fn cache_main_hwnd() {
         let _ = find_main_hwnd();
+    }
+
+    pub fn apply_rounded_corners(width: u32, height: u32, scale: f64) {
+        let hwnd = find_main_hwnd();
+        if hwnd == 0 {
+            return;
+        }
+        unsafe {
+            let pref: u32 = DWMWCP_ROUND;
+            let hr = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                (&pref as *const u32).cast::<c_void>(),
+                std::mem::size_of::<u32>() as u32,
+            );
+            let border = DWM_BORDER_COLORREF;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                (&border as *const u32).cast::<c_void>(),
+                std::mem::size_of::<u32>() as u32,
+            );
+            // Windows 10 fallback: DWM corner preference returns non-zero on Win10,
+            // so clip the frameless window to an 8px-radius rounded rectangle via GDI.
+            if hr != 0 && width > 0 && height > 0 {
+                let diameter = ((16.0 * scale).round() as i32).max(12);
+                let rgn = CreateRoundRectRgn(
+                    0,
+                    0,
+                    width.saturating_add(1) as i32,
+                    height.saturating_add(1) as i32,
+                    diameter,
+                    diameter,
+                );
+                if rgn != 0 {
+                    SetWindowRgn(hwnd, rgn, 1);
+                }
+            }
+        }
     }
 
     pub fn show_and_focus() {
@@ -5047,6 +5107,7 @@ mod win32_window {
 #[cfg(not(windows))]
 mod win32_window {
     pub fn cache_main_hwnd() {}
+    pub fn apply_rounded_corners(_width: u32, _height: u32, _scale: f64) {}
     pub fn show_and_focus() {}
     pub fn post_close() {}
 }
@@ -5384,6 +5445,128 @@ fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     response
 }
 
+fn font_medium(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("medium".into()))
+}
+
+fn font_semibold(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("semibold".into()))
+}
+
+fn font_bold(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("bold".into()))
+}
+
+fn font_display(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("display".into()))
+}
+
+fn font_mono(size: f32) -> FontId {
+    FontId::monospace(size)
+}
+
+fn font_mono_semi(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("mono_semi".into()))
+}
+
+fn install_preview_fonts(egui_ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+
+    fonts.font_data.insert(
+        "pjs_regular".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/PlusJakartaSans-Regular.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "pjs_medium".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/PlusJakartaSans-Medium.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "pjs_semibold".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/PlusJakartaSans-SemiBold.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "pjs_bold".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/PlusJakartaSans-Bold.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "barlow_bold".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/BarlowCondensed-Bold.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "jb_mono_regular".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMono-Regular.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "jb_mono_semibold".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMono-SemiBold.ttf"
+        ))),
+    );
+
+    let prop_fallbacks = fonts
+        .families
+        .get(&egui::FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let mono_fallbacks = fonts
+        .families
+        .get(&egui::FontFamily::Monospace)
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        list.insert(0, "pjs_regular".to_owned());
+    }
+    if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        list.insert(0, "jb_mono_regular".to_owned());
+    }
+
+    let with_prop_fallback = |primary: &str| {
+        let mut list = vec![primary.to_owned(), "pjs_regular".to_owned()];
+        list.extend(prop_fallbacks.iter().cloned());
+        list
+    };
+    let with_mono_fallback = |primary: &str| {
+        let mut list = vec![primary.to_owned(), "jb_mono_regular".to_owned()];
+        list.extend(mono_fallbacks.iter().cloned());
+        list
+    };
+
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("medium".into()), with_prop_fallback("pjs_medium"));
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("semibold".into()), with_prop_fallback("pjs_semibold"));
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("bold".into()), with_prop_fallback("pjs_bold"));
+
+    let mut display_list = vec!["barlow_bold".to_owned(), "pjs_bold".to_owned()];
+    display_list.extend(prop_fallbacks.iter().cloned());
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("display".into()), display_list);
+
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("mono_semi".into()), with_mono_fallback("jb_mono_semibold"));
+
+    egui_ctx.set_fonts(fonts);
+}
+
 fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> bool {
     let mut changed = false;
     Frame::NONE
@@ -5395,7 +5578,7 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_max_width((ui.available_width() - 104.0).max(180.0));
-                    ui.label(RichText::new(title).strong().color(TEXT_PRIMARY).size(14.0));
+                    ui.label(RichText::new(title).font(font_semibold(13.5)).color(TEXT_PRIMARY));
                     if !subtitle.is_empty() {
                         ui.label(RichText::new(subtitle).color(TEXT_MUTED).size(12.5));
                     }
@@ -5407,7 +5590,7 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
                     ui.add_space(6.0);
                     let state_text = if *on { "ON" } else { "OFF" };
                     let state_col = if *on { ACCENT_BLUSH } else { TEXT_MUTED };
-                    ui.label(RichText::new(state_text).strong().color(state_col).size(11.5));
+                    ui.label(RichText::new(state_text).font(font_mono_semi(11.5)).color(state_col));
                 });
             });
         });
@@ -5614,7 +5797,7 @@ fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, fo
             rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            FontId::proportional(font_size),
+            font_bold(font_size),
             TEXT_MUTED,
         );
         return response;
@@ -5650,7 +5833,7 @@ fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, fo
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
-        FontId::proportional(font_size),
+        font_bold(font_size),
         BG_DARK,
     );
     if response.hovered() {
@@ -5788,13 +5971,15 @@ impl StreamerApp {
         visuals.selection.stroke = Stroke::new(1.0, ACCENT_PEARL);
         egui_ctx.set_visuals(visuals);
 
-        // Increase default typography scale for crisp readability on desktop monitors
+        install_preview_fonts(egui_ctx);
+
+        // Typography scale & weights matching the Plus Jakarta Sans / Barlow Condensed / JetBrains Mono preview
         egui_ctx.style_mut(|style| {
-            style.text_styles.insert(egui::TextStyle::Small, FontId::proportional(12.5));
-            style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(14.5));
-            style.text_styles.insert(egui::TextStyle::Button, FontId::proportional(14.0));
-            style.text_styles.insert(egui::TextStyle::Monospace, FontId::monospace(13.5));
-            style.text_styles.insert(egui::TextStyle::Heading, FontId::proportional(20.0));
+            style.text_styles.insert(egui::TextStyle::Small, FontId::proportional(12.0));
+            style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.5));
+            style.text_styles.insert(egui::TextStyle::Button, font_medium(13.0));
+            style.text_styles.insert(egui::TextStyle::Monospace, font_mono(12.5));
+            style.text_styles.insert(egui::TextStyle::Heading, font_bold(18.0));
         });
 
         let initial_cfg = lock(&state).config.clone();
@@ -6165,15 +6350,13 @@ impl StreamerApp {
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new("VALORANT")
-                            .font(FontId::proportional(14.5))
-                            .strong()
+                            .font(font_display(16.5))
                             .color(ACCENT_PINK),
                     );
-                    ui.add_space(5.0);
+                    ui.add_space(4.0);
                     ui.label(
                         RichText::new("RADAR")
-                            .font(FontId::proportional(14.5))
-                            .strong()
+                            .font(font_display(16.5))
                             .color(ACCENT_PEARL),
                     );
                     if let Some(msg) = &toast {
@@ -6262,7 +6445,7 @@ impl StreamerApp {
                         egui::pos2(rect.left() + 34.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
-                        FontId::proportional(14.0),
+                        if selected { font_semibold(13.5) } else { font_medium(13.5) },
                         text_col,
                     );
                     if !meta.is_empty() {
@@ -6277,7 +6460,11 @@ impl StreamerApp {
                             egui::pos2(rect.right() - 10.0, rect.center().y),
                             egui::Align2::RIGHT_CENTER,
                             meta,
-                            FontId::proportional(12.5),
+                            if tab == ActiveTab::Discover && recs_enabled {
+                                font_mono_semi(12.0)
+                            } else {
+                                font_mono(12.0)
+                            },
                             meta_col,
                         );
                     }
@@ -6301,7 +6488,7 @@ impl StreamerApp {
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     // Version & update trigger
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("v{APP_VERSION}")).size(12.5).color(TEXT_MUTED));
+                        ui.label(RichText::new(format!("v{APP_VERSION}")).font(font_mono(12.0)).color(TEXT_MUTED));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let upd_busy = matches!(
                                 update_state,
@@ -6317,7 +6504,7 @@ impl StreamerApp {
                             };
                             let upd_btn = egui::Button::new(
                                 RichText::new(upd_lbl)
-                                    .size(12.5)
+                                    .font(font_medium(12.0))
                                     .color(if upd_avail { ACCENT_PINK } else { TEXT_MUTED }),
                             )
                             .fill(Color32::TRANSPARENT)
@@ -6334,7 +6521,9 @@ impl StreamerApp {
                     ui.add_space(8.0);
 
                     // Quiet secondary action: + Add Streamer
-                    let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(TEXT_PRIMARY).size(13.5))
+                    let add_btn = egui::Button::new(
+                        RichText::new("+ Add Streamer").font(font_semibold(13.0)).color(TEXT_PRIMARY),
+                    )
                         .fill(BTN_SECONDARY)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
                         .corner_radius(CornerRadius::same(6))
@@ -6368,17 +6557,17 @@ impl StreamerApp {
                             };
                             ui.horizontal(|ui| {
                                 paint_status_dot(ui, dot, glowing);
-                                ui.label(RichText::new(riot_text).size(13.0).strong().color(TEXT_PRIMARY));
+                                ui.label(RichText::new(riot_text).font(font_semibold(12.5)).color(TEXT_PRIMARY));
                             });
                             ui.add_space(3.0);
                             ui.label(
-                                RichText::new(format!("Server: {}", active_region.short_label))
-                                    .size(12.5)
+                                RichText::new(active_region.short_label)
+                                    .font(font_mono(12.0))
                                     .color(ALLY_TEAL),
                             );
                             ui.label(
                                 RichText::new(short(&status, 34))
-                                    .size(12.0)
+                                    .size(11.5)
                                     .color(TEXT_MUTED),
                             )
                             .on_hover_text(status.as_str());
@@ -6619,14 +6808,14 @@ impl StreamerApp {
                 }
             });
 
-        // Subtle 1px perimeter border so the frameless AMOLED window remains crisp on dark desktops
+        // Subtle 1px curved perimeter border matching the rounded desktop window
         ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             egui::Id::new("frameless_window_border"),
         ))
         .rect_stroke(
             ctx.screen_rect().shrink(0.5),
-            CornerRadius::ZERO,
+            CornerRadius::same(8),
             Stroke::new(1.0, CARD_BORDER),
             StrokeKind::Inside,
         );
@@ -6813,20 +7002,19 @@ impl StreamerApp {
                         ui.spacing_mut().item_spacing.x = 7.0;
                         ui.label(
                             RichText::new(&entry.riot_id)
-                                .font(FontId::proportional(15.5))
-                                .strong()
+                                .font(font_bold(15.0))
                                 .color(ACCENT_PEARL),
                         );
-                        ui.label(RichText::new("/").color(CARD_BORDER).size(13.0));
-                        ui.label(RichText::new(&entry.platform).size(13.0).strong().color(badge));
-                        ui.label(RichText::new(&entry.channel).size(13.5).color(TEXT_PRIMARY));
-                        ui.label(RichText::new("/").color(CARD_BORDER).size(13.0));
+                        ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
+                        ui.label(RichText::new(&entry.platform).font(font_bold(12.5)).color(badge));
+                        ui.label(RichText::new(&entry.channel).font(font_medium(13.5)).color(TEXT_PRIMARY));
+                        ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
                         let conf_label = if entry.confidence > 0 {
-                            format!("{tier} ({}%)", entry.confidence)
+                            format!("{tier} \u{00B7} {}%", entry.confidence)
                         } else {
                             tier.to_string()
                         };
-                        ui.label(RichText::new(conf_label).size(12.5).strong().color(tier_color));
+                        ui.label(RichText::new(conf_label).font(font_mono_semi(12.0)).color(tier_color));
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -6860,7 +7048,7 @@ impl StreamerApp {
                     ui.add_space(8.0);
 
                     if !entry.title.is_empty() {
-                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(13.5));
+                        ui.label(RichText::new(&entry.title).font(font_medium(13.5)).color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                     }
 
@@ -6870,7 +7058,7 @@ impl StreamerApp {
                         let mut wrote_any = false;
                         if !entry.team_relation.is_empty() {
                             let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
-                            ui.label(RichText::new(&entry.team_relation).size(12.5).strong().color(tc));
+                            ui.label(RichText::new(&entry.team_relation).font(font_semibold(12.0)).color(tc));
                             wrote_any = true;
                         }
                         let mut meta: Vec<&str> = Vec::new();
@@ -6893,7 +7081,7 @@ impl StreamerApp {
                             if wrote_any {
                                 ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
                             }
-                            ui.label(RichText::new(meta.join("  /  ")).size(12.5).color(TEXT_MUTED));
+                            ui.label(RichText::new(meta.join("  /  ")).font(font_mono(11.5)).color(TEXT_MUTED));
                         }
                     });
 
@@ -6935,8 +7123,7 @@ impl StreamerApp {
                             .show(ui, |ui| {
                                 ui.label(
                                     RichText::new(format!("RANKED CANDIDATES ({})", entry.candidates.len()))
-                                        .size(11.5)
-                                        .strong()
+                                        .font(font_semibold(11.0))
                                         .color(TEXT_MUTED),
                                 );
                                 ui.add_space(4.0);
@@ -6963,19 +7150,18 @@ impl StreamerApp {
                                     ui.horizontal(|ui| {
                                         ui.label(
                                             RichText::new(format!("#{}", idx + 1))
-                                                .size(12.0)
-                                                .strong()
+                                                .font(font_mono_semi(11.5))
                                                 .color(if idx == 0 { ACCENT_BLUSH } else { TEXT_MUTED }),
                                         );
                                         ui.label(
                                             RichText::new(format!("{c_tier} ({}%)", cand.confidence))
-                                                .size(12.0)
+                                                .font(font_mono_semi(11.5))
                                                 .color(c_conf_col),
                                         );
-                                        ui.label(RichText::new(&cand.platform).size(12.0).strong().color(c_badge));
-                                        ui.label(RichText::new(&cand.channel).size(12.5).color(TEXT_PRIMARY));
+                                        ui.label(RichText::new(&cand.platform).font(font_semibold(12.0)).color(c_badge));
+                                        ui.label(RichText::new(&cand.channel).font(font_medium(12.5)).color(TEXT_PRIMARY));
                                         if !cand.region_hint.is_empty() {
-                                            ui.label(RichText::new(&cand.region_hint).size(12.0).color(ALLY_TEAL));
+                                            ui.label(RichText::new(&cand.region_hint).font(font_mono(11.5)).color(ALLY_TEAL));
                                         }
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             let open_cand = egui::Button::new(
@@ -7243,36 +7429,35 @@ impl StreamerApp {
         let filters_active = self.has_active_history_filters();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // Subsection 1: Latest Match (quiet single-line summary strip + cards)
+            // Subsection 1: Latest Match (matches preview header weight, colors, and monospace stats)
             if let Some(m) = last_match {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;
-                    ui.label(RichText::new("Latest Match").size(14.0).strong().color(ACCENT_PEARL));
+                    paint_status_dot(ui, ACCENT_PINK, false);
+                    ui.label(RichText::new("LATEST MATCH").font(font_bold(11.5)).color(ACCENT_BLUSH));
                     ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
-                    ui.label(RichText::new(&m.map_name).size(13.5).strong().color(TEXT_PRIMARY));
-                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
-                    ui.label(RichText::new(&m.queue_name).size(13.0).color(ACCENT_BLUSH));
+                    ui.label(RichText::new(&m.queue_name).font(font_semibold(13.0)).color(ACCENT_PEARL));
+                    ui.label(RichText::new(&m.map_name).font(font_medium(13.0)).color(TEXT_PRIMARY));
                     if !m.server_name.is_empty() {
-                        ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
-                        ui.label(RichText::new(&m.server_name).size(13.0).color(ALLY_TEAL));
+                        ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                        ui.label(RichText::new(&m.server_name).font(font_semibold(12.5)).color(ALLY_TEAL));
                     }
-                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                    ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
                     let summary_counts = if m.party_skipped > 0 {
-                        format!("{} checked, {} party skipped", m.players_checked, m.party_skipped)
+                        format!("{} scanned, {} party skipped", m.players_checked, m.party_skipped)
                     } else {
-                        format!("{} checked", m.players_checked)
+                        format!("{} scanned", m.players_checked)
                     };
-                    ui.label(RichText::new(summary_counts).size(13.0).color(TEXT_MUTED));
-                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                    ui.label(RichText::new(summary_counts).font(font_mono(12.0)).color(TEXT_MUTED));
+                    ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
                     if m.streamers_found > 0 {
                         ui.label(
-                            RichText::new(format!("{} live", m.streamers_found))
-                                .size(13.0)
-                                .strong()
+                            RichText::new(format!("{} detected", m.streamers_found))
+                                .font(font_mono_semi(12.0))
                                 .color(LIVE_GREEN),
                         );
                     } else {
-                        ui.label(RichText::new("0 live").size(13.0).color(TEXT_MUTED));
+                        ui.label(RichText::new("0 detected").font(font_mono(12.0)).color(TEXT_MUTED));
                     }
                 });
 
@@ -7288,7 +7473,7 @@ impl StreamerApp {
                     } else {
                         "No live streamers detected in your latest match."
                     };
-                    ui.label(RichText::new(msg).color(TEXT_MUTED).size(13.5));
+                    ui.label(RichText::new(msg).color(TEXT_MUTED).size(13.0));
                     ui.add_space(6.0);
                 }
 
@@ -7299,10 +7484,9 @@ impl StreamerApp {
 
             // Subsection 2: Previous History
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Previous History").size(14.0).strong().color(TEXT_PRIMARY));
                 ui.label(
-                    RichText::new(format!("({})", previous_entries.len()))
-                        .size(13.0)
+                    RichText::new(format!("PREVIOUS HISTORY ({})", previous_entries.len()))
+                        .font(font_semibold(11.5))
                         .color(TEXT_MUTED),
                 );
             });
@@ -7312,15 +7496,15 @@ impl StreamerApp {
                 ui.add_space(40.0);
                 ui.vertical_centered(|ui| {
                     if history.is_empty() {
-                        ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(18.0)).strong().color(TEXT_PRIMARY));
+                        ui.label(RichText::new("No Streamers Recorded Yet").font(font_bold(17.0)).color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("Play a match or click '+ Add Streamer' in the sidebar to link a Riot ID.")
                                 .color(TEXT_MUTED)
-                                .size(14.0),
+                                .size(13.5),
                         );
                     } else {
-                        ui.label(RichText::new("No Records Match Your Filters").font(FontId::proportional(18.0)).strong().color(TEXT_PRIMARY));
+                        ui.label(RichText::new("No Records Match Your Filters").font(font_bold(17.0)).color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("Your saved history is intact. Adjust or reset filters to view older records.")
@@ -7441,20 +7625,20 @@ impl StreamerApp {
                             ui.vertical(|ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.spacing_mut().item_spacing.x = 7.0;
-                                    ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(15.5));
+                                    ui.label(RichText::new(&d.riot_id).font(font_bold(15.0)).color(ACCENT_PEARL));
                                     ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
-                                    ui.label(RichText::new(&d.platform).strong().color(badge).size(13.5));
-                                    ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(14.0));
+                                    ui.label(RichText::new(&d.platform).font(font_bold(12.5)).color(badge));
+                                    ui.label(RichText::new(&d.channel_name).font(font_medium(13.5)).color(TEXT_PRIMARY));
                                     if d.verified {
                                         ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
-                                        ui.label(RichText::new("Verified").size(12.5).strong().color(LIVE_GREEN));
+                                        ui.label(RichText::new("Verified").font(font_mono_semi(12.0)).color(LIVE_GREEN));
                                     }
                                     if !d.server_region.is_empty() {
                                         let reg_label = server_region_by_code(&d.server_region)
                                             .map(|r| r.short_label)
                                             .unwrap_or(&d.server_region);
                                         ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
-                                        ui.label(RichText::new(reg_label).size(12.5).color(ALLY_TEAL));
+                                        ui.label(RichText::new(reg_label).font(font_mono(12.0)).color(ALLY_TEAL));
                                     }
                                 });
                                 if !d.aliases.is_empty() {
@@ -7802,16 +7986,15 @@ impl StreamerApp {
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new("Valorant Servers & Region Detection")
-                            .font(FontId::proportional(16.5))
-                            .strong()
-                            .color(Color32::WHITE),
+                            .font(font_bold(15.5))
+                            .color(ACCENT_PEARL),
                     );
                     ui.label(
                         RichText::new(
                             "Matches streamers to the exact Valorant server you play on to prevent cross-region false positives (e.g. US streamers showing up in Mumbai lobbies).",
                         )
                         .color(TEXT_MUTED)
-                        .size(13.5),
+                        .size(13.0),
                     );
                     ui.add_space(10.0);
 
@@ -7824,7 +8007,7 @@ impl StreamerApp {
                     };
 
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Active Server").strong().color(TEXT_PRIMARY).size(14.0));
+                        ui.label(RichText::new("Active Server").font(font_semibold(13.5)).color(TEXT_PRIMARY));
                         ui.add_space(10.0);
                         egui::ComboBox::from_id_salt("settings_server_region_combo")
                             .width(380.0)
@@ -7851,8 +8034,8 @@ impl StreamerApp {
                         .unwrap_or("Waiting for game server pod in ShooterGame.log");
                     ui.label(
                         RichText::new(format!("Detected server pod: {detected_info}"))
-                            .color(ALLY_TEAL)
-                            .size(13.0),
+                            .font(font_mono(12.0))
+                            .color(ALLY_TEAL),
                     );
                 });
 
@@ -7867,8 +8050,7 @@ impl StreamerApp {
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new("Features & Windows Integration")
-                            .font(FontId::proportional(16.5))
-                            .strong()
+                            .font(font_bold(15.5))
                             .color(ACCENT_PEARL),
                     );
                     ui.add_space(10.0);
@@ -7912,19 +8094,19 @@ impl StreamerApp {
                 .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Optional Platform API Keys").font(FontId::proportional(16.5)).strong().color(Color32::WHITE));
+                        ui.label(RichText::new("Optional Platform API Keys").font(font_bold(15.5)).color(ACCENT_PEARL));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             toggle_slider(ui, &mut self.show_api_secrets);
                             ui.add_space(6.0);
-                            ui.label(RichText::new("Show keys").color(TEXT_MUTED).size(13.0));
+                            ui.label(RichText::new("Show keys").color(TEXT_MUTED).size(12.5));
                         });
                     });
-                    ui.label(RichText::new("Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.").color(TEXT_MUTED).size(13.5));
+                    ui.label(RichText::new("Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.").color(TEXT_MUTED).size(13.0));
                     ui.add_space(10.0);
 
                     // YouTube Data API v3 Key row
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("YouTube Data API v3 Key").strong().color(TEXT_PRIMARY).size(14.0));
+                        ui.label(RichText::new("YouTube Data API v3 Key").font(font_semibold(13.5)).color(TEXT_PRIMARY));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let yt_busy = matches!(yt_check, CheckState::Checking);
                             let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).color(TEXT_PRIMARY).size(13.0))
@@ -8089,16 +8271,15 @@ impl StreamerApp {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new("App Updates & Version")
-                                    .font(FontId::proportional(16.5))
-                                    .strong()
+                                    .font(font_bold(15.5))
                                     .color(ACCENT_PEARL),
                             );
                             ui.label(
                                 RichText::new(format!(
                                     "Installed: v{APP_VERSION} (build {APP_BUILD_SHA})"
                                 ))
-                                .color(TEXT_MUTED)
-                                .size(13.5),
+                                .font(font_mono(12.5))
+                                .color(TEXT_MUTED),
                             );
                         });
 
@@ -8390,6 +8571,8 @@ impl winit::application::ApplicationHandler<AppUserEvent> for SoftwareWindowHost
                     None,
                 );
                 win32_window::cache_main_hwnd();
+                let init_size = win.inner_size();
+                win32_window::apply_rounded_corners(init_size.width, init_size.height, win.scale_factor());
                 if WINDOW_VISIBLE.load(Ordering::Relaxed) {
                     win.request_redraw();
                 } else {
@@ -8417,6 +8600,8 @@ impl winit::application::ApplicationHandler<AppUserEvent> for SoftwareWindowHost
                 if let Some(window) = &self.window {
                     window.set_visible(true);
                     window.set_minimized(false);
+                    let cur_size = window.inner_size();
+                    win32_window::apply_rounded_corners(cur_size.width, cur_size.height, window.scale_factor());
                     window.focus_window();
                     window.request_redraw();
                 }
@@ -8480,6 +8665,13 @@ impl winit::application::ApplicationHandler<AppUserEvent> for SoftwareWindowHost
                 self.render_frame(event_loop);
             }
             other => {
+                if let winit::event::WindowEvent::Resized(new_size) = &other {
+                    win32_window::apply_rounded_corners(
+                        new_size.width,
+                        new_size.height,
+                        window.scale_factor(),
+                    );
+                }
                 if matches!(other, winit::event::WindowEvent::Focused(true)) {
                     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
                 }

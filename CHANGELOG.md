@@ -3,11 +3,6 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
-## [1.2.8] - 2026-11-25
-
-### Changed
-- **Updated README Safety & Bannability Section:** Added a clear **Is This Bannable?** section and disclaimer in `README.md` emphasizing that Valorant Streamer Radar is strictly post-match, non-intrusive, and not a cheat or stream-sniping tool while keeping the standard Riot third-party API notice.
-
 ## [1.2.7] - 2026-11-25
 
 ### Changed

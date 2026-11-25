@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.8%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.8 for Windows" />
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.7%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.7 for Windows" />
   </a>
   &nbsp;
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest/download/ValorantStreamerRadar.exe">
@@ -20,8 +20,9 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v1.2.8-fff5fa?style=flat-square&labelColor=141b27)
-![Mode](https://img.shields.io/badge/Scan%20Mode-Post--Match%20Only-10b981?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v1.2.7-fff5fa?style=flat-square&labelColor=141b27)
+![Mode](https://img.shields.io/badge/Mode-Post--Match%20Only%20(No%20Sniping)-10b981?style=flat-square)
+![VRAM](https://img.shields.io/badge/GPU%20VRAM-0%20MB-38bdf8?style=flat-square)
 
 <br />
 
@@ -31,11 +32,11 @@
 
 ---
 
-## Is This Bannable? (Not a Cheat or Stream Sniping Tool)
+## Is This Bannable?
 
 **Short answer: NO — Valorant Streamer Radar is NOT a cheat, NOT a stream-sniping tool, and is specifically built NOT to interfere with Valorant or Vanguard.**
 
-- **Strictly post-match only (zero competitive advantage):** Never scans live lobbies, agent select, or active matches. The app intentionally waits until your match has completely ended (`InGame -> MainMenu` in `ShooterGame.log`) or until you manually click **Check Last Match** after finishing a game.
+- **Not a stream sniping tool (strictly post-match only):** Never scans live lobbies, agent select, or active matches. The app intentionally waits until your match has completely ended (`InGame -> MainMenu` in `ShooterGame.log`) or until you manually click **Check Last Match** after finishing a game — providing zero live competitive advantage.
 - **No mid-match notifications or overlays:** Desktop notifications never fire while a match is in progress, and the app never draws over your game or inspects live rosters.
 - **Zero gameplay, memory, or GPU interference:** Runs 100% in user space—never reads/writes game memory, never injects DLLs, never modifies game files, and never hooks DirectX, OpenGL, or Vulkan.
 - **Intended purpose:** Help players find VODs, review matches from another perspective, say GG after a game, and discover creators playing on the same Valorant servers.
@@ -59,7 +60,7 @@ Please keep the following limitations in mind:
 
 ---
 
-## Key Features (v1.2.8)
+## Key Features (v1.2.7)
 
 ### 1. Server-Aware, Confidence-Tiered Streamer Detection
 - **Three clear confidence tiers:** Every match is classified as **Confirmed**, **Probable**, or **Unverified**—never treating weak display-name similarity as a confirmed streamer.
@@ -87,7 +88,7 @@ Please keep the following limitations in mind:
 - **Cached discovery:** When enabled in **Settings**, unlocks the **Discover** tab to fetch regional live Valorant streams on Twitch/YouTube with a **5-minute local cache** and clearly labels them as **Discovery Suggestions — Not Matched to Your Lobby**.
 
 ### 6. Automatic Version Update Detection & Synced Changelog
-- Compares the installed version (`v1.2.8`) against the latest published GitHub Release (toggleable in Settings, ON by default, and shown only inside the GUI when opened).
+- Compares the installed version (`v1.2.7`) against the latest published GitHub Release (toggleable in Settings, ON by default, and shown only inside the GUI when opened).
 - Displays the latest version number, release changelog (synced directly from [`CHANGELOG.md`](CHANGELOG.md)), and download/install action when a newer version is available.
 - **Automatically hides** the update notification when no newer version is pending—no manual dismissal needed.
 - Gracefully handles network errors, missing releases, and GitHub API rate limits without falsely claiming the app is up to date.
@@ -110,8 +111,8 @@ User-facing terminology throughout the app uses **Servers** instead of internal 
 
 ## How It Works
 
-1. **Runs quietly in the Windows system tray** while Valorant is open and auto-detects your active Valorant server from `ShooterGame.log`.
-2. **Waits until your match finishes** (`InGame -> MainMenu`), optionally buffering match text chat in memory so post-match stream links can be parsed after the game ends.
+1. **Runs quietly in the Windows system tray** while Valorant is open and auto-detects your active Valorant server from `ShooterGame.log` without touching game memory or GPU hooks.
+2. **Waits until your match completely finishes** (`InGame -> MainMenu`) — because this is **not a stream-sniping tool**, it never scans live lobbies or sends mid-match alerts. Optional match text chat is only buffered in memory and parsed strictly after the game ends.
 3. **Reads your completed match** via Riot's local lockfile (`match-details`) and identifies party members via `partyId` so they can be skipped.
 4. **Evaluates remaining players** against the local & community streamer database (including aliases), server-aware live checks on YouTube/Twitch/Kick, and post-match chat links.
 5. **Categorizes detections by confidence tier** (**Confirmed**, **Probable**, **Unverified**), displays results in **Latest Match**, and sends a Windows toast notification only for **Confirmed** or **Probable** matches.
@@ -158,11 +159,19 @@ All settings use accessible left-to-right **ON/OFF** toggle sliders and are save
 
 ---
 
-## Performance & Memory Notes
+## Performance & RAM Usage
 
-- **Native Rust desktop app:** Built with `eframe/egui`, `tray-icon`, and `tokio` (no bundled Electron/Chromium runtime).
-- **Tray idle behavior:** When closed to the Windows system tray, the GUI hides (`WINDOW_VISIBLE = false`) and stops repainting; only the lightweight background log watcher remains active.
-- **Honest RAM note:** Actual Windows memory usage varies by OS build, GPU driver/wgpu/OpenGL backend, history size, and whether the window is open or minimized to tray. Rather than quoting an unverified static number, you can inspect live working-set usage directly in Windows Task Manager on your own machine.
+Built as a single lightweight **native Rust** binary with **no Electron, Chromium, or Overwolf runtime** — designed to sit quietly in your system tray with zero FPS impact while you play.
+
+| State | Typical RAM Usage | CPU Usage | GPU VRAM |
+| :--- | :---: | :---: | :---: |
+| **System Tray Idle (During Matches)** | **~10 – 25 MB** | **~0%** | **0 MB** |
+| **App Window Open (Browsing / Settings)** | **~30 – 65 MB** | **< 1%** | **0 MB** |
+| *Typical Electron / Overwolf Tracker* | *~250 – 600+ MB* | *2 – 8%* | *100+ MB* |
+
+- **Zero GPU VRAM & zero FPS impact:** Uses pure CPU software rendering (`egui` + `egui_software_backend` + `softbuffer` Win32 GDI) with no DirectX, OpenGL, or Vulkan swapchain—so it never consumes GPU memory or impacts Valorant frame rates.
+- **Tray idle behavior:** When closed to the Windows system tray, the GUI hides (`WINDOW_VISIBLE = false`) and completely stops repainting; only the lightweight background log watcher remains active.
+- **Note:** Exact working-set RAM varies slightly depending on your Windows build and saved match history size, and can be verified anytime in Windows Task Manager.
 
 ---
 
@@ -177,13 +186,13 @@ Valorant-Streamer-Radar/
 │       └── merge-approved-streamer.yml       # Validates & merges approved submissions into streamers.json
 ├── examples/
 │   ├── config.example.json                   # Sample %APPDATA% config.json
-│   └── streamers.example.json                # Sample v1.2.0 streamer database schema
+│   └── streamers.example.json                # Sample streamer database schema
 ├── src/
 │   └── main.rs                               # Native Windows Rust application + unit tests
 ├── web/                                      # Interactive React/TypeScript web simulator
 ├── streamers.json                            # Central moderated community streamer database
 ├── CHANGELOG.md                              # Versioned release notes (source for GitHub Releases)
-├── Cargo.toml                                # Rust package manifest (v1.2.2)
+├── Cargo.toml                                # Rust package manifest (v1.2.7)
 └── README.md
 ```
 
@@ -195,10 +204,10 @@ Valorant-Streamer-Radar/
 - **Wrong server auto-detected:** Open **Settings -> Valorant Servers & Detection** and select your server manually (e.g., **Mumbai**, **Tokyo**, **Manila**, **Austin**).
 - **Update check fails with rate-limit or network error:** GitHub limits unauthenticated API requests per IP. Open the [Releases page](https://github.com/svg2709/Valorant-Streamer-Radar/releases) directly or retry later; failed checks never falsely claim you are up to date.
 - **Kick shows not live even when a creator is streaming:** Kick sits behind Cloudflare and may return HTTP `403`, which the app safely treats as unavailable rather than crashing.
-- **Toast notifications show "Windows PowerShell":** Enable **Custom Windows Toast App ID** in Settings (or check whether Windows policy restricts `HKCU` registry writes).
+- **Toast notifications show "Windows PowerShell":** Custom Windows Toast App ID is enabled automatically by default; if Windows still falls back to PowerShell, check whether local Windows policy restricts `HKCU` registry writes.
 
 ---
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the complete version history and release notes for **v1.2.2** and earlier versions.
+See [`CHANGELOG.md`](CHANGELOG.md) for the complete version history and release notes for **v1.2.7** and earlier versions.

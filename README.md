@@ -161,13 +161,13 @@ All settings use accessible left-to-right **ON/OFF** toggle sliders and are save
 
 ## Performance & RAM Usage
 
-Built as a single lightweight **native Rust** binary with **no Electron, Chromium, or Overwolf runtime** — designed to sit quietly in your system tray with zero FPS impact while you play.
+Built as a single lightweight **native Rust** binary with **no Electron or Chromium runtime** — designed to sit quietly in your system tray with zero FPS impact while you play.
 
 | State | Typical RAM Usage | CPU Usage | GPU VRAM |
 | :--- | :---: | :---: | :---: |
 | **System Tray Idle (During Matches)** | **~10 – 25 MB** | **~0%** | **0 MB** |
 | **App Window Open (Browsing / Settings)** | **~30 – 65 MB** | **< 1%** | **0 MB** |
-| *Typical Electron / Overwolf Tracker* | *~250 – 600+ MB* | *2 – 8%* | *100+ MB* |
+| *Typical Electron / Browser-Based Tracker* | *~250 – 600+ MB* | *2 – 8%* | *100+ MB* |
 
 - **Zero GPU VRAM & zero FPS impact:** Uses pure CPU software rendering (`egui` + `egui_software_backend` + `softbuffer` Win32 GDI) with no DirectX, OpenGL, or Vulkan swapchain—so it never consumes GPU memory or impacts Valorant frame rates.
 - **Tray idle behavior:** When closed to the Windows system tray, the GUI hides (`WINDOW_VISIBLE = false`) and completely stops repainting; only the lightweight background log watcher remains active.

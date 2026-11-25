@@ -428,6 +428,12 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
     }
   }, [activeTab, config.enable_recommendations, recsLastFetchedMs, handleRefreshRecs]);
 
+  useEffect(() => {
+    if (!config.enable_recommendations && activeTab === 'discover') {
+      onChangeTab('history');
+    }
+  }, [config.enable_recommendations, activeTab, onChangeTab]);
+
   const handleTestYoutubeKey = () => {
     const key = draft.youtube_api_key.trim();
     if (!key) {
@@ -829,12 +835,16 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
       meta: String(customDirectory.length + communityDirectory.length),
       icon: BookOpen,
     },
-    {
-      key: 'discover',
-      label: 'Discover',
-      meta: config.enable_recommendations ? 'Live' : 'Off',
-      icon: Compass,
-    },
+    ...(config.enable_recommendations
+      ? [
+          {
+            key: 'discover' as DesktopTab,
+            label: 'Discover',
+            meta: 'Live',
+            icon: Compass,
+          },
+        ]
+      : []),
     { key: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
@@ -1616,7 +1626,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
           )}
 
           {/* TAB 3: DISCOVER */}
-          {activeTab === 'discover' && (
+          {activeTab === 'discover' && config.enable_recommendations && (
             <div>
               {!config.enable_recommendations ? (
                 <div className="mx-auto my-8 max-w-xl rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-5">
@@ -1705,7 +1715,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       </button>
                       <ToggleSwitch
                         checked={true}
-                        onChange={(next) => onToggleRecommendationsImmediate(next)}
+                        onChange={(next) => {
+                          onToggleRecommendationsImmediate(next);
+                          if (!next) onChangeTab('history');
+                        }}
                         ariaLabel="Toggle Live Streamer Recommendations"
                       />
                     </div>
@@ -1837,7 +1850,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       setDraft({ ...draft, enable_recommendations: next })
                     }
                     title="Live Streamer Recommendations"
-                    description="OFF by default to conserve bandwidth. Unlocks cached regional suggestions in Discover."
+                    description="OFF by default to conserve bandwidth. Turn ON to show the Discover tab with cached regional suggestions."
                   />
                   <ToggleSettingRow
                     checked={draft.capture_in_game_chat}

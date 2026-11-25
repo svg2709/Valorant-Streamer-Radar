@@ -6040,6 +6040,9 @@ impl StreamerApp {
                 s.recommendations_cache = None;
             }
         }
+        if !self.cfg_draft.enable_recommendations && self.active_tab == ActiveTab::Discover {
+            self.active_tab = ActiveTab::History;
+        }
         self.settings_error = None;
         set_toast(&self.state, "Settings saved to config.json!");
     }
@@ -6124,6 +6127,9 @@ impl StreamerApp {
         if toast.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
+        if !recs_enabled && self.active_tab == ActiveTab::Discover {
+            self.active_tab = ActiveTab::History;
+        }
 
         // Thin 2px Pink-to-Pearl top brand accent hairline
         egui::TopBottomPanel::top("accent_strip")
@@ -6204,16 +6210,14 @@ impl StreamerApp {
             .show(ctx, |ui| {
                 // Navigation items
                 let dir_total = local_dir.len() + remote_dir.len();
-                let nav_items: [(ActiveTab, &str, String); 4] = [
+                let mut nav_items: Vec<(ActiveTab, &str, String)> = vec![
                     (ActiveTab::History, "History", history.len().to_string()),
                     (ActiveTab::Directory, "Directory", dir_total.to_string()),
-                    (
-                        ActiveTab::Discover,
-                        "Discover",
-                        if recs_enabled { "Live".to_string() } else { "Off".to_string() },
-                    ),
-                    (ActiveTab::Settings, "Settings", String::new()),
                 ];
+                if recs_enabled {
+                    nav_items.push((ActiveTab::Discover, "Discover", "Live".to_string()));
+                }
+                nav_items.push((ActiveTab::Settings, "Settings", String::new()));
 
                 for (tab, label, meta) in nav_items {
                     let selected = self.active_tab == tab;
@@ -7609,11 +7613,14 @@ impl StreamerApp {
                 let mut keep_on = true;
                 if toggle_slider(ui, &mut keep_on).changed() && !keep_on {
                     self.cfg_draft.enable_recommendations = false;
-                    let mut s = lock(&self.state);
-                    s.config.enable_recommendations = false;
-                    s.recommendations = RecommendationsState::Idle;
-                    s.recommendations_cache = None;
-                    save_json("config.json", &s.config);
+                    {
+                        let mut s = lock(&self.state);
+                        s.config.enable_recommendations = false;
+                        s.recommendations = RecommendationsState::Idle;
+                        s.recommendations_cache = None;
+                        save_json("config.json", &s.config);
+                    }
+                    self.active_tab = ActiveTab::History;
                     return;
                 }
                 ui.label(RichText::new("ON").size(12.0).strong().color(ACCENT_BLUSH));
@@ -7877,7 +7884,7 @@ impl StreamerApp {
                         ui,
                         &mut self.cfg_draft.enable_recommendations,
                         "Live Streamer Recommendations (Twitch & YouTube)",
-                        "OFF by default to save internet bandwidth. Turn ON to browse optional regional Valorant streams under the Discover tab.",
+                        "OFF by default to save internet bandwidth. Turn ON to show the Discover tab and browse optional regional Valorant streams.",
                     );
                     ui.add_space(8.0);
                     toggle_row(

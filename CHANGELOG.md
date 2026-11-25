@@ -3,6 +3,11 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.7] - 2026-11-25
+
+### Changed
+- **Auto-Hide Discover Tab When Recommendations Are Off:** The **Discover** sidebar tab is now hidden whenever **Live Streamer Recommendations** is turned off in **Settings** (its default state), and automatically appears as soon as recommendations are enabled. Turning recommendations off also cleanly returns to the **History** tab.
+
 ## [1.2.6] - 2026-11-25
 
 ### Changed

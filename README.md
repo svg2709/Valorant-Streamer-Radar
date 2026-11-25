@@ -4,6 +4,8 @@
 
 **Discover whether players from your last finished Valorant match were streaming live on YouTube, Twitch, or Kick — strictly post-match, server-aware, and confidence-tiered.**
 
+<sub><b>Zero in-game FPS hit</b> &middot; ~10–25 MB RAM in tray &middot; ~0% CPU &middot; 0 MB GPU VRAM (native Rust, no Electron)</sub>
+
 <p align="center">
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
     <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.7%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.7 for Windows" />

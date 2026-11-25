@@ -236,7 +236,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>(() => {
+    const first = history[0];
+    return first ? { [`${first.match_id}-${first.riot_id}-${first.platform}`]: true } : {};
+  });
   const filterPopoverRef = useRef<HTMLDivElement | null>(null);
 
   // Directory state

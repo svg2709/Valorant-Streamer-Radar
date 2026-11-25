@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   Bell,
+  Camera,
   Monitor,
   Settings,
 } from 'lucide-react';
@@ -41,9 +42,9 @@ import { WinRtToast } from './components/WinRtToast';
 
 const STORAGE_KEYS = {
   config: 'vsr_v120_config',
-  history: 'vsr_v120_history',
-  customDir: 'vsr_v120_custom_dir',
-  lastMatch: 'vsr_v120_last_match',
+  history: 'vsr_v127_na_history',
+  customDir: 'vsr_v127_na_custom_dir',
+  lastMatch: 'vsr_v127_na_last_match',
 };
 
 function loadStored<T>(key: string, fallback: T): T {
@@ -90,6 +91,7 @@ export default function App() {
   const [studioView, setStudioView] = useState<StudioView>('simulator');
   const [desktopTab, setDesktopTab] = useState<DesktopTab>('history');
   const [windowVisible, setWindowVisible] = useState<boolean>(true);
+  const [screenshotMode, setScreenshotMode] = useState<boolean>(false);
 
   const [config, setConfig] = useState<AppConfig>(loadConfigWithMigration);
   const [history, setHistory] = useState<StreamerEntry[]>(() =>
@@ -107,8 +109,8 @@ export default function App() {
   const [inMatch, setInMatch] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isSyncingDirectory, setIsSyncingDirectory] = useState<boolean>(false);
-  const [detectedRegion, setDetectedRegion] = useState<ServerRegionCode>('ap-mumbai');
-  const [status, setStatus] = useState<string>('Idle | Monitoring ShooterGame.log');
+  const [detectedRegion, setDetectedRegion] = useState<ServerRegionCode>('na-us-east');
+  const [status, setStatus] = useState<string>('Found 2 live stream(s) in Competitive on Ascent!');
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>(SIM_SCENARIOS[0].id);
   const [lastScannedMatch, setLastScannedMatch] = useState<LastMatchSummary | null>(() =>
     loadStored<LastMatchSummary | null>(STORAGE_KEYS.lastMatch, {
@@ -120,7 +122,7 @@ export default function App() {
       party_skipped: 2,
       streamers_found: INITIAL_HISTORY.filter((h) => h.match_id === INITIAL_HISTORY[0]?.match_id).length,
       scanned_at: INITIAL_HISTORY[0]?.timestamp ?? formatRadarTimestamp(new Date()),
-      server_name: getServerRegionInfo('ap-mumbai').label,
+      server_name: getServerRegionInfo('na-us-east').label,
     })
   );
 
@@ -141,7 +143,7 @@ export default function App() {
       id: 'boot-2',
       time: nowHms(),
       category: 'server',
-      message: 'ShooterGame.log server detected: aresriot.aws-ap-south-1-mumbai-1 -> AP / Mumbai (India).',
+      message: 'ShooterGame.log server detected: aresriot.aws-us-east-1-ashburn-1 -> NA / US East (Virginia / Georgia / Illinois).',
     },
   ]);
 
@@ -535,11 +537,11 @@ export default function App() {
     const sample =
       history.find((h) => resolveEntryTier(h) !== 'Unverified') ?? {
         match_id: 'preview-toast',
-        riot_id: 'RohanYT#IND',
+        riot_id: 'TylerFPS#NA1',
         platform: 'YouTube' as Platform,
-        channel: 'Rohan Gaming',
-        title: 'ROAD TO IMMORTAL 3 MUMBAI SERVER | LIVE RANKED GRIND',
-        url: 'https://www.youtube.com/watch?v=val_rohan_live_01',
+        channel: 'TylerFPS',
+        title: 'ROAD TO IMMORTAL 3 NA EAST | LIVE RANKED GRIND',
+        url: 'https://www.youtube.com/watch?v=val_tyler_live_01',
         timestamp: formatRadarTimestamp(new Date()),
         team_relation: 'Enemy' as const,
         map_name: 'Ascent',
@@ -554,6 +556,91 @@ export default function App() {
     simulator: 'Dashboard',
     lab: 'Match & Tray Simulator',
   };
+
+  if (screenshotMode) {
+    return (
+      <div className="relative flex min-h-screen w-full items-center justify-center bg-[#060609] p-6 sm:p-10">
+        <div className="w-full max-w-[1120px]">
+          <DesktopWindow
+            visible={windowVisible}
+            activeTab={desktopTab}
+            onChangeTab={setDesktopTab}
+            status={status}
+            isScanning={isScanning}
+            isSyncingDirectory={isSyncingDirectory}
+            valorantRunning={valorantRunning}
+            detectedRegion={detectedRegion}
+            config={config}
+            history={history}
+            lastScannedMatch={lastScannedMatch}
+            customDirectory={customDirectory}
+            communityDirectory={communityDirectory}
+            toastMessage={inlineToast}
+            onTriggerManualScan={() => runSimulatedScan('Manual')}
+            onOpenAddModal={(entry) => {
+              setPrefillRec(null);
+              setEditingEntry(entry ?? null);
+              setModalOpen(true);
+            }}
+            onOpenAddFromRecommendation={(rec) => {
+              setEditingEntry(null);
+              setPrefillRec(rec);
+              setModalOpen(true);
+            }}
+            onDeleteCustomEntry={handleDeleteCustomEntry}
+            onSyncDirectory={handleSyncDirectory}
+            onClearHistory={() => {
+              setHistory([]);
+              showInlineToast('Cleared streamer_history.json');
+            }}
+            onCopyLink={handleCopyLink}
+            onWatchStream={handleWatchStream}
+            onSaveConfig={handleSaveConfig}
+            onToggleRecommendationsImmediate={handleToggleRecommendationsImmediate}
+            onHideToTray={() => {
+              setWindowVisible(false);
+              pushLog('log', 'Window close intercepted -> hidden to system tray.');
+            }}
+            onRestoreFromTray={() => setWindowVisible(true)}
+          />
+        </div>
+
+        {/* Unobtrusive outside-frame toggle to return to full simulator lab */}
+        <button
+          type="button"
+          onClick={() => setScreenshotMode(false)}
+          className="fixed right-3 bottom-3 inline-flex items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#0B0B0E]/85 px-2.5 py-1.5 text-[11px] font-medium text-[#8E95A5] opacity-40 transition-opacity hover:border-[#FF5CA8]/50 hover:text-[#FFF5FA] hover:opacity-100"
+          title="Return to full Match & Tray simulator controls"
+        >
+          <Monitor className="h-3 w-3" />
+          Exit Screenshot View
+        </button>
+
+        <StreamerModal
+          isOpen={modalOpen}
+          editingEntry={editingEntry}
+          prefillRecommendation={prefillRec}
+          defaultServerRegion={effectiveRegion.code}
+          onClose={() => {
+            setModalOpen(false);
+            setEditingEntry(null);
+            setPrefillRec(null);
+          }}
+          onSave={handleSaveStreamer}
+        />
+
+        <WinRtToast
+          entry={winRtToastEntry}
+          useCustomAppId={true}
+          onDismiss={() => setWinRtToastEntry(null)}
+          onOpenStream={(entry) => {
+            handleWatchStream(entry);
+            setWinRtToastEntry(null);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-[#000000] text-[#F4F4F6] lg:flex-row">
@@ -665,6 +752,18 @@ export default function App() {
           </div>
 
           <div className="flex shrink-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setStudioView('simulator');
+                setWindowVisible(true);
+                setScreenshotMode(true);
+              }}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#0B0B0E] px-3.5 py-2 text-xs font-semibold text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/50 hover:bg-[#121216] whitespace-nowrap"
+            >
+              <Camera className="h-3.5 w-3.5 text-[#FFA6D2]" />
+              Screenshot View
+            </button>
             <button
               type="button"
               onClick={handlePreviewToast}

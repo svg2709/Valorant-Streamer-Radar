@@ -4997,14 +4997,14 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
         .fill(BG_DARK)
         .stroke(Stroke::new(1.0, if *on { ACCENT_PINK.linear_multiply(0.35) } else { CARD_BORDER }))
         .rounding(Rounding::same(6.0))
-        .inner_margin(Margin::symmetric(12.0, 9.0))
+        .inner_margin(Margin::symmetric(14.0, 10.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.set_max_width((ui.available_width() - 96.0).max(160.0));
-                    ui.label(RichText::new(title).strong().color(TEXT_PRIMARY).size(12.5));
+                    ui.set_max_width((ui.available_width() - 104.0).max(180.0));
+                    ui.label(RichText::new(title).strong().color(TEXT_PRIMARY).size(14.0));
                     if !subtitle.is_empty() {
-                        ui.label(RichText::new(subtitle).color(TEXT_MUTED).size(11.0));
+                        ui.label(RichText::new(subtitle).color(TEXT_MUTED).size(12.5));
                     }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -5014,7 +5014,7 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
                     ui.add_space(6.0);
                     let state_text = if *on { "ON" } else { "OFF" };
                     let state_col = if *on { ACCENT_BLUSH } else { TEXT_MUTED };
-                    ui.label(RichText::new(state_text).strong().color(state_col).size(10.5));
+                    ui.label(RichText::new(state_text).strong().color(state_col).size(11.5));
                 });
             });
         });
@@ -5032,15 +5032,15 @@ fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
     let l = egui::pos2(rect.left() + w * 0.24, rect.top() + h * 0.28);
     let b = egui::pos2(rect.center().x, rect.bottom() - h * 0.22);
     let r = egui::pos2(rect.right() - w * 0.24, rect.top() + h * 0.28);
-    let stroke = Stroke::new(1.8, ACCENT_PEARL);
+    let stroke = Stroke::new(1.9, ACCENT_PEARL);
     p.line_segment([l, b], stroke);
     p.line_segment([b, r], stroke);
-    p.circle_filled(egui::pos2(rect.center().x, rect.top() + h * 0.28), 1.4, ACCENT_PINK);
+    p.circle_filled(egui::pos2(rect.center().x, rect.top() + h * 0.28), 1.5, ACCENT_PINK);
 }
 
 /// Custom frameless title bar Minimize button (vector-drawn dash).
 fn paint_minimize_button(ui: &mut egui::Ui) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(38.0, 34.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(42.0, 38.0), egui::Sense::click());
     let hovered = resp.hovered();
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -5049,15 +5049,15 @@ fn paint_minimize_button(ui: &mut egui::Ui) -> egui::Response {
     let col = if hovered { TEXT_PRIMARY } else { TEXT_MUTED };
     let cy = rect.center().y + 1.0;
     ui.painter().line_segment(
-        [egui::pos2(rect.center().x - 5.0, cy), egui::pos2(rect.center().x + 5.0, cy)],
-        Stroke::new(1.4, col),
+        [egui::pos2(rect.center().x - 5.5, cy), egui::pos2(rect.center().x + 5.5, cy)],
+        Stroke::new(1.5, col),
     );
     resp.on_hover_text("Minimize")
 }
 
 /// Custom frameless title bar Close button (hides window to system tray).
 fn paint_close_button(ui: &mut egui::Ui) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(38.0, 34.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(42.0, 38.0), egui::Sense::click());
     let hovered = resp.hovered();
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -5065,8 +5065,8 @@ fn paint_close_button(ui: &mut egui::Ui) -> egui::Response {
     }
     let col = if hovered { Color32::WHITE } else { TEXT_MUTED };
     let c = rect.center();
-    let d = 4.5;
-    let stroke = Stroke::new(1.4, col);
+    let d = 5.0;
+    let stroke = Stroke::new(1.5, col);
     ui.painter().line_segment([egui::pos2(c.x - d, c.y - d), egui::pos2(c.x + d, c.y + d)], stroke);
     ui.painter().line_segment([egui::pos2(c.x + d, c.y - d), egui::pos2(c.x - d, c.y + d)], stroke);
     resp.on_hover_text("Hide to system tray")
@@ -5319,6 +5319,15 @@ impl StreamerApp {
         visuals.selection.bg_fill = ACCENT_PINK;
         visuals.selection.stroke = Stroke::new(1.0, ACCENT_PEARL);
         cc.egui_ctx.set_visuals(visuals);
+
+        // Increase default typography scale for crisp readability on desktop monitors
+        cc.egui_ctx.style_mut(|style| {
+            style.text_styles.insert(egui::TextStyle::Small, FontId::proportional(12.5));
+            style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(14.5));
+            style.text_styles.insert(egui::TextStyle::Button, FontId::proportional(14.0));
+            style.text_styles.insert(egui::TextStyle::Monospace, FontId::monospace(13.5));
+            style.text_styles.insert(egui::TextStyle::Heading, FontId::proportional(20.0));
+        });
 
         let initial_cfg = lock(&state).config.clone();
 
@@ -5651,9 +5660,9 @@ impl eframe::App for StreamerApp {
                 paint_gradient_strip(ui, 2.0);
             });
 
-        // Custom 34px AMOLED Black draggable title bar (Minimize & Close-to-tray only)
+        // Custom 38px AMOLED Black draggable title bar (Minimize & Close-to-tray only)
         egui::TopBottomPanel::top("custom_titlebar")
-            .exact_height(34.0)
+            .exact_height(38.0)
             .frame(
                 Frame::none()
                     .fill(BG_DARK)
@@ -5663,7 +5672,7 @@ impl eframe::App for StreamerApp {
                 let bar_rect = ui.max_rect();
                 let drag_rect = egui::Rect::from_min_max(
                     bar_rect.min,
-                    egui::pos2((bar_rect.right() - 78.0).max(bar_rect.left()), bar_rect.bottom()),
+                    egui::pos2((bar_rect.right() - 86.0).max(bar_rect.left()), bar_rect.bottom()),
                 );
                 let drag_resp = ui.interact(drag_rect, egui::Id::new("custom_titlebar_drag"), egui::Sense::drag());
                 if drag_resp.drag_started_by(egui::PointerButton::Primary) {
@@ -5672,26 +5681,26 @@ impl eframe::App for StreamerApp {
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.add_space(12.0);
+                    ui.add_space(14.0);
                     ui.horizontal_centered(|ui| {
-                        ui.spacing_mut().item_spacing.x = 7.0;
-                        paint_brand_mark(ui, 16.0);
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        paint_brand_mark(ui, 18.0);
                         ui.label(
                             RichText::new("VALORANT")
-                                .font(FontId::proportional(13.0))
+                                .font(FontId::proportional(14.5))
                                 .strong()
                                 .color(ACCENT_PINK),
                         );
                         ui.label(
                             RichText::new("RADAR")
-                                .font(FontId::proportional(13.0))
+                                .font(FontId::proportional(14.5))
                                 .strong()
                                 .color(ACCENT_PEARL),
                         );
                         if let Some(msg) = &toast {
                             ui.add_space(10.0);
-                            ui.label(RichText::new("/").color(CARD_BORDER).size(11.5));
-                            ui.label(RichText::new(short(msg, 56)).color(ACCENT_BLUSH).size(11.5));
+                            ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
+                            ui.label(RichText::new(short(msg, 64)).color(ACCENT_BLUSH).size(12.5));
                         }
                     });
 
@@ -5709,14 +5718,14 @@ impl eframe::App for StreamerApp {
                 });
             });
 
-        // Left Sidebar Navigation Rail (208px AMOLED Black)
+        // Left Sidebar Navigation Rail (236px AMOLED Black)
         egui::SidePanel::left("nav_sidebar")
-            .exact_width(208.0)
+            .exact_width(236.0)
             .resizable(false)
             .frame(
                 Frame::none()
                     .fill(BG_DARK)
-                    .inner_margin(Margin::symmetric(12.0, 14.0))
+                    .inner_margin(Margin::symmetric(14.0, 16.0))
                     .stroke(Stroke::new(1.0, CARD_BORDER)),
             )
             .show(ctx, |ui| {
@@ -5735,7 +5744,7 @@ impl eframe::App for StreamerApp {
 
                 for (tab, label, meta) in nav_items {
                     let selected = self.active_tab == tab;
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 38.0), egui::Sense::click());
                     if resp.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
@@ -5759,16 +5768,16 @@ impl eframe::App for StreamerApp {
                         egui::pos2(rect.left() + 12.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
-                        FontId::proportional(13.0),
+                        FontId::proportional(14.5),
                         text_col,
                     );
                     if !meta.is_empty() {
-                        let meta_col = if selected { ACCENT_BLUSH } else { Color32::from_rgb(100, 108, 124) };
+                        let meta_col = if selected { ACCENT_BLUSH } else { Color32::from_rgb(108, 116, 134) };
                         ui.painter().text(
                             egui::pos2(rect.right() - 10.0, rect.center().y),
                             egui::Align2::RIGHT_CENTER,
                             meta,
-                            FontId::proportional(11.0),
+                            FontId::proportional(12.5),
                             meta_col,
                         );
                     }
@@ -5784,14 +5793,14 @@ impl eframe::App for StreamerApp {
                         }
                         self.active_tab = tab;
                     }
-                    ui.add_space(4.0);
+                    ui.add_space(5.0);
                 }
 
                 // Bottom-anchored actions, Riot status, and update check
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     // Version & update trigger
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("v{APP_VERSION}")).size(11.0).color(TEXT_MUTED));
+                        ui.label(RichText::new(format!("v{APP_VERSION}")).size(12.5).color(TEXT_MUTED));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let upd_busy = matches!(
                                 update_state,
@@ -5807,7 +5816,7 @@ impl eframe::App for StreamerApp {
                             };
                             let upd_btn = egui::Button::new(
                                 RichText::new(upd_lbl)
-                                    .size(11.0)
+                                    .size(12.5)
                                     .color(if upd_avail { ACCENT_PINK } else { TEXT_MUTED }),
                             )
                             .fill(Color32::TRANSPARENT)
@@ -5824,11 +5833,11 @@ impl eframe::App for StreamerApp {
                     ui.add_space(8.0);
 
                     // Quiet secondary action: + Add Streamer
-                    let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(TEXT_PRIMARY).size(12.5))
+                    let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(TEXT_PRIMARY).size(13.5))
                         .fill(BTN_SECONDARY)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
                         .rounding(Rounding::same(6.0))
-                        .min_size(Vec2::new(ui.available_width(), 32.0));
+                        .min_size(Vec2::new(ui.available_width(), 35.0));
                     if ui.add(add_btn).clicked() {
                         self.open_add_modal(None);
                     }
@@ -5837,7 +5846,7 @@ impl eframe::App for StreamerApp {
 
                     // Primary focal CTA: Check Last Match
                     let scan_lbl = if is_scanning { "Scanning..." } else { "Check Last Match" };
-                    if gradient_button(ui, scan_lbl, Vec2::new(ui.available_width(), 34.0), !is_scanning, 12.5).clicked() {
+                    if gradient_button(ui, scan_lbl, Vec2::new(ui.available_width(), 38.0), !is_scanning, 13.5).clicked() {
                         let _ = self.manual_scan_tx.send(ScanTrigger::Manual);
                     }
 
@@ -5848,7 +5857,7 @@ impl eframe::App for StreamerApp {
                         .fill(CARD_BG)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
                         .rounding(Rounding::same(6.0))
-                        .inner_margin(Margin::symmetric(10.0, 8.0))
+                        .inner_margin(Margin::symmetric(11.0, 9.0))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             let (dot, glowing, riot_text) = match riot_status {
@@ -5858,17 +5867,17 @@ impl eframe::App for StreamerApp {
                             };
                             ui.horizontal(|ui| {
                                 paint_status_dot(ui, dot, glowing);
-                                ui.label(RichText::new(riot_text).size(11.5).strong().color(TEXT_PRIMARY));
+                                ui.label(RichText::new(riot_text).size(13.0).strong().color(TEXT_PRIMARY));
                             });
-                            ui.add_space(2.0);
+                            ui.add_space(3.0);
                             ui.label(
                                 RichText::new(format!("Server: {}", active_region.short_label))
-                                    .size(11.0)
+                                    .size(12.5)
                                     .color(ALLY_TEAL),
                             );
                             ui.label(
-                                RichText::new(short(&status, 30))
-                                    .size(10.5)
+                                RichText::new(short(&status, 34))
+                                    .size(12.0)
                                     .color(TEXT_MUTED),
                             )
                             .on_hover_text(status.as_str());
@@ -5893,15 +5902,15 @@ impl eframe::App for StreamerApp {
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .default_width(480.0)
-                .min_width(480.0)
-                .max_width(480.0)
+                .default_width(540.0)
+                .min_width(540.0)
+                .max_width(540.0)
                 .frame(
                     Frame::none()
                         .fill(CARD_BG)
                         .stroke(Stroke::new(1.5, ACCENT_PINK))
                         .rounding(Rounding::same(10.0))
-                        .inner_margin(Margin::same(20.0)),
+                        .inner_margin(Margin::same(22.0)),
                 )
                 .show(ctx, |ui| {
                     ui.label(
@@ -6290,49 +6299,49 @@ impl StreamerApp {
                 },
             ))
             .rounding(Rounding::same(8.0))
-            .inner_margin(Margin::symmetric(14.0, 12.0))
+            .inner_margin(Margin::symmetric(16.0, 14.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.set_max_width((ui.available_width() - 168.0).max(160.0));
+                        ui.set_max_width((ui.available_width() - 188.0).max(180.0));
                         // Line 1: Riot ID + Channel (clean typography, zero pill walls)
                         ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 RichText::new(&entry.riot_id)
-                                    .font(FontId::proportional(15.0))
+                                    .font(FontId::proportional(16.5))
                                     .strong()
                                     .color(ACCENT_PEARL),
                             );
-                            ui.label(RichText::new("/").color(CARD_BORDER).size(12.0));
+                            ui.label(RichText::new("/").color(CARD_BORDER).size(13.5));
                             ui.label(
                                 RichText::new(&entry.channel)
-                                    .font(FontId::proportional(13.0))
+                                    .font(FontId::proportional(14.5))
                                     .strong()
                                     .color(badge),
                             );
                         });
-                        ui.add_space(3.0);
+                        ui.add_space(4.0);
 
                         // Line 2: Stream title
-                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(12.5));
-                        ui.add_space(5.0);
+                        ui.label(RichText::new(&entry.title).color(TEXT_PRIMARY).size(14.0));
+                        ui.add_space(6.0);
 
                         // Line 3: Unboxed inline metadata
                         ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.x = 5.0;
-                            ui.label(RichText::new(&entry.platform).size(11.0).strong().color(badge));
-                            ui.label(RichText::new("/").size(10.5).color(CARD_BORDER));
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(RichText::new(&entry.platform).size(12.5).strong().color(badge));
+                            ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
                             let conf_label = if entry.confidence > 0 {
                                 format!("{tier} ({}%)", entry.confidence)
                             } else {
                                 tier.to_string()
                             };
-                            ui.label(RichText::new(conf_label).size(11.0).strong().color(tier_color));
+                            ui.label(RichText::new(conf_label).size(12.5).strong().color(tier_color));
 
                             if !entry.team_relation.is_empty() {
                                 let tc = if entry.team_relation == "Ally" { ALLY_TEAL } else { ENEMY_AMBER };
-                                ui.label(RichText::new("/").size(10.5).color(CARD_BORDER));
-                                ui.label(RichText::new(&entry.team_relation).size(11.0).color(tc));
+                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                                ui.label(RichText::new(&entry.team_relation).size(12.5).color(tc));
                             }
                             let mut tail: Vec<&str> = Vec::new();
                             if !entry.agent_name.is_empty() {
@@ -6349,24 +6358,24 @@ impl StreamerApp {
                             }
                             tail.push(&entry.timestamp);
                             if !tail.is_empty() {
-                                ui.label(RichText::new("/").size(10.5).color(CARD_BORDER));
-                                ui.label(RichText::new(tail.join(" / ")).size(11.0).color(TEXT_MUTED));
+                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                                ui.label(RichText::new(tail.join(" / ")).size(12.5).color(TEXT_MUTED));
                             }
                         });
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if gradient_button(ui, "Watch", Vec2::new(78.0, 28.0), true, 12.0)
+                        if gradient_button(ui, "Watch", Vec2::new(88.0, 32.0), true, 13.5)
                             .on_hover_text(entry.url.as_str())
                             .clicked()
                         {
                             let _ = open::that(&entry.url);
                         }
-                        let copy = egui::Button::new(RichText::new("Copy").color(TEXT_PRIMARY).size(12.0))
+                        let copy = egui::Button::new(RichText::new("Copy").color(TEXT_PRIMARY).size(13.0))
                             .fill(BTN_SECONDARY)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
                             .rounding(Rounding::same(6.0))
-                            .min_size(Vec2::new(60.0, 28.0));
+                            .min_size(Vec2::new(68.0, 32.0));
                         if ui.add(copy).clicked() {
                             if let Ok(mut cb) = Clipboard::new() {
                                 let _ = cb.set_text(entry.url.clone());
@@ -6378,7 +6387,7 @@ impl StreamerApp {
 
                 // Optional expandable details disclosure (keeps cards quiet by default)
                 if has_details {
-                    ui.add_space(6.0);
+                    ui.add_space(7.0);
                     let mut hints: Vec<String> = Vec::new();
                     if !entry.chat_message.is_empty() {
                         hints.push("In-game chat".to_string());
@@ -6395,7 +6404,7 @@ impl StreamerApp {
                     };
                     let toggle_btn = egui::Button::new(
                         RichText::new(toggle_label)
-                            .size(11.0)
+                            .size(12.5)
                             .color(if is_expanded { ACCENT_BLUSH } else { TEXT_MUTED }),
                     )
                     .fill(Color32::TRANSPARENT)
@@ -6409,7 +6418,7 @@ impl StreamerApp {
                     }
 
                     if is_expanded {
-                        ui.add_space(4.0);
+                        ui.add_space(5.0);
                         ui.separator();
                         ui.add_space(6.0);
 
@@ -6417,9 +6426,9 @@ impl StreamerApp {
                             ui.label(
                                 RichText::new(format!("In-game chat: \"{}\"", entry.chat_message))
                                     .color(ACCENT_BLUSH)
-                                    .size(11.5),
+                                    .size(13.0),
                             );
-                            ui.add_space(3.0);
+                            ui.add_space(4.0);
                         }
                         if !entry.server_match_status.is_empty() || !entry.match_reason.is_empty() {
                             let mut parts: Vec<&str> = Vec::new();
@@ -6429,14 +6438,14 @@ impl StreamerApp {
                             if !entry.match_reason.is_empty() {
                                 parts.push(&entry.match_reason);
                             }
-                            ui.label(RichText::new(parts.join(" / ")).color(TEXT_MUTED).size(11.0));
+                            ui.label(RichText::new(parts.join(" / ")).color(TEXT_MUTED).size(12.5));
                         }
 
                         if entry.candidates.len() > 1 {
                             ui.add_space(6.0);
                             ui.label(
                                 RichText::new(format!("Other ranked candidates ({})", entry.candidates.len()))
-                                    .size(11.0)
+                                    .size(12.5)
                                     .strong()
                                     .color(TEXT_MUTED),
                             );
@@ -6464,23 +6473,23 @@ impl StreamerApp {
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(format!("#{}", idx + 1))
-                                            .size(11.0)
+                                            .size(12.5)
                                             .strong()
                                             .color(if idx == 0 { ACCENT_BLUSH } else { TEXT_MUTED }),
                                     );
                                     ui.label(
                                         RichText::new(format!("{}% {}", cand.confidence, c_tier))
-                                            .size(11.0)
+                                            .size(12.5)
                                             .color(c_conf_col),
                                     );
-                                    ui.label(RichText::new(&cand.platform).size(11.0).strong().color(c_badge));
-                                    ui.label(RichText::new(&cand.channel).size(11.5).color(TEXT_PRIMARY));
+                                    ui.label(RichText::new(&cand.platform).size(12.5).strong().color(c_badge));
+                                    ui.label(RichText::new(&cand.channel).size(13.0).color(TEXT_PRIMARY));
                                     if !cand.region_hint.is_empty() {
-                                        ui.label(RichText::new(&cand.region_hint).size(10.5).color(ALLY_TEAL));
+                                        ui.label(RichText::new(&cand.region_hint).size(12.0).color(ALLY_TEAL));
                                     }
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         let open_cand = egui::Button::new(
-                                            RichText::new("Open").size(10.5).color(ACCENT_PEARL),
+                                            RichText::new("Open").size(12.0).color(ACCENT_PEARL),
                                         )
                                         .fill(BTN_SECONDARY)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
@@ -6491,7 +6500,7 @@ impl StreamerApp {
                                     });
                                 });
                                 if idx + 1 < entry.candidates.len() {
-                                    ui.add_space(2.0);
+                                    ui.add_space(3.0);
                                 }
                             }
                         }
@@ -6510,22 +6519,22 @@ impl StreamerApp {
 
         // Single clean toolbar row: Search + Collapsible Filters trigger + Clear
         ui.horizontal(|ui| {
-            let reserved = if history.is_empty() { 112.0 } else { 172.0 };
-            let search_w = (ui.available_width() - reserved).max(180.0);
+            let reserved = if history.is_empty() { 126.0 } else { 196.0 };
+            let search_w = (ui.available_width() - reserved).max(200.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
                     .hint_text("Search Riot ID, channel, map, server, or title...")
                     .desired_width(search_w)
-                    .margin(Margin::symmetric(10.0, 7.0)),
+                    .margin(Margin::symmetric(12.0, 8.0)),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if !history.is_empty() {
-                    let clear = egui::Button::new(RichText::new("Clear").color(TEXT_MUTED).size(12.0))
+                    let clear = egui::Button::new(RichText::new("Clear").color(TEXT_MUTED).size(13.5))
                         .fill(Color32::TRANSPARENT)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
                         .rounding(Rounding::same(6.0))
-                        .min_size(Vec2::new(54.0, 30.0));
+                        .min_size(Vec2::new(64.0, 34.0));
                     if ui.add(clear).clicked() {
                         let mut s = lock(&self.state);
                         s.history.clear();
@@ -6542,7 +6551,7 @@ impl StreamerApp {
                 let filter_btn = egui::Button::new(
                     RichText::new(filter_label)
                         .color(if filter_active { ACCENT_PEARL } else { TEXT_PRIMARY })
-                        .size(12.0),
+                        .size(13.5),
                 )
                 .fill(BTN_SECONDARY)
                 .stroke(Stroke::new(
@@ -6550,7 +6559,7 @@ impl StreamerApp {
                     if filter_active { ACCENT_PINK.linear_multiply(0.65) } else { CARD_BORDER },
                 ))
                 .rounding(Rounding::same(6.0))
-                .min_size(Vec2::new(88.0, 30.0));
+                .min_size(Vec2::new(102.0, 34.0));
                 if ui.add(filter_btn).clicked() {
                     self.show_filters_popover = !self.show_filters_popover;
                 }
@@ -6597,7 +6606,7 @@ impl StreamerApp {
                 .inner_margin(Margin::symmetric(14.0, 12.0))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Team").color(TEXT_MUTED).size(11.5));
+                        ui.label(RichText::new("Team").color(TEXT_MUTED).size(13.0));
                         ui.add_space(6.0);
                         for (f, label) in [
                             (TeamFilter::All, "All"),
@@ -6608,7 +6617,7 @@ impl StreamerApp {
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let done_btn = egui::Button::new(RichText::new("Done").color(TEXT_PRIMARY).size(11.5))
+                            let done_btn = egui::Button::new(RichText::new("Done").color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
                                 .rounding(Rounding::same(5.0));
@@ -6617,7 +6626,7 @@ impl StreamerApp {
                             }
                             if self.has_active_history_filters() {
                                 ui.add_space(6.0);
-                                let reset = egui::Button::new(RichText::new("Reset").color(ACCENT_BLUSH).size(11.5))
+                                let reset = egui::Button::new(RichText::new("Reset").color(ACCENT_BLUSH).size(13.0))
                                     .fill(Color32::TRANSPARENT)
                                     .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.45)))
                                     .rounding(Rounding::same(5.0));
@@ -6628,11 +6637,11 @@ impl StreamerApp {
                         });
                     });
 
-                    ui.add_space(8.0);
+                    ui.add_space(10.0);
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new("Match").color(TEXT_MUTED).size(11.5));
+                        ui.label(RichText::new("Match").color(TEXT_MUTED).size(13.0));
                         egui::ComboBox::from_id_salt("history_match_type_filter")
-                            .width(122.0)
+                            .width(136.0)
                             .selected_text(selected_match_type)
                             .show_ui(ui, |ui| {
                                 for opt in &queue_options {
@@ -6641,9 +6650,9 @@ impl StreamerApp {
                             });
 
                         ui.add_space(6.0);
-                        ui.label(RichText::new("Server").color(TEXT_MUTED).size(11.5));
+                        ui.label(RichText::new("Server").color(TEXT_MUTED).size(13.0));
                         egui::ComboBox::from_id_salt("history_server_filter")
-                            .width(126.0)
+                            .width(140.0)
                             .selected_text(selected_server)
                             .show_ui(ui, |ui| {
                                 for opt in &server_options {
@@ -6652,9 +6661,9 @@ impl StreamerApp {
                             });
 
                         ui.add_space(6.0);
-                        ui.label(RichText::new("Date").color(TEXT_MUTED).size(11.5));
+                        ui.label(RichText::new("Date").color(TEXT_MUTED).size(13.0));
                         egui::ComboBox::from_id_salt("history_date_filter")
-                            .width(100.0)
+                            .width(114.0)
                             .selected_text(self.date_filter.label())
                             .show_ui(ui, |ui| {
                                 for opt in [
@@ -6668,9 +6677,9 @@ impl StreamerApp {
                             });
 
                         ui.add_space(6.0);
-                        ui.label(RichText::new("Status").color(TEXT_MUTED).size(11.5));
+                        ui.label(RichText::new("Status").color(TEXT_MUTED).size(13.0));
                         egui::ComboBox::from_id_salt("history_status_filter")
-                            .width(108.0)
+                            .width(122.0)
                             .selected_text(self.status_filter.label())
                             .show_ui(ui, |ui| {
                                 for opt in [
@@ -6719,41 +6728,41 @@ impl StreamerApp {
             // Subsection 1: Latest Match (quiet single-line summary strip + cards)
             if let Some(m) = last_match {
                 ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(RichText::new("Latest Match").size(12.5).strong().color(ACCENT_PEARL));
-                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
-                    ui.label(RichText::new(&m.map_name).size(12.0).strong().color(TEXT_PRIMARY));
-                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
-                    ui.label(RichText::new(&m.queue_name).size(11.5).color(ACCENT_BLUSH));
+                    ui.spacing_mut().item_spacing.x = 7.0;
+                    ui.label(RichText::new("Latest Match").size(14.0).strong().color(ACCENT_PEARL));
+                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                    ui.label(RichText::new(&m.map_name).size(13.5).strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                    ui.label(RichText::new(&m.queue_name).size(13.0).color(ACCENT_BLUSH));
                     if !m.server_name.is_empty() {
-                        ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
-                        ui.label(RichText::new(&m.server_name).size(11.5).color(ALLY_TEAL));
+                        ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                        ui.label(RichText::new(&m.server_name).size(13.0).color(ALLY_TEAL));
                     }
-                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
                     let summary_counts = if m.party_skipped > 0 {
                         format!("{} checked, {} party skipped", m.players_checked, m.party_skipped)
                     } else {
                         format!("{} checked", m.players_checked)
                     };
-                    ui.label(RichText::new(summary_counts).size(11.5).color(TEXT_MUTED));
-                    ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
+                    ui.label(RichText::new(summary_counts).size(13.0).color(TEXT_MUTED));
+                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
                     if m.streamers_found > 0 {
                         ui.label(
                             RichText::new(format!("{} live", m.streamers_found))
-                                .size(11.5)
+                                .size(13.0)
                                 .strong()
                                 .color(LIVE_GREEN),
                         );
                     } else {
-                        ui.label(RichText::new("0 live").size(11.5).color(TEXT_MUTED));
+                        ui.label(RichText::new("0 live").size(13.0).color(TEXT_MUTED));
                     }
                 });
 
-                ui.add_space(8.0);
+                ui.add_space(9.0);
                 if !latest_entries.is_empty() {
                     for entry in &latest_entries {
                         self.render_history_card(ui, entry);
-                        ui.add_space(8.0);
+                        ui.add_space(9.0);
                     }
                 } else {
                     let msg = if filters_active && m.streamers_found > 0 {
@@ -6761,7 +6770,7 @@ impl StreamerApp {
                     } else {
                         "No live streamers detected in your latest match."
                     };
-                    ui.label(RichText::new(msg).color(TEXT_MUTED).size(12.0));
+                    ui.label(RichText::new(msg).color(TEXT_MUTED).size(13.5));
                     ui.add_space(6.0);
                 }
 
@@ -6772,46 +6781,46 @@ impl StreamerApp {
 
             // Subsection 2: Previous History
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Previous History").size(12.5).strong().color(TEXT_PRIMARY));
+                ui.label(RichText::new("Previous History").size(14.0).strong().color(TEXT_PRIMARY));
                 ui.label(
                     RichText::new(format!("({})", previous_entries.len()))
-                        .size(11.5)
+                        .size(13.0)
                         .color(TEXT_MUTED),
                 );
             });
-            ui.add_space(8.0);
+            ui.add_space(9.0);
 
             if previous_entries.is_empty() && latest_entries.is_empty() {
                 ui.add_space(40.0);
                 ui.vertical_centered(|ui| {
                     if history.is_empty() {
-                        ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(16.0)).strong().color(TEXT_PRIMARY));
+                        ui.label(RichText::new("No Streamers Recorded Yet").font(FontId::proportional(18.0)).strong().color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("Play a match or click '+ Add Streamer' in the sidebar to link a Riot ID.")
                                 .color(TEXT_MUTED)
-                                .size(12.5),
+                                .size(14.0),
                         );
                     } else {
-                        ui.label(RichText::new("No Records Match Your Filters").font(FontId::proportional(16.0)).strong().color(TEXT_PRIMARY));
+                        ui.label(RichText::new("No Records Match Your Filters").font(FontId::proportional(18.0)).strong().color(TEXT_PRIMARY));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("Your saved history is intact. Adjust or reset filters to view older records.")
                                 .color(TEXT_MUTED)
-                                .size(12.5),
+                                .size(14.0),
                         );
                         ui.add_space(10.0);
-                        if gradient_button(ui, "Reset Filters", Vec2::new(118.0, 30.0), true, 12.0).clicked() {
+                        if gradient_button(ui, "Reset Filters", Vec2::new(132.0, 34.0), true, 13.5).clicked() {
                             self.reset_history_filters();
                         }
                     }
                 });
             } else if previous_entries.is_empty() {
-                ui.label(RichText::new("No earlier history records match your current filters.").color(TEXT_MUTED).size(12.0));
+                ui.label(RichText::new("No earlier history records match your current filters.").color(TEXT_MUTED).size(13.5));
             } else {
                 for entry in previous_entries {
                     self.render_history_card(ui, entry);
-                    ui.add_space(8.0);
+                    ui.add_space(9.0);
                 }
             }
         });
@@ -6845,11 +6854,11 @@ impl StreamerApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let sync_label = if is_syncing { "Syncing..." } else { "Sync Database" };
-                let sync_btn = egui::Button::new(RichText::new(sync_label).color(TEXT_PRIMARY).size(12.0))
+                let sync_btn = egui::Button::new(RichText::new(sync_label).color(TEXT_PRIMARY).size(13.5))
                     .fill(BTN_SECONDARY)
                     .stroke(Stroke::new(1.0, CARD_BORDER))
                     .rounding(Rounding::same(5.0))
-                    .min_size(Vec2::new(108.0, 28.0));
+                    .min_size(Vec2::new(124.0, 32.0));
                 if ui.add_enabled(!is_syncing, sync_btn).clicked() {
                     let _ = self.manual_scan_tx.send(ScanTrigger::RefreshDirectory);
                 }
@@ -6860,7 +6869,7 @@ impl StreamerApp {
         ui.label(
             RichText::new("Community contributions are moderated before being merged into the central streamers.json database.")
                 .color(TEXT_MUTED)
-                .size(11.5),
+                .size(13.0),
         );
         ui.add_space(10.0);
 
@@ -6889,7 +6898,7 @@ impl StreamerApp {
                     DirectorySourceTab::Custom => "No custom streamers saved yet. Click '+ Add Streamer' to add one.",
                     DirectorySourceTab::Community => "Community database cache is empty. Click 'Sync Database' to fetch the latest streamers.json.",
                 };
-                ui.label(RichText::new(msg).color(TEXT_MUTED).size(13.0));
+                ui.label(RichText::new(msg).color(TEXT_MUTED).size(14.5));
             });
             return;
         }
@@ -6908,48 +6917,48 @@ impl StreamerApp {
                     .fill(CARD_BG)
                     .stroke(Stroke::new(1.0, CARD_BORDER))
                     .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(14.0, 10.0))
+                    .inner_margin(Margin::symmetric(16.0, 12.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 6.0;
-                                    ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(14.0));
-                                    ui.label(RichText::new("/").color(CARD_BORDER).size(11.0));
-                                    ui.label(RichText::new(&d.platform).strong().color(badge).size(12.0));
-                                    ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(12.5));
+                                    ui.spacing_mut().item_spacing.x = 7.0;
+                                    ui.label(RichText::new(&d.riot_id).strong().color(ACCENT_PEARL).size(15.5));
+                                    ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
+                                    ui.label(RichText::new(&d.platform).strong().color(badge).size(13.5));
+                                    ui.label(RichText::new(&d.channel_name).color(TEXT_PRIMARY).size(14.0));
                                     if d.verified {
-                                        ui.label(RichText::new("/").color(CARD_BORDER).size(11.0));
-                                        ui.label(RichText::new("Verified").size(11.0).strong().color(LIVE_GREEN));
+                                        ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
+                                        ui.label(RichText::new("Verified").size(12.5).strong().color(LIVE_GREEN));
                                     }
                                     if !d.server_region.is_empty() {
                                         let reg_label = server_region_by_code(&d.server_region)
                                             .map(|r| r.short_label)
                                             .unwrap_or(&d.server_region);
-                                        ui.label(RichText::new("/").color(CARD_BORDER).size(11.0));
-                                        ui.label(RichText::new(reg_label).size(11.0).color(ALLY_TEAL));
+                                        ui.label(RichText::new("/").color(CARD_BORDER).size(12.5));
+                                        ui.label(RichText::new(reg_label).size(12.5).color(ALLY_TEAL));
                                     }
                                 });
                                 if !d.aliases.is_empty() {
                                     ui.label(
                                         RichText::new(format!("Aliases: {}", d.aliases.join(", ")))
                                             .color(ACCENT_BLUSH)
-                                            .size(11.0),
+                                            .size(12.5),
                                     );
                                 }
-                                ui.label(RichText::new(&d.channel_url).color(TEXT_MUTED).size(11.0));
+                                ui.label(RichText::new(&d.channel_url).color(TEXT_MUTED).size(12.5));
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if self.dir_source_tab == DirectorySourceTab::Custom {
-                                    let del = egui::Button::new(RichText::new("Delete").color(ERR_ROSE).size(12.0))
+                                    let del = egui::Button::new(RichText::new("Delete").color(ERR_ROSE).size(13.0))
                                         .fill(Color32::TRANSPARENT)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
                                         .rounding(Rounding::same(5.0));
                                     if ui.add(del).clicked() {
                                         to_delete = Some((d.riot_id.clone(), d.platform.clone()));
                                     }
-                                    let edit = egui::Button::new(RichText::new("Edit").color(TEXT_PRIMARY).size(12.0))
+                                    let edit = egui::Button::new(RichText::new("Edit").color(TEXT_PRIMARY).size(13.0))
                                         .fill(BTN_SECONDARY)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
                                         .rounding(Rounding::same(5.0));
@@ -6957,7 +6966,7 @@ impl StreamerApp {
                                         to_edit = Some(d.clone());
                                     }
                                 }
-                                let open_btn = egui::Button::new(RichText::new("Open").color(TEXT_PRIMARY).size(12.0))
+                                let open_btn = egui::Button::new(RichText::new("Open").color(TEXT_PRIMARY).size(13.0))
                                     .fill(BTN_SECONDARY)
                                     .stroke(Stroke::new(1.0, CARD_BORDER))
                                     .rounding(Rounding::same(5.0));
@@ -6967,7 +6976,7 @@ impl StreamerApp {
                             });
                         });
                     });
-                ui.add_space(8.0);
+                ui.add_space(9.0);
             }
         });
 
@@ -7003,7 +7012,7 @@ impl StreamerApp {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new("Live Streamer Recommendations are OFF")
-                                    .font(FontId::proportional(17.0))
+                                    .font(FontId::proportional(18.5))
                                     .strong()
                                     .color(ACCENT_PEARL),
                             );
@@ -7014,13 +7023,13 @@ impl StreamerApp {
                                     active_region.label
                                 ))
                                 .color(TEXT_MUTED)
-                                .size(12.5),
+                                .size(14.0),
                             );
                             ui.add_space(4.0);
                             ui.label(
                                 RichText::new("Note: Recommended streams are regional discovery suggestions and are never treated as confirmed player detections from your matches.")
                                     .color(ENEMY_AMBER)
-                                    .size(11.5),
+                                    .size(13.0),
                             );
                         });
                     });
@@ -7058,9 +7067,9 @@ impl StreamerApp {
                 .fill(BTN_SECONDARY)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
                 .rounding(Rounding::same(4.0))
-                .inner_margin(Margin::symmetric(8.0, 3.0))
+                .inner_margin(Margin::symmetric(9.0, 4.0))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(format!("Server: {}", active_region.label)).size(11.5).color(ALLY_TEAL));
+                    ui.label(RichText::new(format!("Server: {}", active_region.label)).size(13.0).color(ALLY_TEAL));
                 });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -7074,12 +7083,12 @@ impl StreamerApp {
                     save_json("config.json", &s.config);
                     return;
                 }
-                ui.label(RichText::new("ON").size(10.5).strong().color(ACCENT_BLUSH));
+                ui.label(RichText::new("ON").size(12.0).strong().color(ACCENT_BLUSH));
                 ui.add_space(8.0);
 
                 let busy = matches!(recommendations, RecommendationsState::Loading);
                 let ref_lbl = if busy { "Refreshing..." } else { "Refresh Live" };
-                if gradient_button(ui, ref_lbl, Vec2::new(112.0, 28.0), !busy, 12.0).clicked() {
+                if gradient_button(ui, ref_lbl, Vec2::new(124.0, 32.0), !busy, 13.5).clicked() {
                     self.trigger_recommendations_fetch(active_region.code, true);
                 }
             });
@@ -7089,7 +7098,7 @@ impl StreamerApp {
         ui.label(
             RichText::new("Discovery Suggestions (Not Matched to Your Lobby)  |  Cached for 5 minutes to reduce bandwidth & API usage.")
                 .color(TEXT_MUTED)
-                .size(11.0),
+                .size(12.5),
         );
         ui.add_space(10.0);
 
@@ -7097,7 +7106,7 @@ impl StreamerApp {
             RecommendationsState::Idle => {
                 ui.add_space(50.0);
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("Click 'Refresh Live' to load regional Twitch & YouTube Valorant streams.").color(TEXT_MUTED).size(13.0));
+                    ui.label(RichText::new("Click 'Refresh Live' to load regional Twitch & YouTube Valorant streams.").color(TEXT_MUTED).size(14.5));
                 });
             }
             RecommendationsState::Loading => {
@@ -7108,7 +7117,7 @@ impl StreamerApp {
                     ui.label(
                         RichText::new(format!("Fetching live Twitch & YouTube Valorant streamers for {}...", active_region.short_label))
                             .color(TEXT_MUTED)
-                            .size(13.0),
+                            .size(14.5),
                     );
                 });
             }
@@ -7121,7 +7130,7 @@ impl StreamerApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             paint_cross_icon(ui, ERR_ROSE);
-                            ui.label(RichText::new(err).color(ERR_ROSE).size(12.5));
+                            ui.label(RichText::new(err).color(ERR_ROSE).size(13.5));
                         });
                     });
             }
@@ -7143,7 +7152,7 @@ impl StreamerApp {
                         fetched_at
                     ))
                     .color(TEXT_MUTED)
-                    .size(11.5),
+                    .size(13.0),
                 );
                 ui.add_space(8.0);
 
@@ -7153,7 +7162,7 @@ impl StreamerApp {
                         ui.label(
                             RichText::new("No live Valorant streams found for this platform filter. Try 'All Platforms' or Refresh.")
                                 .color(TEXT_MUTED)
-                                .size(13.0),
+                                .size(14.5),
                         );
                     });
                     return;
@@ -7171,47 +7180,47 @@ impl StreamerApp {
                             .fill(CARD_BG)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
                             .rounding(Rounding::same(8.0))
-                            .inner_margin(Margin::symmetric(14.0, 12.0))
+                            .inner_margin(Margin::symmetric(16.0, 14.0))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
-                                        ui.set_max_width((ui.available_width() - 210.0).max(160.0));
+                                        ui.set_max_width((ui.available_width() - 224.0).max(180.0));
                                         ui.horizontal_wrapped(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 6.0;
+                                            ui.spacing_mut().item_spacing.x = 7.0;
                                             paint_status_dot(ui, LIVE_GREEN, true);
-                                            ui.label(RichText::new(&rec.channel).strong().color(ACCENT_PEARL).size(14.0));
-                                            ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
-                                            ui.label(RichText::new(&rec.platform).size(11.5).strong().color(badge));
+                                            ui.label(RichText::new(&rec.channel).strong().color(ACCENT_PEARL).size(15.5));
+                                            ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                                            ui.label(RichText::new(&rec.platform).size(13.0).strong().color(badge));
                                             if let Some(v) = rec.viewers {
-                                                ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
-                                                ui.label(RichText::new(format_viewers(v)).size(11.5).color(LIVE_GREEN));
+                                                ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                                                ui.label(RichText::new(format_viewers(v)).size(13.0).color(LIVE_GREEN));
                                             }
-                                            ui.label(RichText::new("/").size(11.0).color(CARD_BORDER));
-                                            ui.label(RichText::new(&rec.region_label).size(11.0).color(TEXT_MUTED));
+                                            ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                                            ui.label(RichText::new(&rec.region_label).size(12.5).color(TEXT_MUTED));
                                         });
-                                        ui.add_space(3.0);
-                                        ui.label(RichText::new(&rec.title).color(TEXT_PRIMARY).size(12.5));
+                                        ui.add_space(4.0);
+                                        ui.label(RichText::new(&rec.title).color(TEXT_PRIMARY).size(14.0));
                                     });
 
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if gradient_button(ui, "Watch", Vec2::new(80.0, 28.0), true, 12.0)
+                                        if gradient_button(ui, "Watch", Vec2::new(88.0, 32.0), true, 13.5)
                                             .on_hover_text(rec.url.as_str())
                                             .clicked()
                                         {
                                             let _ = open::that(&rec.url);
                                         }
-                                        let save_btn = egui::Button::new(RichText::new("+ Directory").color(TEXT_PRIMARY).size(11.5))
+                                        let save_btn = egui::Button::new(RichText::new("+ Directory").color(TEXT_PRIMARY).size(13.0))
                                             .fill(BTN_SECONDARY)
                                             .stroke(Stroke::new(1.0, CARD_BORDER))
                                             .rounding(Rounding::same(6.0))
-                                            .min_size(Vec2::new(88.0, 30.0));
+                                            .min_size(Vec2::new(98.0, 32.0));
                                         if ui.add(save_btn).clicked() {
                                             prefill_rec = Some(rec.clone());
                                         }
                                     });
                                 });
                             });
-                        ui.add_space(8.0);
+                        ui.add_space(9.0);
                     }
                 });
 
@@ -7241,7 +7250,7 @@ impl StreamerApp {
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new("Valorant Servers & Region Detection")
-                            .font(FontId::proportional(15.0))
+                            .font(FontId::proportional(16.5))
                             .strong()
                             .color(Color32::WHITE),
                     );
@@ -7250,7 +7259,7 @@ impl StreamerApp {
                             "Matches streamers to the exact Valorant server you play on to prevent cross-region false positives (e.g. US streamers showing up in Mumbai lobbies).",
                         )
                         .color(TEXT_MUTED)
-                        .size(12.0),
+                        .size(13.5),
                     );
                     ui.add_space(10.0);
 
@@ -7263,10 +7272,10 @@ impl StreamerApp {
                     };
 
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Active Server").strong().color(TEXT_PRIMARY).size(12.5));
+                        ui.label(RichText::new("Active Server").strong().color(TEXT_PRIMARY).size(14.0));
                         ui.add_space(10.0);
                         egui::ComboBox::from_id_salt("settings_server_region_combo")
-                            .width(360.0)
+                            .width(380.0)
                             .selected_text(selected_label)
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
@@ -7291,7 +7300,7 @@ impl StreamerApp {
                     ui.label(
                         RichText::new(format!("Detected server pod: {detected_info}"))
                             .color(ALLY_TEAL)
-                            .size(11.5),
+                            .size(13.0),
                     );
                 });
 
@@ -7306,7 +7315,7 @@ impl StreamerApp {
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new("Features & Windows Integration")
-                            .font(FontId::proportional(15.0))
+                            .font(FontId::proportional(16.5))
                             .strong()
                             .color(ACCENT_PEARL),
                     );
@@ -7358,22 +7367,22 @@ impl StreamerApp {
                 .inner_margin(Margin::same(18.0))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Optional Platform API Keys").font(FontId::proportional(15.0)).strong().color(Color32::WHITE));
+                        ui.label(RichText::new("Optional Platform API Keys").font(FontId::proportional(16.5)).strong().color(Color32::WHITE));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             toggle_slider(ui, &mut self.show_api_secrets);
                             ui.add_space(6.0);
-                            ui.label(RichText::new("Show keys").color(TEXT_MUTED).size(11.5));
+                            ui.label(RichText::new("Show keys").color(TEXT_MUTED).size(13.0));
                         });
                     });
-                    ui.label(RichText::new("Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.").color(TEXT_MUTED).size(12.0));
+                    ui.label(RichText::new("Leave blank to run 100% keyless on YouTube, Twitch, and Kick, or add free keys for faster official API checks.").color(TEXT_MUTED).size(13.5));
                     ui.add_space(10.0);
 
                     // YouTube Data API v3 Key row
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("YouTube Data API v3 Key").strong().color(TEXT_PRIMARY).size(12.5));
+                        ui.label(RichText::new("YouTube Data API v3 Key").strong().color(TEXT_PRIMARY).size(14.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let yt_busy = matches!(yt_check, CheckState::Checking);
-                            let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).color(TEXT_PRIMARY).size(11.5))
+                            let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
                                 .rounding(Rounding::same(4.0));
@@ -7381,7 +7390,7 @@ impl StreamerApp {
                                 lock(&self.state).yt_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestYouTubeKey(self.cfg_draft.youtube_api_key.clone()));
                             }
-                            if gradient_button(ui, "Get YouTube Key", Vec2::new(118.0, 24.0), true, 11.5)
+                            if gradient_button(ui, "Get YouTube Key", Vec2::new(134.0, 28.0), true, 13.0)
                                 .on_hover_text("Opens Google Cloud Console -> Credentials")
                                 .clicked()
                             {
@@ -7396,7 +7405,7 @@ impl StreamerApp {
                                 .password(!self.show_api_secrets)
                                 .hint_text("AIza... (optional)")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(10.0, 7.0)),
                         )
                         .changed()
                     {
@@ -7410,10 +7419,10 @@ impl StreamerApp {
 
                     // Twitch Helix Client ID + Secret row
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Twitch Helix API (Client ID & Secret)").strong().color(TEXT_PRIMARY).size(12.5));
+                        ui.label(RichText::new("Twitch Helix API (Client ID & Secret)").strong().color(TEXT_PRIMARY).size(14.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let tw_busy = matches!(twitch_check, CheckState::Checking);
-                            let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).color(TEXT_PRIMARY).size(11.5))
+                            let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
                                 .rounding(Rounding::same(4.0));
@@ -7424,7 +7433,7 @@ impl StreamerApp {
                                     client_secret: self.cfg_draft.twitch_client_secret.clone(),
                                 });
                             }
-                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(Color32::WHITE).strong().size(11.5))
+                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(Color32::WHITE).strong().size(13.0))
                                 .fill(TWITCH_PURPLE)
                                 .rounding(Rounding::same(4.0));
                             if ui.add(get_tw).on_hover_text("Opens Twitch Developer Console -> Applications").clicked() {
@@ -7433,28 +7442,28 @@ impl StreamerApp {
                         });
                     });
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Twitch Client ID").color(TEXT_MUTED).size(11.5));
+                    ui.label(RichText::new("Twitch Client ID").color(TEXT_MUTED).size(13.0));
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_id)
                                 .password(!self.show_api_secrets)
                                 .hint_text("Optional Helix Client ID")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(10.0, 7.0)),
                         )
                         .changed()
                     {
                         lock(&self.state).twitch_key_check = CheckState::Idle;
                     }
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Twitch Client Secret").color(TEXT_MUTED).size(11.5));
+                    ui.label(RichText::new("Twitch Client Secret").color(TEXT_MUTED).size(13.0));
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_secret)
                                 .password(!self.show_api_secrets)
                                 .hint_text("Optional Helix Client Secret")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(10.0, 7.0)),
                         )
                         .changed()
                     {
@@ -7470,7 +7479,7 @@ impl StreamerApp {
                         RichText::new("How to get free API keys (Step-by-Step Guide)")
                             .color(ALLY_TEAL)
                             .strong()
-                            .size(12.5),
+                            .size(13.5),
                     )
                     .default_open(false)
                     .show(ui, |ui| {
@@ -7480,23 +7489,23 @@ impl StreamerApp {
                             .rounding(Rounding::same(6.0))
                             .inner_margin(Margin::same(12.0))
                             .show(ui, |ui| {
-                                ui.label(RichText::new("YouTube Data API v3 (Free - 10,000 units/day, no card needed)").strong().color(ACCENT_PINK).size(12.0));
-                                ui.label(RichText::new("1. Click 'Get YouTube Key' above to open Google Cloud Console.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("2. Create a new project (e.g. Valorant-Radar) from the top-left selector.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("3. Open APIs & Services -> Library, search 'YouTube Data API v3', click Enable.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("4. Open APIs & Services -> Credentials -> + CREATE CREDENTIALS -> API key.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("5. Paste the AIza... key above, click 'Test Key', then 'Save Settings'.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("YouTube Data API v3 (Free - 10,000 units/day, no card needed)").strong().color(ACCENT_PINK).size(13.5));
+                                ui.label(RichText::new("1. Click 'Get YouTube Key' above to open Google Cloud Console.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("2. Create a new project (e.g. Valorant-Radar) from the top-left selector.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("3. Open APIs & Services -> Library, search 'YouTube Data API v3', click Enable.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("4. Open APIs & Services -> Credentials -> + CREATE CREDENTIALS -> API key.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("5. Paste the AIza... key above, click 'Test Key', then 'Save Settings'.").color(TEXT_PRIMARY).size(13.0));
 
                                 ui.add_space(8.0);
-                                ui.label(RichText::new("Twitch Helix API (Free - requires 2FA on your Twitch account)").strong().color(TWITCH_PURPLE).size(12.0));
-                                ui.label(RichText::new("1. Click 'Get Twitch Keys' above to open Twitch Developer Console.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("2. Click 'Register Your Application', name it 'Valorant Radar'.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("3. Set OAuth Redirect URL to http://localhost and Category to Application Integration.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("4. Open Manage -> copy Client ID, click 'New Secret' -> copy Client Secret.").color(TEXT_PRIMARY).size(11.5));
-                                ui.label(RichText::new("5. Paste both above, click 'Test Twitch', then 'Save Settings'.").color(TEXT_PRIMARY).size(11.5));
+                                ui.label(RichText::new("Twitch Helix API (Free - requires 2FA on your Twitch account)").strong().color(TWITCH_PURPLE).size(13.5));
+                                ui.label(RichText::new("1. Click 'Get Twitch Keys' above to open Twitch Developer Console.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("2. Click 'Register Your Application', name it 'Valorant Radar'.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("3. Set OAuth Redirect URL to http://localhost and Category to Application Integration.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("4. Open Manage -> copy Client ID, click 'New Secret' -> copy Client Secret.").color(TEXT_PRIMARY).size(13.0));
+                                ui.label(RichText::new("5. Paste both above, click 'Test Twitch', then 'Save Settings'.").color(TEXT_PRIMARY).size(13.0));
 
                                 ui.add_space(6.0);
-                                ui.label(RichText::new("Kick does not need an API key. Leaving keys empty still works via keyless fallbacks.").color(TEXT_MUTED).size(11.0));
+                                ui.label(RichText::new("Kick does not need an API key. Leaving keys empty still works via keyless fallbacks.").color(TEXT_MUTED).size(12.5));
                             });
                     });
                 });
@@ -7514,7 +7523,7 @@ impl StreamerApp {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new("App Updates & Version")
-                                    .font(FontId::proportional(15.0))
+                                    .font(FontId::proportional(16.5))
                                     .strong()
                                     .color(ACCENT_PEARL),
                             );
@@ -7523,16 +7532,16 @@ impl StreamerApp {
                                     "Installed: v{APP_VERSION} (build {APP_BUILD_SHA})"
                                 ))
                                 .color(TEXT_MUTED)
-                                .size(12.0),
+                                .size(13.5),
                             );
                         });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let open_rel = egui::Button::new(RichText::new("Open Releases").color(TEXT_PRIMARY).size(12.0))
+                            let open_rel = egui::Button::new(RichText::new("Open Releases").color(TEXT_PRIMARY).size(13.5))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
                                 .rounding(Rounding::same(6.0))
-                                .min_size(Vec2::new(104.0, 32.0));
+                                .min_size(Vec2::new(118.0, 34.0));
                             if ui.add(open_rel).clicked() {
                                 let _ = open::that(format!(
                                     "https://github.com/{UPDATE_REPO_OWNER}/{UPDATE_REPO_NAME}/releases"
@@ -7548,7 +7557,7 @@ impl StreamerApp {
                             } else {
                                 "Check for Updates"
                             };
-                            if gradient_button(ui, check_lbl, Vec2::new(136.0, 32.0), !busy, 12.0).clicked() {
+                            if gradient_button(ui, check_lbl, Vec2::new(152.0, 34.0), !busy, 13.5).clicked() {
                                 lock(&self.state).update_state = UpdateState::Checking;
                                 let _ = self.bg_tx.send(BgTask::CheckForUpdates { silent: false });
                             }
@@ -7709,8 +7718,8 @@ fn main() -> Result<()> {
             .with_icon(window_icon)
             .with_decorations(false)
             .with_resizable(true)
-            .with_inner_size([920.0, 620.0])
-            .with_min_inner_size([720.0, 480.0])
+            .with_inner_size([1120.0, 740.0])
+            .with_min_inner_size([860.0, 560.0])
             .with_visible(!start_hidden),
         ..Default::default()
     };

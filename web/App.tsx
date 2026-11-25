@@ -676,7 +676,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1160px] flex-1 p-6">
+        <main className="mx-auto w-full max-w-[1320px] flex-1 p-6">
           {studioView === 'simulator' && (
             <DesktopWindow
               visible={windowVisible}

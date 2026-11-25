@@ -191,8 +191,8 @@ const ToggleSettingRow: React.FC<ToggleSettingRowProps> = ({
     }`}
   >
     <div className="min-w-0">
-      <p className="text-xs font-semibold text-[#F4F4F6]">{title}</p>
-      <p className="mt-0.5 text-[11px] leading-relaxed text-[#8E95A5]">
+      <p className="text-[13.5px] font-semibold text-[#F4F4F6]">{title}</p>
+      <p className="mt-0.5 text-xs leading-relaxed text-[#8E95A5]">
         {description}
       </p>
     </div>
@@ -618,8 +618,8 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
             {/* Primary typographic line: zero boxed pill clutter */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-              <span className="font-mono text-[14px] font-bold text-[#FFF5FA]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+              <span className="font-mono text-[15.5px] font-bold text-[#FFF5FA]">
                 {entry.riot_id}
               </span>
               <span className="text-[#1F1F26]" aria-hidden="true">/</span>
@@ -642,35 +642,35 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               )}
               <span className="text-[#1F1F26]" aria-hidden="true">/</span>
               <span
-                className="font-mono text-[11px] font-semibold tabular-nums"
+                className="font-mono text-xs font-semibold tabular-nums"
                 style={{ color: tColor }}
               >
                 {tier}
                 {entry.confidence ? ` · ${entry.confidence}%` : ''}
               </span>
               {entry.server_region && (
-                <span className="text-[11px] font-medium text-[#2DD4BF]">
+                <span className="text-xs font-medium text-[#2DD4BF]">
                   · {entry.server_region}
                 </span>
               )}
               {entry.chat_message && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FFA6D2]">
-                  · <MessageSquareQuote className="h-3 w-3" /> Chat
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#FFA6D2]">
+                  · <MessageSquareQuote className="h-3.5 w-3.5" /> Chat
                 </span>
               )}
             </div>
 
-            <p className="mt-1 truncate text-[12.5px] text-[#D8DCE6]">{entry.title}</p>
+            <p className="mt-1 truncate text-sm text-[#D8DCE6]">{entry.title}</p>
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="font-mono text-[11px] text-[#8E95A5] tabular-nums">
+              <span className="font-mono text-xs text-[#8E95A5] tabular-nums">
                 {metaItems.join('  ·  ')}
               </span>
               {hasExpandableDetails && (
                 <button
                   type="button"
                   onClick={() => toggleCardDetails(cardKey)}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-[#8E95A5] transition-colors hover:text-[#FFA6D2]"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[#8E95A5] transition-colors hover:text-[#FFA6D2]"
                 >
                   <span>
                     {isExpanded
@@ -680,18 +680,18 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       : 'Details'}
                   </span>
                   <ChevronDown
-                    className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                    className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                   />
                 </button>
               )}
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => onCopyLink(entry.url)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-2.5 text-xs font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/45 hover:bg-[#1A1A20] whitespace-nowrap"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-[13px] font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/45 hover:bg-[#1A1A20] whitespace-nowrap"
             >
               <Copy className="h-3.5 w-3.5 text-[#8E95A5]" />
               Copy
@@ -700,10 +700,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               type="button"
               onClick={() => onWatchStream(entry)}
               title={entry.url}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3 text-xs font-bold text-[#000000] transition-opacity whitespace-nowrap"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3.5 text-[13px] font-bold text-[#000000] transition-opacity whitespace-nowrap"
             >
               Watch
-              <ExternalLink className="h-3 w-3" />
+              <ExternalLink className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
@@ -712,14 +712,14 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
         {hasExpandableDetails && isExpanded && (
           <div className="mt-3 space-y-2 border-t border-[#1F1F26] pt-2.5">
             {entry.chat_message && (
-              <div className="rounded border border-[#FF5CA8]/30 bg-[#000000] px-2.5 py-1.5 text-[11.5px] text-[#FFA6D2]">
+              <div className="rounded border border-[#FF5CA8]/30 bg-[#000000] px-3 py-2 text-[13px] text-[#FFA6D2]">
                 <span className="font-semibold text-[#FFF5FA]">In-Game Chat:</span>{' '}
                 &ldquo;{entry.chat_message}&rdquo;
               </div>
             )}
 
             {(entry.server_match_status || entry.match_reason) && (
-              <p className="text-[11px] text-[#8E95A5]">
+              <p className="text-xs text-[#8E95A5]">
                 {entry.server_match_status && (
                   <span className="font-medium text-[#D8DCE6]">
                     {entry.server_match_status}
@@ -731,8 +731,8 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
             )}
 
             {entry.candidates && entry.candidates.length > 1 && (
-              <div className="rounded-md border border-[#1F1F26] bg-[#000000] px-3 py-2">
-                <p className="text-[10px] font-semibold tracking-wider text-[#8E95A5] uppercase">
+              <div className="rounded-md border border-[#1F1F26] bg-[#000000] px-3 py-2.5">
+                <p className="text-[11px] font-semibold tracking-wider text-[#8E95A5] uppercase">
                   Ranked Candidates ({entry.candidates.length})
                 </p>
                 <div className="mt-1.5 space-y-1.5">
@@ -748,7 +748,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     return (
                       <div
                         key={`${cand.url}-${idx}`}
-                        className="flex flex-wrap items-center justify-between gap-2 text-[11.5px]"
+                        className="flex flex-wrap items-center justify-between gap-2 text-xs"
                       >
                         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span
@@ -769,11 +769,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           </span>
                           <span className="font-medium text-[#F4F4F6]">{cand.channel}</span>
                           {cand.region_hint && (
-                            <span className="text-[10.5px] text-[#2DD4BF]">
+                            <span className="text-xs text-[#2DD4BF]">
                               · {cand.region_hint}
                             </span>
                           )}
-                          <span className="truncate text-[10.5px] text-[#8E95A5]">
+                          <span className="truncate text-xs text-[#8E95A5]">
                             — {cand.match_reason}
                           </span>
                         </div>
@@ -781,10 +781,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           href={cand.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#FFA6D2] hover:text-[#FFF5FA]"
+                          className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#FFA6D2] hover:text-[#FFF5FA]"
                         >
                           Open
-                          <ExternalLink className="h-2.5 w-2.5" />
+                          <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>
                     );
@@ -850,27 +850,27 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
       {/* 2px Pink-to-Pearl Top Accent Hairline */}
       <div className="h-[2px] w-full bg-pink-white-strip" />
 
-      {/* Custom Frameless 34px AMOLED Title Bar (Minimize & Close-to-tray ONLY) */}
-      <div className="flex h-[34px] items-center justify-between border-b border-[#1F1F26] bg-[#000000] pl-3 pr-1 select-none">
-        <div className="flex min-w-0 items-center gap-2">
-          <RadarIcon size={16} className="shrink-0" />
+      {/* Custom Frameless 38px AMOLED Title Bar (Minimize & Close-to-tray ONLY) */}
+      <div className="flex h-[38px] items-center justify-between border-b border-[#1F1F26] bg-[#000000] pl-3.5 pr-1 select-none">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <RadarIcon size={18} className="shrink-0" />
           <span
-            className="text-[13px] font-bold tracking-wider whitespace-nowrap"
+            className="text-[15px] font-bold tracking-wider whitespace-nowrap"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <span className="text-pink-white-gradient">VALORANT</span>{' '}
             <span className="text-[#FFF5FA]">RADAR</span>
           </span>
           <span className="hidden text-[#1F1F26] sm:inline">/</span>
-          <span className="hidden truncate text-[11px] text-[#8E95A5] sm:inline">
+          <span className="hidden truncate text-xs text-[#8E95A5] sm:inline">
             {status}
           </span>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
           {toastMessage && (
-            <span className="hidden max-w-[280px] items-center gap-1 truncate text-[11px] font-medium text-[#FFA6D2] md:inline-flex">
-              <Check className="h-3 w-3 shrink-0 text-[#FF5CA8]" />
+            <span className="hidden max-w-[320px] items-center gap-1.5 truncate text-xs font-medium text-[#FFA6D2] md:inline-flex">
+              <Check className="h-3.5 w-3.5 shrink-0 text-[#FF5CA8]" />
               <span className="truncate">{toastMessage}</span>
             </span>
           )}
@@ -880,27 +880,27 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               onClick={onHideToTray}
               title="Minimize"
               aria-label="Minimize window"
-              className="flex h-[32px] w-[38px] items-center justify-center text-[#8E95A5] transition-colors hover:bg-[#1A1A20] hover:text-white"
+              className="flex h-[36px] w-[42px] items-center justify-center text-[#8E95A5] transition-colors hover:bg-[#1A1A20] hover:text-white"
             >
-              <Minus className="h-3.5 w-3.5" />
+              <Minus className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={onHideToTray}
               title="Close to system tray"
               aria-label="Close to system tray"
-              className="flex h-[32px] w-[38px] items-center justify-center text-[#8E95A5] transition-colors hover:bg-[#DC2626] hover:text-white"
+              className="flex h-[36px] w-[42px] items-center justify-center text-[#8E95A5] transition-colors hover:bg-[#DC2626] hover:text-white"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Body: 208px Left Sidebar Navigation + Main AMOLED Content Canvas */}
-      <div className="flex min-h-[580px] flex-col md:flex-row">
+      {/* Body: 236px Left Sidebar Navigation + Main AMOLED Content Canvas */}
+      <div className="flex min-h-[680px] flex-col md:flex-row">
         {/* Left Sidebar Navigation Rail */}
-        <aside className="flex w-full shrink-0 flex-col justify-between border-b border-[#1F1F26] bg-[#000000] p-3 md:w-[208px] md:border-r md:border-b-0">
+        <aside className="flex w-full shrink-0 flex-col justify-between border-b border-[#1F1F26] bg-[#000000] p-3.5 md:w-[236px] md:border-r md:border-b-0">
           <nav className="flex flex-row gap-1 overflow-x-auto md:flex-col md:overflow-visible" aria-label="App sections">
             {navItems.map(({ key, label, meta, icon: IconComp }) => {
               const active = activeTab === key;
@@ -909,7 +909,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   key={key}
                   type="button"
                   onClick={() => onChangeTab(key)}
-                  className={`relative flex shrink-0 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-xs font-medium transition-colors whitespace-nowrap md:w-full ${
+                  className={`relative flex shrink-0 items-center justify-between gap-2 rounded-md px-3 py-2.5 text-[13.5px] font-medium transition-colors whitespace-nowrap md:w-full ${
                     active
                       ? 'bg-[#121216] text-[#FFF5FA]'
                       : 'text-[#8E95A5] hover:bg-[#0B0B0E] hover:text-[#F4F4F6]'
@@ -921,9 +921,9 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       aria-hidden="true"
                     />
                   )}
-                  <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex items-center gap-2.5">
                     <IconComp
-                      className={`h-3.5 w-3.5 shrink-0 ${
+                      className={`h-4 w-4 shrink-0 ${
                         active ? 'text-[#FF5CA8]' : 'text-[#5A6275]'
                       }`}
                     />
@@ -931,7 +931,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   </span>
                   {meta && (
                     <span
-                      className={`font-mono text-[10.5px] tabular-nums ${
+                      className={`font-mono text-xs tabular-nums ${
                         key === 'discover' && config.enable_recommendations
                           ? 'text-[#22C55E]'
                           : active
@@ -948,11 +948,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
           </nav>
 
           {/* Bottom-Anchored Status & Primary Actions */}
-          <div className="mt-3 space-y-2 border-t border-[#1F1F26] pt-3 md:mt-6">
-            <div className="rounded-md border border-[#1F1F26] bg-[#0B0B0E] px-2.5 py-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#F4F4F6]">
+          <div className="mt-4 space-y-2.5 border-t border-[#1F1F26] pt-3.5 md:mt-6">
+            <div className="rounded-md border border-[#1F1F26] bg-[#0B0B0E] px-3 py-2.5">
+              <div className="flex items-center gap-2 text-xs font-medium text-[#F4F4F6]">
                 <span
-                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                  className="inline-block h-2 w-2 shrink-0 rounded-full"
                   style={{
                     backgroundColor: valorantRunning ? '#22C55E' : '#5A6275',
                   }}
@@ -961,7 +961,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   {valorantRunning ? 'Valorant Active' : 'Waiting for Riot'}
                 </span>
               </div>
-              <p className="mt-0.5 truncate font-mono text-[10.5px] text-[#2DD4BF]">
+              <p className="mt-1 truncate font-mono text-xs text-[#2DD4BF]">
                 {effectiveRegion.shortLabel}
               </p>
             </div>
@@ -970,7 +970,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               type="button"
               disabled={isScanning}
               onClick={onTriggerManualScan}
-              className={`inline-flex h-8 w-full items-center justify-center rounded-md px-3 text-xs font-bold transition-all whitespace-nowrap ${
+              className={`inline-flex h-9 w-full items-center justify-center rounded-md px-3 text-[13px] font-bold transition-all whitespace-nowrap ${
                 isScanning
                   ? 'cursor-not-allowed border border-[#1F1F26] bg-[#121216] text-[#8E95A5]'
                   : 'bg-pink-white-gradient bg-pink-white-gradient-hover text-[#000000]'
@@ -982,26 +982,26 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
             <button
               type="button"
               onClick={() => onOpenAddModal()}
-              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-xs font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/50 hover:bg-[#1A1A20] whitespace-nowrap"
+              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-[13px] font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/50 hover:bg-[#1A1A20] whitespace-nowrap"
             >
-              <Plus className="h-3.5 w-3.5 text-[#FFA6D2]" />
+              <Plus className="h-4 w-4 text-[#FFA6D2]" />
               Add Streamer
             </button>
 
             <div className="flex items-center justify-between pt-1">
-              <span className="font-mono text-[10.5px] text-[#5A6275]">v{APP_VERSION}</span>
+              <span className="font-mono text-xs text-[#5A6275]">v{APP_VERSION}</span>
               <button
                 type="button"
                 disabled={updateState.status === 'checking'}
                 onClick={() => handleCheckForUpdates(false)}
-                className={`inline-flex items-center gap-1 text-[10.5px] font-medium transition-colors whitespace-nowrap ${
+                className={`inline-flex items-center gap-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
                   updateState.status === 'available'
                     ? 'text-[#FF5CA8] hover:text-[#FFA6D2]'
                     : 'text-[#8E95A5] hover:text-[#FFF5FA]'
                 } disabled:opacity-60`}
               >
                 <RefreshCw
-                  className={`h-3 w-3 ${updateState.status === 'checking' ? 'animate-spin text-[#FFA6D2]' : ''}`}
+                  className={`h-3.5 w-3.5 ${updateState.status === 'checking' ? 'animate-spin text-[#FFA6D2]' : ''}`}
                 />
                 {updateState.status === 'checking'
                   ? 'Checking...'
@@ -1014,7 +1014,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
         </aside>
 
         {/* Main Panel (#000000) */}
-        <div className="min-w-0 flex-1 max-h-[680px] overflow-y-auto bg-[#000000] px-5 py-4">
+        <div className="min-w-0 flex-1 max-h-[780px] overflow-y-auto bg-[#000000] px-6 py-5">
           {/* Global Update Banner */}
           {updateState.status === 'available' && (
             <div className="mb-4 rounded-lg border border-[#FF5CA8]/70 bg-[#0B0B0E] px-4 py-3">
@@ -1106,14 +1106,14 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               {/* Clean Single-Row Toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-2.5">
                 <div className="flex flex-1 flex-wrap items-center gap-2">
-                  <div className="relative min-w-[200px] flex-1 sm:max-w-[320px]">
-                    <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#5A6275]" />
+                  <div className="relative min-w-[220px] flex-1 sm:max-w-[360px]">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#5A6275]" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search Riot ID, channel, map, server..."
-                      className="h-8 w-full rounded-md border border-[#1F1F26] bg-[#0B0B0E] pr-3 pl-8 text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
+                      className="h-9 w-full rounded-md border border-[#1F1F26] bg-[#0B0B0E] pr-3 pl-9 text-[13px] text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                     />
                   </div>
 
@@ -1123,7 +1123,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       type="button"
                       onClick={() => setFiltersOpen((prev) => !prev)}
                       aria-expanded={filtersOpen}
-                      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors whitespace-nowrap ${
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3.5 text-[13px] font-medium transition-colors whitespace-nowrap ${
                         filtersOpen || activePopoverFilterCount > 0
                           ? 'border-[#FF5CA8]/60 bg-[#121216] text-[#FFF5FA]'
                           : 'border-[#1F1F26] bg-[#0B0B0E] text-[#8E95A5] hover:border-[#2B2B36] hover:text-white'
@@ -1140,7 +1140,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       <div
                         role="dialog"
                         aria-label="History filters"
-                        className="absolute top-10 left-0 z-30 w-[300px] rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-3.5 shadow-2xl"
+                        className="absolute top-11 left-0 z-30 w-[330px] rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-4 shadow-2xl"
                       >
                         <div className="space-y-3">
                           <div>
@@ -1319,10 +1319,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   {/* SUBSECTION 1: LATEST MATCH (quiet unboxed summary bar) */}
                   {lastScannedMatch && (
                     <section aria-label="Latest Match">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#FF5CA8]" />
-                          <h3 className="text-[11px] font-bold tracking-wider text-[#FFA6D2] uppercase">
+                      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+                          <span className="inline-block h-2 w-2 rounded-full bg-[#FF5CA8]" />
+                          <h3 className="text-xs font-bold tracking-wider text-[#FFA6D2] uppercase">
                             Latest Match
                           </h3>
                           <span className="text-[#1F1F26]">/</span>
@@ -1339,7 +1339,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             </>
                           )}
                           <span className="text-[#1F1F26]">·</span>
-                          <span className="font-mono text-[11px] text-[#8E95A5] tabular-nums">
+                          <span className="font-mono text-xs text-[#8E95A5] tabular-nums">
                             {lastScannedMatch.players_checked} scanned
                             {lastScannedMatch.party_skipped > 0
                               ? `, ${lastScannedMatch.party_skipped} party skipped`
@@ -1347,7 +1347,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           </span>
                           <span className="text-[#1F1F26]">·</span>
                           <span
-                            className={`font-mono text-[11px] font-semibold tabular-nums ${
+                            className={`font-mono text-xs font-semibold tabular-nums ${
                               lastScannedMatch.streamers_found > 0
                                 ? 'text-[#22C55E]'
                                 : 'text-[#8E95A5]'
@@ -1356,7 +1356,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             {lastScannedMatch.streamers_found} detected
                           </span>
                         </div>
-                        <span className="font-mono text-[11px] text-[#5A6275] tabular-nums">
+                        <span className="font-mono text-xs text-[#5A6275] tabular-nums">
                           {lastScannedMatch.scanned_at}
                         </span>
                       </div>
@@ -1378,15 +1378,15 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   {/* SUBSECTION 2: PREVIOUS HISTORY */}
                   {previousHistoryEntries.length > 0 && (
                     <section aria-label="Previous History" className="border-t border-[#1F1F26] pt-4">
-                      <div className="mb-2 flex items-center justify-between">
-                        <h3 className="text-[11px] font-bold tracking-wider text-[#8E95A5] uppercase">
+                      <div className="mb-2.5 flex items-center justify-between">
+                        <h3 className="text-xs font-bold tracking-wider text-[#8E95A5] uppercase">
                           Previous History ({previousHistoryEntries.length})
                         </h3>
-                        <span className="font-mono text-[10.5px] text-[#5A6275]">
+                        <span className="font-mono text-xs text-[#5A6275]">
                           Most recent first
                         </span>
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         {previousHistoryEntries.map((entry) => renderHistoryCard(entry))}
                       </div>
                     </section>
@@ -1399,13 +1399,13 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
           {/* TAB 2: DIRECTORY MANAGER */}
           {activeTab === 'directory' && (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2.5">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <div className="flex items-center rounded-md border border-[#1F1F26] bg-[#0B0B0E] p-0.5">
                     <button
                       type="button"
                       onClick={() => setDirSource('custom')}
-                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap tabular-nums ${
+                      className={`rounded px-3 py-1.5 text-[13px] font-medium transition-colors whitespace-nowrap tabular-nums ${
                         dirSource === 'custom'
                           ? 'bg-[#1A1A20] text-[#FFF5FA]'
                           : 'text-[#8E95A5] hover:text-white'
@@ -1416,7 +1416,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     <button
                       type="button"
                       onClick={() => setDirSource('community')}
-                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap tabular-nums ${
+                      className={`rounded px-3 py-1.5 text-[13px] font-medium transition-colors whitespace-nowrap tabular-nums ${
                         dirSource === 'community'
                           ? 'bg-[#1A1A20] text-[#FFF5FA]'
                           : 'text-[#8E95A5] hover:text-white'
@@ -1426,14 +1426,14 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     </button>
                   </div>
 
-                  <div className="relative w-56">
-                    <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#5A6275]" />
+                  <div className="relative w-64">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#5A6275]" />
                     <input
                       type="text"
                       value={dirSearch}
                       onChange={(e) => setDirSearch(e.target.value)}
                       placeholder="Filter Riot ID, alias, channel..."
-                      className="h-8 w-full rounded-md border border-[#1F1F26] bg-[#0B0B0E] pr-3 pl-8 text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
+                      className="h-9 w-full rounded-md border border-[#1F1F26] bg-[#0B0B0E] pr-3 pl-9 text-[13px] text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                     />
                   </div>
                 </div>
@@ -1442,7 +1442,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   type="button"
                   disabled={isSyncingDirectory}
                   onClick={onSyncDirectory}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-xs font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/50 hover:bg-[#1A1A20] disabled:opacity-50 whitespace-nowrap"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3.5 text-[13px] font-medium text-[#F4F4F6] transition-colors hover:border-[#FF5CA8]/50 hover:bg-[#1A1A20] disabled:opacity-50 whitespace-nowrap"
                 >
                   <RefreshCw
                     className={`h-3.5 w-3.5 ${isSyncingDirectory ? 'animate-spin' : ''}`}
@@ -1452,11 +1452,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               </div>
 
               {filteredDirectory.length === 0 ? (
-                <div className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] py-12 text-center text-xs text-[#8E95A5]">
+                <div className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] py-12 text-center text-sm text-[#8E95A5]">
                   No entries match your filter.
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {filteredDirectory.map((d) => {
                     const pColor = platformColor(d.platform);
                     const regShort = d.server_region
@@ -1465,11 +1465,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     return (
                       <div
                         key={`${d.id || d.riot_id}-${d.platform}-${d.channel_url}`}
-                        className="flex flex-col justify-between gap-2.5 rounded-lg border border-[#1F1F26] bg-[#0B0B0E] px-4 py-3 sm:flex-row sm:items-center"
+                        className="flex flex-col justify-between gap-2.5 rounded-lg border border-[#1F1F26] bg-[#0B0B0E] px-4 py-3.5 sm:flex-row sm:items-center"
                       >
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                            <span className="font-mono text-[13.5px] font-semibold text-[#FFF5FA]">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+                            <span className="font-mono text-[15px] font-semibold text-[#FFF5FA]">
                               {d.riot_id}
                             </span>
                             <span className="text-[#1F1F26]">/</span>
@@ -1480,14 +1480,14 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             {regShort && (
                               <>
                                 <span className="text-[#1F1F26]">/</span>
-                                <span className="text-[11px] font-medium text-[#2DD4BF]">
+                                <span className="text-xs font-medium text-[#2DD4BF]">
                                   {regShort}
                                 </span>
                               </>
                             )}
                             <span className="text-[#1F1F26]">/</span>
                             <span
-                              className={`text-[11px] font-medium ${
+                              className={`text-xs font-medium ${
                                 d.verified ? 'text-[#22C55E]' : 'text-[#FB923C]'
                               }`}
                             >
@@ -1495,32 +1495,32 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             </span>
                           </div>
                           {d.aliases && d.aliases.length > 0 && (
-                            <p className="mt-0.5 font-mono text-[10.5px] text-[#FFA6D2]">
+                            <p className="mt-1 font-mono text-xs text-[#FFA6D2]">
                               Aliases: {d.aliases.join(', ')}
                             </p>
                           )}
-                          <p className="mt-0.5 truncate font-mono text-[11px] text-[#8E95A5]">
+                          <p className="mt-0.5 truncate font-mono text-xs text-[#8E95A5]">
                             {d.channel_url}
                           </p>
                         </div>
 
-                        <div className="flex shrink-0 items-center gap-1.5">
+                        <div className="flex shrink-0 items-center gap-2">
                           {dirSource === 'custom' && (
                             <>
                               <button
                                 type="button"
                                 onClick={() => onOpenAddModal(d)}
-                                className="inline-flex h-7 items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 text-xs text-[#F4F4F6] hover:bg-[#1A1A20]"
+                                className="inline-flex h-8 items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-3 text-[13px] text-[#F4F4F6] hover:bg-[#1A1A20]"
                               >
-                                <Pencil className="h-3 w-3" />
+                                <Pencil className="h-3.5 w-3.5" />
                                 Edit
                               </button>
                               <button
                                 type="button"
                                 onClick={() => onDeleteCustomEntry(d.riot_id, d.platform)}
-                                className="inline-flex h-7 items-center gap-1 rounded border border-[#1F1F26] px-2.5 text-xs text-[#FF668A] hover:border-[#FF668A]"
+                                className="inline-flex h-8 items-center gap-1 rounded border border-[#1F1F26] px-3 text-[13px] text-[#FF668A] hover:border-[#FF668A]"
                               >
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                                 Delete
                               </button>
                             </>
@@ -1529,10 +1529,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             href={d.channel_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex h-7 items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 text-xs text-[#F4F4F6] hover:bg-[#1A1A20]"
+                            className="inline-flex h-8 items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-3 text-[13px] text-[#F4F4F6] hover:bg-[#1A1A20]"
                           >
                             Open
-                            <ExternalLink className="h-3 w-3" />
+                            <ExternalLink className="h-3.5 w-3.5" />
                           </a>
                         </div>
                       </div>
@@ -1546,7 +1546,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowSanitizerTools((prev) => !prev)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[#8E95A5] hover:text-[#FFF5FA]"
+                  className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#8E95A5] hover:text-[#FFF5FA]"
                 >
                   <ShieldCheck className="h-3.5 w-3.5 text-[#22C55E]" />
                   <span>URL &amp; IGN Heuristic Verifier</span>
@@ -1630,10 +1630,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       <Radio className="h-5 w-5 text-[#FF5CA8]" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-[#FFF5FA]">
+                      <h3 className="text-[15.5px] font-semibold text-[#FFF5FA]">
                         Live Streamer Recommendations are OFF
                       </h3>
-                      <p className="mt-1 text-xs leading-relaxed text-[#8E95A5]">
+                      <p className="mt-1 text-[13px] leading-relaxed text-[#8E95A5]">
                         Disabled by default to conserve bandwidth and API quota. Enabling fetches
                         cached live Valorant creators near{' '}
                         <span className="font-semibold text-[#2DD4BF]">{effectiveRegion.label}</span>.
@@ -1662,7 +1662,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             key={plat}
                             type="button"
                             onClick={() => setDiscoverPlatform(plat)}
-                            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                            className={`rounded px-3 py-1.5 text-[13px] font-medium transition-colors whitespace-nowrap ${
                               discoverPlatform === plat
                                 ? 'bg-[#1A1A20] text-[#FFF5FA]'
                                 : 'text-[#8E95A5] hover:text-white'
@@ -1672,11 +1672,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           </button>
                         ))}
                       </div>
-                      <span className="font-mono text-[11px] text-[#2DD4BF]">
+                      <span className="font-mono text-xs text-[#2DD4BF]">
                         {effectiveRegion.shortLabel}
                       </span>
                       <span className="text-[#1F1F26]">·</span>
-                      <span className="font-mono text-[11px] text-[#8E95A5]">
+                      <span className="font-mono text-xs text-[#8E95A5]">
                         Updated {recsUpdatedAt}
                       </span>
                     </div>
@@ -1686,7 +1686,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                         type="button"
                         disabled={isRefreshingRecs}
                         onClick={() => handleRefreshRecs(true)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-xs font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50 disabled:opacity-60 whitespace-nowrap"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3.5 text-[13px] font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50 disabled:opacity-60 whitespace-nowrap"
                       >
                         <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingRecs ? 'animate-spin' : ''}`} />
                         {isRefreshingRecs ? 'Refreshing...' : 'Refresh'}
@@ -1699,25 +1699,25 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 text-[11px] text-[#8E95A5]">
-                    <Info className="h-3.5 w-3.5 shrink-0 text-[#38BDF8]" />
+                  <div className="flex items-center gap-2 text-xs text-[#8E95A5]">
+                    <Info className="h-4 w-4 shrink-0 text-[#38BDF8]" />
                     <span>
                       Discovery suggestions near {effectiveRegion.shortLabel} — not matched to your lobby.
                     </span>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {visibleRecommendations.map((rec) => {
                       const pColor = platformColor(rec.platform);
                       return (
                         <div
                           key={rec.id}
-                          className="flex flex-col justify-between gap-3 rounded-lg border border-[#1F1F26] bg-[#0B0B0E] px-4 py-3 sm:flex-row sm:items-center"
+                          className="flex flex-col justify-between gap-3 rounded-lg border border-[#1F1F26] bg-[#0B0B0E] px-4 py-3.5 sm:flex-row sm:items-center"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#22C55E]" />
-                              <span className="text-[13.5px] font-bold text-[#FFF5FA]">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+                              <span className="inline-block h-2 w-2 rounded-full bg-[#22C55E]" />
+                              <span className="text-[15px] font-bold text-[#FFF5FA]">
                                 {rec.channel}
                               </span>
                               <span className="text-[#1F1F26]">/</span>
@@ -1725,23 +1725,23 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                                 {rec.platform}
                               </span>
                               <span className="text-[#1F1F26]">/</span>
-                              <span className="font-mono text-[11px] font-medium text-[#22C55E] tabular-nums">
+                              <span className="font-mono text-xs font-medium text-[#22C55E] tabular-nums">
                                 {formatViewers(rec.viewers)}
                               </span>
-                              <span className="text-[11px] text-[#8E95A5]">
+                              <span className="text-xs text-[#8E95A5]">
                                 · {rec.region_label}
                               </span>
                             </div>
-                            <p className="mt-1 truncate text-xs text-[#D8DCE6]">
+                            <p className="mt-1 truncate text-[13.5px] text-[#D8DCE6]">
                               {rec.title}
                             </p>
                           </div>
 
-                          <div className="flex shrink-0 items-center gap-1.5">
+                          <div className="flex shrink-0 items-center gap-2">
                             <button
                               type="button"
                               onClick={() => onOpenAddFromRecommendation(rec)}
-                              className="inline-flex h-8 items-center gap-1 rounded-md border border-[#1F1F26] bg-[#121216] px-2.5 text-xs font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50 hover:bg-[#1A1A20] whitespace-nowrap"
+                              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-[13px] font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50 hover:bg-[#1A1A20] whitespace-nowrap"
                             >
                               <Plus className="h-3.5 w-3.5 text-[#FFA6D2]" />
                               Save
@@ -1750,10 +1750,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                               href={rec.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3 text-xs font-bold text-[#000000] whitespace-nowrap"
+                              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-3.5 text-[13px] font-bold text-[#000000] whitespace-nowrap"
                             >
                               Watch
-                              <ExternalLink className="h-3 w-3" />
+                              <ExternalLink className="h-3.5 w-3.5" />
                             </a>
                           </div>
                         </div>
@@ -1769,11 +1769,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
           {activeTab === 'settings' && (
             <div className="space-y-4">
               {/* Valorant Servers & Detection (clean dropdown, no redundant chip wall) */}
-              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-4">
-                <h3 className="text-sm font-semibold text-[#FFF5FA]">
+              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-5">
+                <h3 className="text-[15.5px] font-semibold text-[#FFF5FA]">
                   Valorant Server
                 </h3>
-                <p className="mt-0.5 text-xs text-[#8E95A5]">
+                <p className="mt-1 text-[13px] text-[#8E95A5]">
                   Prioritizes your actual in-game Valorant server to prevent cross-server false positives.
                 </p>
 
@@ -1787,7 +1787,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                         server_override: e.target.value as ServerRegionOverride,
                       })
                     }
-                    className="w-full max-w-md rounded-md border border-[#1F1F26] bg-[#000000] px-3 py-2 text-xs text-white focus:border-[#FF5CA8] focus:outline-none"
+                    className="w-full max-w-lg rounded-md border border-[#1F1F26] bg-[#000000] px-3 py-2 text-[13px] text-white focus:border-[#FF5CA8] focus:outline-none"
                   >
                     <option value="auto">
                       Auto-detect from Valorant log (Current: {detectedRegionInfo.label})
@@ -1800,17 +1800,17 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   </select>
                 </div>
 
-                <p className="mt-2.5 font-mono text-[11px] text-[#2DD4BF]">
+                <p className="mt-2.5 font-mono text-xs text-[#2DD4BF]">
                   Detected: {detectedRegionInfo.label} ({detectedRegionInfo.podExample})
                 </p>
               </section>
 
               {/* Features & Windows Integration */}
-              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-4">
-                <h3 className="text-sm font-semibold text-[#FFF5FA]">
+              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-5">
+                <h3 className="text-[15.5px] font-semibold text-[#FFF5FA]">
                   Features &amp; Windows Integration
                 </h3>
-                <div className="mt-3 space-y-2">
+                <div className="mt-3 space-y-2.5">
                   <ToggleSettingRow
                     checked={draft.skip_party_members}
                     onChange={(next) =>
@@ -1861,18 +1861,18 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               </section>
 
               {/* Optional Platform API Keys */}
-              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-4">
+              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm font-semibold text-[#FFF5FA]">
+                    <h3 className="text-[15.5px] font-semibold text-[#FFF5FA]">
                       Optional Platform API Keys
                     </h3>
-                    <p className="mt-0.5 text-xs text-[#8E95A5]">
+                    <p className="mt-1 text-[13px] text-[#8E95A5]">
                       Leave blank to run keyless, or add free keys for faster official API checks.
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-[#8E95A5]">Show keys</span>
+                    <span className="text-xs text-[#8E95A5]">Show keys</span>
                     <ToggleSwitch
                       checked={showSecrets}
                       onChange={setShowSecrets}
@@ -1882,18 +1882,18 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   </div>
                 </div>
 
-                <div className="mt-3.5 space-y-3.5">
+                <div className="mt-4 space-y-4">
                   <div>
                     <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-medium text-[#F4F4F6]">
+                      <label className="text-[13px] font-medium text-[#F4F4F6]">
                         YouTube Data API v3 Key
                       </label>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <a
                           href="https://console.cloud.google.com/apis/credentials"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-[11px] font-medium text-[#FFA6D2] hover:border-[#FF5CA8]/50 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-xs font-medium text-[#FFA6D2] hover:border-[#FF5CA8]/50 whitespace-nowrap"
                         >
                           Get Key
                           <ExternalLink className="h-3 w-3" />
@@ -1901,7 +1901,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                         <button
                           type="button"
                           onClick={handleTestYoutubeKey}
-                          className="rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-[11px] font-medium text-[#F4F4F6] hover:bg-[#1A1A20] whitespace-nowrap"
+                          className="rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-xs font-medium text-[#F4F4F6] hover:bg-[#1A1A20] whitespace-nowrap"
                         >
                           Test Key
                         </button>
@@ -1915,11 +1915,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                         setYtKeyStatus(null);
                       }}
                       placeholder="AIza... (optional)"
-                      className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-1.5 font-mono text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
+                      className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 font-mono text-[13px] text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                     />
                     {ytKeyStatus && (
                       <div
-                        className={`mt-1.5 flex items-start gap-1.5 rounded border px-2.5 py-1.5 text-[11px] ${
+                        className={`mt-1.5 flex items-start gap-1.5 rounded border px-2.5 py-1.5 text-xs ${
                           ytKeyStatus.kind === 'ok'
                             ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
                             : 'border-[#FF668A]/40 bg-[#FF668A]/10 text-[#FF668A]'
@@ -1937,15 +1937,15 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
 
                   <div>
                     <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-[#F4F4F6]">
+                      <span className="text-[13px] font-medium text-[#F4F4F6]">
                         Twitch Helix API (Client ID &amp; Secret)
                       </span>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <a
                           href="https://dev.twitch.tv/console/apps"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-[11px] font-medium text-[#A770FF] hover:border-[#A770FF]/60 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-xs font-medium text-[#A770FF] hover:border-[#A770FF]/60 whitespace-nowrap"
                         >
                           Get Keys
                           <ExternalLink className="h-3 w-3" />
@@ -1953,15 +1953,15 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                         <button
                           type="button"
                           onClick={handleTestTwitchKeys}
-                          className="rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-[11px] font-medium text-[#F4F4F6] hover:bg-[#1A1A20] whitespace-nowrap"
+                          className="rounded border border-[#1F1F26] bg-[#121216] px-2.5 py-1 text-xs font-medium text-[#F4F4F6] hover:bg-[#1A1A20] whitespace-nowrap"
                         >
                           Test Twitch
                         </button>
                       </div>
                     </div>
-                    <div className="grid gap-2.5 sm:grid-cols-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <div>
-                        <label className="mb-1 block text-[11px] text-[#8E95A5]">
+                        <label className="mb-1 block text-xs text-[#8E95A5]">
                           Client ID
                         </label>
                         <input
@@ -1972,11 +1972,11 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             setTwitchKeyStatus(null);
                           }}
                           placeholder="Optional Client ID"
-                          className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-1.5 font-mono text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
+                          className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 font-mono text-[13px] text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-[11px] text-[#8E95A5]">
+                        <label className="mb-1 block text-xs text-[#8E95A5]">
                           Client Secret
                         </label>
                         <input
@@ -1987,13 +1987,13 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             setTwitchKeyStatus(null);
                           }}
                           placeholder="Optional Client Secret"
-                          className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-1.5 font-mono text-xs text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
+                          className="w-full rounded border border-[#1F1F26] bg-[#000000] px-3 py-2 font-mono text-[13px] text-white placeholder-[#5A6275] focus:border-[#FF5CA8] focus:outline-none"
                         />
                       </div>
                     </div>
                     {twitchKeyStatus && (
                       <div
-                        className={`mt-1.5 flex items-start gap-1.5 rounded border px-2.5 py-1.5 text-[11px] ${
+                        className={`mt-1.5 flex items-start gap-1.5 rounded border px-2.5 py-1.5 text-xs ${
                           twitchKeyStatus.kind === 'ok'
                             ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
                             : 'border-[#FF668A]/40 bg-[#FF668A]/10 text-[#FF668A]'
@@ -2014,23 +2014,23 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowApiGuide((prev) => !prev)}
-                      className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-[#FFA6D2] transition-colors hover:text-[#FFF5FA]"
+                      className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-[13px] font-medium text-[#FFA6D2] transition-colors hover:text-[#FFF5FA]"
                     >
                       <span className="inline-flex items-center gap-1.5">
-                        <KeyRound className="h-3.5 w-3.5" />
+                        <KeyRound className="h-4 w-4" />
                         How to get free API keys (Step-by-Step Guide)
                       </span>
                       <ChevronDown
-                        className={`h-3.5 w-3.5 transition-transform ${showApiGuide ? 'rotate-180' : ''}`}
+                        className={`h-4 w-4 transition-transform ${showApiGuide ? 'rotate-180' : ''}`}
                       />
                     </button>
                     {showApiGuide && (
-                      <div className="space-y-3 border-t border-[#1F1F26] px-3.5 py-3 text-[11.5px] leading-relaxed text-[#F4F4F6]">
+                      <div className="space-y-3 border-t border-[#1F1F26] px-4 py-3.5 text-xs leading-relaxed text-[#F4F4F6]">
                         <div>
                           <p className="font-semibold text-[#FF5CA8]">
                             YouTube Data API v3 (Free — 10,000 units/day)
                           </p>
-                          <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[#D8DCE6]">
+                          <ol className="mt-1 list-decimal space-y-1 pl-4 text-[#D8DCE6]">
                             <li>Click <strong className="text-white">Get Key</strong> above to open Google Cloud Console.</li>
                             <li>Create a new project (e.g. <span className="font-mono text-white">Valorant-Radar</span>).</li>
                             <li>Enable <span className="font-mono text-white">YouTube Data API v3</span> under Library.</li>
@@ -2041,13 +2041,13 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                           <p className="font-semibold text-[#A770FF]">
                             Twitch Helix API (Free — requires 2FA)
                           </p>
-                          <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[#D8DCE6]">
+                          <ol className="mt-1 list-decimal space-y-1 pl-4 text-[#D8DCE6]">
                             <li>Click <strong className="text-white">Get Keys</strong> above to open Twitch Developer Console.</li>
                             <li>Register an application with redirect URL <span className="font-mono text-white">http://localhost</span>.</li>
                             <li>Copy <strong className="text-white">Client ID</strong> and generate a <strong className="text-white">Client Secret</strong>.</li>
                           </ol>
                         </div>
-                        <p className="flex items-center gap-1.5 text-[11px] text-[#8E95A5]">
+                        <p className="flex items-center gap-1.5 text-xs text-[#8E95A5]">
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#FB923C]" />
                           Kick needs no API key. Leaving all keys blank still works keyless.
                         </p>
@@ -2058,13 +2058,13 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
               </section>
 
               {/* App Updates & Version */}
-              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-4">
+              <section className="rounded-lg border border-[#1F1F26] bg-[#0B0B0E] p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-[#FFF5FA]">
+                    <h3 className="text-[15.5px] font-semibold text-[#FFF5FA]">
                       App Updates
                     </h3>
-                    <p className="mt-0.5 font-mono text-[11px] text-[#8E95A5]">
+                    <p className="mt-1 font-mono text-xs text-[#8E95A5]">
                       Installed v{APP_VERSION} · Checks GitHub Releases automatically
                     </p>
                   </div>
@@ -2073,7 +2073,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       type="button"
                       disabled={updateState.status === 'checking'}
                       onClick={() => handleCheckForUpdates(false)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3 text-xs font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50 disabled:opacity-60 whitespace-nowrap"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#121216] px-3.5 text-[13px] font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50 disabled:opacity-60 whitespace-nowrap"
                     >
                       <RefreshCw
                         className={`h-3.5 w-3.5 ${updateState.status === 'checking' ? 'animate-spin' : ''}`}
@@ -2084,36 +2084,36 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                       href={`https://github.com/${COMMUNITY_REPO_OWNER}/${COMMUNITY_REPO_NAME}/releases`}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#000000] px-3 text-xs font-medium text-[#8E95A5] hover:text-white whitespace-nowrap"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#1F1F26] bg-[#000000] px-3.5 text-[13px] font-medium text-[#8E95A5] hover:text-white whitespace-nowrap"
                     >
                       Releases
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   </div>
                 </div>
 
                 {updateState.status === 'up_to_date' && (
-                  <p className="mt-2.5 flex items-center gap-1.5 text-xs text-[#22C55E]">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <p className="mt-2.5 flex items-center gap-1.5 text-[13px] text-[#22C55E]">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
                     {updateState.message}
                   </p>
                 )}
                 {updateState.status === 'error' && (
-                  <p className="mt-2.5 flex items-center gap-1.5 text-xs text-[#FF668A]">
-                    <XCircle className="h-3.5 w-3.5 shrink-0" />
+                  <p className="mt-2.5 flex items-center gap-1.5 text-[13px] text-[#FF668A]">
+                    <XCircle className="h-4 w-4 shrink-0" />
                     {updateState.message}
                   </p>
                 )}
               </section>
 
               <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <span className="font-mono text-[11px] text-[#5A6275]">
+                <span className="font-mono text-xs text-[#5A6275]">
                   %APPDATA%\ValorantStreamerRadar\config.json
                 </span>
                 <button
                   type="button"
                   onClick={handleSaveSettings}
-                  className="rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-5 py-2 text-xs font-bold text-[#000000] transition-opacity whitespace-nowrap"
+                  className="rounded-md bg-pink-white-gradient bg-pink-white-gradient-hover px-5 py-2.5 text-[13px] font-bold text-[#000000] transition-opacity whitespace-nowrap"
                 >
                   Save Settings
                 </button>

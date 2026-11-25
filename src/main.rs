@@ -4,7 +4,8 @@ use anyhow::{anyhow, Context, Result};
 use arboard::Clipboard;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Local;
-use eframe::egui::{self, Color32, FontId, Frame, Margin, RichText, Rounding, Stroke, Vec2};
+use egui::{Color32, CornerRadius, FontId, Frame, Margin, RichText, Stroke, StrokeKind, Vec2};
+use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -16,9 +17,11 @@ use std::fs::{self, File, OpenOptions};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinSet;
@@ -5044,25 +5047,39 @@ mod win32_window {
     pub fn post_close() {}
 }
 
+#[derive(Debug, Clone, Copy)]
+enum AppUserEvent {
+    RequestRepaint {
+        when: Instant,
+        cumulative_pass_nr: u64,
+    },
+    ShowWindow,
+    Quit,
+}
+
+static EVENT_LOOP_PROXY: OnceLock<winit::event_loop::EventLoopProxy<AppUserEvent>> = OnceLock::new();
+
 fn show_window(ctx: &egui::Context) {
     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
-    // eframe 0.29 / winit 0.30 stops delivering RedrawRequested while a Win32 window is hidden,
-    // so send_viewport_cmd(Visible(true)) alone never runs until Win32 unhides and invalidates it.
     win32_window::show_and_focus();
+    if let Some(proxy) = EVENT_LOOP_PROXY.get() {
+        let _ = proxy.send_event(AppUserEvent::ShowWindow);
+    }
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     ctx.request_repaint();
-    // Follow-up repaint ensures NVIDIA G-SYNC / OpenGL redraws once DWM maps the unhidden window.
-    ctx.request_repaint_after(Duration::from_millis(80));
 }
 
 fn quit_app(ctx: &egui::Context) {
     QUIT.store(true, Ordering::Relaxed);
+    if let Some(proxy) = EVENT_LOOP_PROXY.get() {
+        let _ = proxy.send_event(AppUserEvent::Quit);
+    }
     win32_window::post_close();
     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     ctx.request_repaint();
-    // Dropping out of run_native removes the tray icon cleanly; this is just a safety net.
+    // Dropping out of run_app removes the tray icon cleanly; this is just a safety net.
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(3));
         std::process::exit(0);
@@ -5348,8 +5365,9 @@ fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
             CARD_BORDER
         };
         let painter = ui.painter();
-        painter.rect_filled(rect, Rounding::same(radius), track_bg);
-        painter.rect_stroke(rect, Rounding::same(radius), Stroke::new(1.0, border_col));
+        let track_cr = CornerRadius::same(radius.round() as u8);
+        painter.rect_filled(rect, track_cr, track_bg);
+        painter.rect_stroke(rect, track_cr, Stroke::new(1.0, border_col), StrokeKind::Inside);
 
         let thumb_x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), how_on);
         let thumb_center = egui::pos2(thumb_x, rect.center().y);
@@ -5364,11 +5382,11 @@ fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
 
 fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> bool {
     let mut changed = false;
-    Frame::none()
+    Frame::NONE
         .fill(BG_DARK)
         .stroke(Stroke::new(1.0, if *on { ACCENT_PINK.linear_multiply(0.35) } else { CARD_BORDER }))
-        .rounding(Rounding::same(6.0))
-        .inner_margin(Margin::symmetric(14.0, 10.0))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
@@ -5397,9 +5415,9 @@ fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
     let p = ui.painter();
     let box_rect = rect.shrink(0.5);
-    let r = (box_rect.width() * 0.18).max(3.0);
-    p.rect_filled(box_rect, Rounding::same(r), BG_DARK);
-    p.rect_stroke(box_rect, Rounding::same(r), Stroke::new(1.3, ACCENT_PINK));
+    let r = (box_rect.width() * 0.18).max(3.0).round() as u8;
+    p.rect_filled(box_rect, CornerRadius::same(r), BG_DARK);
+    p.rect_stroke(box_rect, CornerRadius::same(r), Stroke::new(1.3, ACCENT_PINK), StrokeKind::Inside);
     let cx = box_rect.center().x;
     let cy = box_rect.center().y;
     let half_w = box_rect.width() * 0.24;
@@ -5424,14 +5442,14 @@ fn paint_copy_icon_button(ui: &mut egui::Ui) -> egui::Response {
     let border = if hovered { ACCENT_PINK.linear_multiply(0.55) } else { CARD_BORDER };
     let icon_col = if hovered { ACCENT_PEARL } else { TEXT_MUTED };
     let p = ui.painter();
-    p.rect_filled(rect, Rounding::same(6.0), fill);
-    p.rect_stroke(rect, Rounding::same(6.0), Stroke::new(1.0, border));
+    p.rect_filled(rect, CornerRadius::same(6), fill);
+    p.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, border), StrokeKind::Inside);
 
     let c = rect.center();
     let stroke = Stroke::new(1.4, icon_col);
     // Front sheet (bottom-right)
     let front = egui::Rect::from_min_size(egui::pos2(c.x - 2.5, c.y - 2.5), Vec2::new(8.5, 9.5));
-    p.rect_stroke(front, Rounding::same(1.5), stroke);
+    p.rect_stroke(front, CornerRadius::same(2), stroke, StrokeKind::Inside);
     // Back sheet outline (top-left L-edge)
     let bx = c.x - 5.5;
     let by = c.y - 6.0;
@@ -5466,7 +5484,7 @@ fn paint_nav_icon(p: &egui::Painter, c: egui::Pos2, tab: ActiveTab, color: Color
         }
         ActiveTab::Directory => {
             let r = egui::Rect::from_center_size(c, Vec2::new(11.0, 10.5));
-            p.rect_stroke(r, Rounding::same(1.5), s);
+            p.rect_stroke(r, CornerRadius::same(2), s, StrokeKind::Inside);
             p.line_segment([egui::pos2(c.x, r.top() + 1.0), egui::pos2(c.x, r.bottom() - 1.0)], s);
         }
         ActiveTab::Discover => {
@@ -5487,7 +5505,7 @@ fn paint_minimize_button(ui: &mut egui::Ui) -> egui::Response {
     let hovered = resp.hovered();
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        ui.painter().rect_filled(rect, Rounding::ZERO, SURFACE_HOVER);
+        ui.painter().rect_filled(rect, CornerRadius::ZERO, SURFACE_HOVER);
     }
     let col = if hovered { TEXT_PRIMARY } else { TEXT_MUTED };
     let cy = rect.center().y + 1.0;
@@ -5504,7 +5522,7 @@ fn paint_close_button(ui: &mut egui::Ui) -> egui::Response {
     let hovered = resp.hovered();
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        ui.painter().rect_filled(rect, Rounding::ZERO, Color32::from_rgb(190, 24, 93));
+        ui.painter().rect_filled(rect, CornerRadius::ZERO, Color32::from_rgb(190, 24, 93));
     }
     let col = if hovered { Color32::WHITE } else { TEXT_MUTED };
     let c = rect.center();
@@ -5573,7 +5591,7 @@ fn paint_gradient_strip(ui: &mut egui::Ui, height: f32) {
         let x1 = (x0 + step_w + 0.6).min(rect.right());
         painter.rect_filled(
             egui::Rect::from_min_max(egui::pos2(x0, rect.top()), egui::pos2(x1, rect.bottom())),
-            Rounding::ZERO,
+            CornerRadius::ZERO,
             pink_white_color(t),
         );
     }
@@ -5584,9 +5602,10 @@ fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, fo
     let (rect, response) = ui.allocate_exact_size(size, sense);
     let painter = ui.painter();
     let r = 6.0f32.min(rect.height() * 0.5);
+    let cr = CornerRadius::same(r.round() as u8);
 
     if !enabled {
-        painter.rect_filled(rect, Rounding::same(r), CARD_BORDER);
+        painter.rect_filled(rect, cr, CARD_BORDER);
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -5613,14 +5632,15 @@ fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, fo
         let t = ((i as f32 + 0.5) / steps as f32 + hover_boost).clamp(0.0, 1.0);
         painter.rect_filled(
             egui::Rect::from_min_max(egui::pos2(x0, rect.top() + inset), egui::pos2(x1, rect.bottom() - inset)),
-            Rounding::ZERO,
+            CornerRadius::ZERO,
             pink_white_color(t),
         );
     }
     painter.rect_stroke(
         rect,
-        Rounding::same(r),
+        cr,
         Stroke::new(1.0, ACCENT_PEARL.linear_multiply(if response.hovered() { 0.9 } else { 0.5 })),
+        StrokeKind::Inside,
     );
     painter.text(
         rect.center(),
@@ -5646,11 +5666,11 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
             });
         }
         CheckState::Ok(msg) => {
-            Frame::none()
+            Frame::NONE
                 .fill(LIVE_GREEN.linear_multiply(0.12))
                 .stroke(Stroke::new(1.0, LIVE_GREEN.linear_multiply(0.55)))
-                .rounding(Rounding::same(5.0))
-                .inner_margin(Margin::symmetric(8.0, 6.0))
+                .corner_radius(CornerRadius::same(5))
+                .inner_margin(Margin::symmetric(8, 6))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         paint_check_icon(ui, LIVE_GREEN);
@@ -5659,11 +5679,11 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
                 });
         }
         CheckState::Warn { msg, suggested_name } => {
-            Frame::none()
+            Frame::NONE
                 .fill(ENEMY_AMBER.linear_multiply(0.12))
                 .stroke(Stroke::new(1.0, ENEMY_AMBER.linear_multiply(0.55)))
-                .rounding(Rounding::same(5.0))
-                .inner_margin(Margin::symmetric(8.0, 6.0))
+                .corner_radius(CornerRadius::same(5))
+                .inner_margin(Margin::symmetric(8, 6))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         paint_warn_icon(ui, ENEMY_AMBER);
@@ -5676,7 +5696,7 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
                         )
                         .fill(BTN_SECONDARY)
                         .stroke(Stroke::new(1.0, ENEMY_AMBER))
-                        .rounding(Rounding::same(4.0));
+                        .corner_radius(CornerRadius::same(4));
                         if ui.add(use_btn).clicked() {
                             apply_name = Some(name.clone());
                         }
@@ -5684,11 +5704,11 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
                 });
         }
         CheckState::Err(msg) => {
-            Frame::none()
+            Frame::NONE
                 .fill(ERR_ROSE.linear_multiply(0.12))
                 .stroke(Stroke::new(1.0, ERR_ROSE.linear_multiply(0.6)))
-                .rounding(Rounding::same(5.0))
-                .inner_margin(Margin::symmetric(8.0, 6.0))
+                .corner_radius(CornerRadius::same(5))
+                .inner_margin(Margin::symmetric(8, 6))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         paint_cross_icon(ui, ERR_ROSE);
@@ -5741,7 +5761,7 @@ struct StreamerApp {
 
 impl StreamerApp {
     fn new(
-        cc: &eframe::CreationContext<'_>,
+        egui_ctx: &egui::Context,
         state: Arc<Mutex<AppState>>,
         tx: mpsc::UnboundedSender<ScanTrigger>,
         bg_tx: mpsc::UnboundedSender<BgTask>,
@@ -5762,10 +5782,10 @@ impl StreamerApp {
         visuals.widgets.active.bg_fill = Color32::from_rgb(34, 34, 42);
         visuals.selection.bg_fill = ACCENT_PINK;
         visuals.selection.stroke = Stroke::new(1.0, ACCENT_PEARL);
-        cc.egui_ctx.set_visuals(visuals);
+        egui_ctx.set_visuals(visuals);
 
         // Increase default typography scale for crisp readability on desktop monitors
-        cc.egui_ctx.style_mut(|style| {
+        egui_ctx.style_mut(|style| {
             style.text_styles.insert(egui::TextStyle::Small, FontId::proportional(12.5));
             style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(14.5));
             style.text_styles.insert(egui::TextStyle::Button, FontId::proportional(14.0));
@@ -6019,12 +6039,8 @@ impl StreamerApp {
     }
 }
 
-impl eframe::App for StreamerApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 1.0]
-    }
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl StreamerApp {
+    fn update_ui(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) {
             if QUIT.load(Ordering::Relaxed) {
                 return; // let the real quit through
@@ -6036,8 +6052,6 @@ impl eframe::App for StreamerApp {
             return;
         }
 
-        // eframe 0.29 may unhide the window after the first frame even with `.with_visible(false)`;
-        // enforce hiding explicitly only when launched with `--background`.
         if self.pending_initial_hide {
             self.pending_initial_hide = false;
             win32_window::cache_main_hwnd();
@@ -6108,7 +6122,7 @@ impl eframe::App for StreamerApp {
         // Thin 2px Pink-to-Pearl top brand accent hairline
         egui::TopBottomPanel::top("accent_strip")
             .exact_height(2.0)
-            .frame(Frame::none().fill(BG_DARK))
+            .frame(Frame::NONE.fill(BG_DARK))
             .show(ctx, |ui| {
                 paint_gradient_strip(ui, 2.0);
             });
@@ -6117,7 +6131,7 @@ impl eframe::App for StreamerApp {
         egui::TopBottomPanel::top("custom_titlebar")
             .exact_height(38.0)
             .frame(
-                Frame::none()
+                Frame::NONE
                     .fill(BG_DARK)
                     .stroke(Stroke::new(1.0, CARD_BORDER)),
             )
@@ -6176,9 +6190,9 @@ impl eframe::App for StreamerApp {
             .exact_width(236.0)
             .resizable(false)
             .frame(
-                Frame::none()
+                Frame::NONE
                     .fill(BG_DARK)
-                    .inner_margin(Margin::symmetric(14.0, 16.0))
+                    .inner_margin(Margin::symmetric(14, 16))
                     .stroke(Stroke::new(1.0, CARD_BORDER)),
             )
             .show(ctx, |ui| {
@@ -6208,14 +6222,14 @@ impl eframe::App for StreamerApp {
                     } else {
                         Color32::TRANSPARENT
                     };
-                    ui.painter().rect_filled(rect, Rounding::same(6.0), fill);
+                    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
                     // Match preview: crisp 2px vertical pink indicator on the left edge of the active tab
                     if selected {
                         let bar = egui::Rect::from_min_max(
                             egui::pos2(rect.left(), rect.top() + 6.0),
                             egui::pos2(rect.left() + 2.5, rect.bottom() - 6.0),
                         );
-                        ui.painter().rect_filled(bar, Rounding::same(1.2), ACCENT_PINK);
+                        ui.painter().rect_filled(bar, CornerRadius::same(1), ACCENT_PINK);
                     }
 
                     let icon_col = if selected {
@@ -6313,7 +6327,7 @@ impl eframe::App for StreamerApp {
                     let add_btn = egui::Button::new(RichText::new("+ Add Streamer").color(TEXT_PRIMARY).size(13.5))
                         .fill(BTN_SECONDARY)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
-                        .rounding(Rounding::same(6.0))
+                        .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(ui.available_width(), 35.0));
                     if ui.add(add_btn).clicked() {
                         self.open_add_modal(None);
@@ -6330,11 +6344,11 @@ impl eframe::App for StreamerApp {
                     ui.add_space(10.0);
 
                     // Compact live Riot & Server status block
-                    Frame::none()
+                    Frame::NONE
                         .fill(CARD_BG)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
-                        .rounding(Rounding::same(6.0))
-                        .inner_margin(Margin::symmetric(11.0, 9.0))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::symmetric(11, 9))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             let (dot, glowing, riot_text) = match riot_status {
@@ -6383,11 +6397,11 @@ impl eframe::App for StreamerApp {
                 .min_width(540.0)
                 .max_width(540.0)
                 .frame(
-                    Frame::none()
+                    Frame::NONE
                         .fill(CARD_BG)
                         .stroke(Stroke::new(1.5, ACCENT_PINK))
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(Margin::same(22.0)),
+                        .corner_radius(CornerRadius::same(10))
+                        .inner_margin(Margin::same(22)),
                 )
                 .show(ctx, |ui| {
                     ui.label(
@@ -6403,7 +6417,7 @@ impl eframe::App for StreamerApp {
                             egui::TextEdit::singleline(&mut self.input_riot_id)
                                 .hint_text("e.g. RohanYT#IND")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(8, 6)),
                         )
                         .changed()
                     {
@@ -6417,7 +6431,7 @@ impl eframe::App for StreamerApp {
                             egui::TextEdit::singleline(&mut self.input_aliases)
                                 .hint_text("e.g. RohanAlt#IND, RohanSmurf#AP")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(8, 6)),
                         )
                         .changed()
                     {
@@ -6460,7 +6474,7 @@ impl eframe::App for StreamerApp {
                             egui::TextEdit::singleline(&mut self.input_channel_name)
                                 .hint_text("e.g. Rohan Gaming")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(8, 6)),
                         )
                         .changed()
                     {
@@ -6479,7 +6493,7 @@ impl eframe::App for StreamerApp {
                             egui::TextEdit::singleline(&mut self.input_channel_url)
                                 .hint_text(url_hint)
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8.0, 6.0)),
+                                .margin(Margin::symmetric(8, 6)),
                         )
                         .changed()
                     {
@@ -6492,7 +6506,7 @@ impl eframe::App for StreamerApp {
                         let verify_btn = egui::Button::new(RichText::new(verify_label).color(Color32::WHITE).strong().size(12.0))
                             .fill(BTN_SECONDARY)
                             .stroke(Stroke::new(1.0, ALLY_TEAL))
-                            .rounding(Rounding::same(5.0))
+                            .corner_radius(CornerRadius::same(5))
                             .min_size(Vec2::new(140.0, 28.0));
                         if ui.add_enabled(!is_verifying, verify_btn).clicked() {
                             trigger_verify = true;
@@ -6504,7 +6518,7 @@ impl eframe::App for StreamerApp {
                         let open_btn = egui::Button::new(RichText::new("Open Link").color(TEXT_PRIMARY).size(12.0))
                             .fill(BTN_SECONDARY)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                            .rounding(Rounding::same(5.0))
+                            .corner_radius(CornerRadius::same(5))
                             .min_size(Vec2::new(82.0, 28.0));
                         if ui.add_enabled(can_open, open_btn).clicked() {
                             let _ = open::that(self.input_channel_url.trim());
@@ -6532,13 +6546,13 @@ impl eframe::App for StreamerApp {
                         let local_btn = egui::Button::new(RichText::new("Save Local").color(TEXT_PRIMARY))
                             .fill(BTN_SECONDARY)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                            .rounding(Rounding::same(6.0))
+                            .corner_radius(CornerRadius::same(6))
                             .min_size(Vec2::new(92.0, 34.0));
                         submit_local = ui.add(local_btn).clicked();
 
                         ui.add_space(6.0);
                         cancel = ui
-                            .add(egui::Button::new("Cancel").min_size(Vec2::new(72.0, 34.0)).rounding(Rounding::same(6.0)))
+                            .add(egui::Button::new("Cancel").min_size(Vec2::new(72.0, 34.0)).corner_radius(CornerRadius::same(6)))
                             .clicked();
                     });
                 });
@@ -6575,7 +6589,7 @@ impl eframe::App for StreamerApp {
 
         // Main panel (AMOLED Black canvas)
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(BG_DARK).inner_margin(Margin::symmetric(20.0, 16.0)))
+            .frame(Frame::NONE.fill(BG_DARK).inner_margin(Margin::symmetric(20, 16)))
             .show(ctx, |ui| {
                 self.render_update_banner(ui, &update_state);
                 match self.active_tab {
@@ -6600,7 +6614,12 @@ impl eframe::App for StreamerApp {
             egui::Order::Foreground,
             egui::Id::new("frameless_window_border"),
         ))
-        .rect_stroke(ctx.screen_rect().shrink(0.5), Rounding::ZERO, Stroke::new(1.0, CARD_BORDER));
+        .rect_stroke(
+            ctx.screen_rect().shrink(0.5),
+            CornerRadius::ZERO,
+            Stroke::new(1.0, CARD_BORDER),
+            StrokeKind::Inside,
+        );
     }
 }
 
@@ -6609,11 +6628,11 @@ impl StreamerApp {
         // Automatically hidden when UpToDate or Idle (no manual dismissal required for up-to-date state).
         match update_state {
             UpdateState::Available(info) => {
-                Frame::none()
+                Frame::NONE
                     .fill(CARD_BG)
                     .stroke(Stroke::new(1.2, ACCENT_PINK))
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(14.0, 10.0))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(14, 10))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -6656,7 +6675,7 @@ impl StreamerApp {
                                 let rel_btn = egui::Button::new(RichText::new("Release Notes").size(11.5).color(TEXT_PRIMARY))
                                     .fill(BTN_SECONDARY)
                                     .stroke(Stroke::new(1.0, CARD_BORDER))
-                                    .rounding(Rounding::same(5.0));
+                                    .corner_radius(CornerRadius::same(5));
                                 if ui.add(rel_btn).clicked() {
                                     let _ = open::that(&info.html_url);
                                 }
@@ -6665,7 +6684,7 @@ impl StreamerApp {
                                 let ch_btn = egui::Button::new(RichText::new(toggle_lbl).size(11.5).color(ACCENT_BLUSH))
                                     .fill(BTN_SECONDARY)
                                     .stroke(Stroke::new(1.0, CARD_BORDER))
-                                    .rounding(Rounding::same(5.0));
+                                    .corner_radius(CornerRadius::same(5));
                                 if ui.add(ch_btn).clicked() {
                                     self.show_update_changelog = !self.show_update_changelog;
                                 }
@@ -6678,11 +6697,11 @@ impl StreamerApp {
 
                         if self.show_update_changelog && !info.changelog.is_empty() {
                             ui.add_space(8.0);
-                            Frame::none()
+                            Frame::NONE
                                 .fill(HEADER_BG)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(6.0))
-                                .inner_margin(Margin::symmetric(10.0, 8.0))
+                                .corner_radius(CornerRadius::same(6))
+                                .inner_margin(Margin::symmetric(10, 8))
                                 .show(ui, |ui| {
                                     ui.label(
                                         RichText::new(format!("RELEASE CHANGELOG ({})", info.tag_name))
@@ -6703,11 +6722,11 @@ impl StreamerApp {
                 ui.add_space(10.0);
             }
             UpdateState::Downloading(msg) | UpdateState::Installing(msg) => {
-                Frame::none()
+                Frame::NONE
                     .fill(CARD_BG)
                     .stroke(Stroke::new(1.0, ACCENT_BLUSH))
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(14.0, 9.0))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(14, 9))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spinner();
@@ -6718,11 +6737,11 @@ impl StreamerApp {
                 ui.add_space(10.0);
             }
             UpdateState::Error(msg) if self.active_tab != ActiveTab::Settings => {
-                Frame::none()
+                Frame::NONE
                     .fill(CARD_BG)
                     .stroke(Stroke::new(1.0, ERR_ROSE))
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(14.0, 8.0))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(14, 8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             paint_warn_icon(ui, ERR_ROSE);
@@ -6771,11 +6790,11 @@ impl StreamerApp {
             CARD_BORDER
         };
 
-        let frame_resp = Frame::none()
+        let frame_resp = Frame::NONE
             .fill(CARD_BG)
             .stroke(Stroke::new(1.0, border_col))
-            .rounding(Rounding::same(8.0))
-            .inner_margin(Margin::symmetric(16.0, 12.0))
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 // Collapsed primary row: Riot ID, Platform, Channel, Confidence tier ONLY + icon Copy + Watch
                 ui.horizontal(|ui| {
@@ -6870,11 +6889,11 @@ impl StreamerApp {
 
                     if !entry.chat_message.is_empty() {
                         ui.add_space(6.0);
-                        Frame::none()
+                        Frame::NONE
                             .fill(BG_DARK)
                             .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.3)))
-                            .rounding(Rounding::same(5.0))
-                            .inner_margin(Margin::symmetric(10.0, 6.0))
+                            .corner_radius(CornerRadius::same(5))
+                            .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| {
                                 ui.label(
                                     RichText::new(format!("In-Game Chat: \"{}\"", entry.chat_message))
@@ -6898,11 +6917,11 @@ impl StreamerApp {
 
                     if entry.candidates.len() > 1 {
                         ui.add_space(8.0);
-                        Frame::none()
+                        Frame::NONE
                             .fill(BG_DARK)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                            .rounding(Rounding::same(6.0))
-                            .inner_margin(Margin::symmetric(10.0, 8.0))
+                            .corner_radius(CornerRadius::same(6))
+                            .inner_margin(Margin::symmetric(10, 8))
                             .show(ui, |ui| {
                                 ui.label(
                                     RichText::new(format!("RANKED CANDIDATES ({})", entry.candidates.len()))
@@ -6954,7 +6973,7 @@ impl StreamerApp {
                                             )
                                             .fill(BTN_SECONDARY)
                                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                                            .rounding(Rounding::same(4.0));
+                                            .corner_radius(CornerRadius::same(4));
                                             let open_resp = ui.add(open_cand).on_hover_text(cand.url.as_str());
                                             button_rects.push(open_resp.rect);
                                             if open_resp.clicked() {
@@ -6981,7 +7000,12 @@ impl StreamerApp {
         if ui.rect_contains_pointer(card_rect) && !pointer_on_button {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if !is_expanded {
-                ui.painter().rect_stroke(card_rect, Rounding::same(8.0), Stroke::new(1.0, Color32::from_rgb(43, 43, 54)));
+                ui.painter().rect_stroke(
+                    card_rect,
+                    CornerRadius::same(8),
+                    Stroke::new(1.0, Color32::from_rgb(43, 43, 54)),
+                    StrokeKind::Inside,
+                );
             }
             if !button_clicked && ui.input(|i| i.pointer.primary_clicked()) {
                 if is_expanded {
@@ -7009,7 +7033,7 @@ impl StreamerApp {
                 egui::TextEdit::singleline(&mut self.search_query)
                     .hint_text("Search Riot ID, channel, map, server, or title...")
                     .desired_width(search_w)
-                    .margin(Margin::symmetric(12.0, 8.0)),
+                    .margin(Margin::symmetric(12, 8)),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -7017,7 +7041,7 @@ impl StreamerApp {
                     let clear = egui::Button::new(RichText::new("Clear").color(TEXT_MUTED).size(13.5))
                         .fill(Color32::TRANSPARENT)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
-                        .rounding(Rounding::same(6.0))
+                        .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(64.0, 34.0));
                     if ui.add(clear).clicked() {
                         let mut s = lock(&self.state);
@@ -7042,7 +7066,7 @@ impl StreamerApp {
                     1.0,
                     if filter_active { ACCENT_PINK.linear_multiply(0.65) } else { CARD_BORDER },
                 ))
-                .rounding(Rounding::same(6.0))
+                .corner_radius(CornerRadius::same(6))
                 .min_size(Vec2::new(102.0, 34.0));
                 if ui.add(filter_btn).clicked() {
                     self.show_filters_popover = !self.show_filters_popover;
@@ -7083,11 +7107,11 @@ impl StreamerApp {
             let selected_match_type = self.match_type_filter.clone();
             let selected_server = self.server_filter.clone();
 
-            Frame::none()
+            Frame::NONE
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.35)))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(Margin::symmetric(14.0, 12.0))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::symmetric(14, 12))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Team").color(TEXT_MUTED).size(13.0));
@@ -7104,7 +7128,7 @@ impl StreamerApp {
                             let done_btn = egui::Button::new(RichText::new("Done").color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(5.0));
+                                .corner_radius(CornerRadius::same(5));
                             if ui.add(done_btn).clicked() {
                                 self.show_filters_popover = false;
                             }
@@ -7113,7 +7137,7 @@ impl StreamerApp {
                                 let reset = egui::Button::new(RichText::new("Reset").color(ACCENT_BLUSH).size(13.0))
                                     .fill(Color32::TRANSPARENT)
                                     .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.45)))
-                                    .rounding(Rounding::same(5.0));
+                                    .corner_radius(CornerRadius::same(5));
                                 if ui.add(reset).clicked() {
                                     self.reset_history_filters();
                                 }
@@ -7333,7 +7357,7 @@ impl StreamerApp {
                 egui::TextEdit::singleline(&mut self.dir_search)
                     .hint_text("Filter Riot ID, alias, channel, or server...")
                     .desired_width(230.0)
-                    .margin(Margin::symmetric(8.0, 6.0)),
+                    .margin(Margin::symmetric(8, 6)),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -7341,7 +7365,7 @@ impl StreamerApp {
                 let sync_btn = egui::Button::new(RichText::new(sync_label).color(TEXT_PRIMARY).size(13.5))
                     .fill(BTN_SECONDARY)
                     .stroke(Stroke::new(1.0, CARD_BORDER))
-                    .rounding(Rounding::same(5.0))
+                    .corner_radius(CornerRadius::same(5))
                     .min_size(Vec2::new(124.0, 32.0));
                 if ui.add_enabled(!is_syncing, sync_btn).clicked() {
                     let _ = self.manual_scan_tx.send(ScanTrigger::RefreshDirectory);
@@ -7397,11 +7421,11 @@ impl StreamerApp {
                     "Kick" => KICK_GREEN,
                     _ => ACCENT_PINK,
                 };
-                Frame::none()
+                Frame::NONE
                     .fill(CARD_BG)
                     .stroke(Stroke::new(1.0, CARD_BORDER))
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(Margin::symmetric(16.0, 12.0))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(16, 12))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -7438,14 +7462,14 @@ impl StreamerApp {
                                     let del = egui::Button::new(RichText::new("Delete").color(ERR_ROSE).size(13.0))
                                         .fill(Color32::TRANSPARENT)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
-                                        .rounding(Rounding::same(5.0));
+                                        .corner_radius(CornerRadius::same(5));
                                     if ui.add(del).clicked() {
                                         to_delete = Some((d.riot_id.clone(), d.platform.clone()));
                                     }
                                     let edit = egui::Button::new(RichText::new("Edit").color(TEXT_PRIMARY).size(13.0))
                                         .fill(BTN_SECONDARY)
                                         .stroke(Stroke::new(1.0, CARD_BORDER))
-                                        .rounding(Rounding::same(5.0));
+                                        .corner_radius(CornerRadius::same(5));
                                     if ui.add(edit).clicked() {
                                         to_edit = Some(d.clone());
                                     }
@@ -7453,7 +7477,7 @@ impl StreamerApp {
                                 let open_btn = egui::Button::new(RichText::new("Open").color(TEXT_PRIMARY).size(13.0))
                                     .fill(BTN_SECONDARY)
                                     .stroke(Stroke::new(1.0, CARD_BORDER))
-                                    .rounding(Rounding::same(5.0));
+                                    .corner_radius(CornerRadius::same(5));
                                 if ui.add(open_btn).clicked() {
                                     let _ = open::that(&d.channel_url);
                                 }
@@ -7488,11 +7512,11 @@ impl StreamerApp {
 
         if !recs_enabled {
             ui.add_space(36.0);
-            Frame::none()
+            Frame::NONE
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(10.0))
-                .inner_margin(Margin::same(24.0))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(Margin::same(24))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -7637,11 +7661,11 @@ impl StreamerApp {
                 });
             }
             RecommendationsState::Error(err) => {
-                Frame::none()
+                Frame::NONE
                     .fill(ERR_ROSE.linear_multiply(0.12))
                     .stroke(Stroke::new(1.0, ERR_ROSE.linear_multiply(0.6)))
-                    .rounding(Rounding::same(6.0))
-                    .inner_margin(Margin::same(14.0))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(Margin::same(14))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             paint_cross_icon(ui, ERR_ROSE);
@@ -7691,11 +7715,11 @@ impl StreamerApp {
                         } else {
                             ACCENT_PINK
                         };
-                        Frame::none()
+                        Frame::NONE
                             .fill(CARD_BG)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                            .rounding(Rounding::same(8.0))
-                            .inner_margin(Margin::symmetric(16.0, 14.0))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(Margin::symmetric(16, 14))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
@@ -7727,7 +7751,7 @@ impl StreamerApp {
                                         let save_btn = egui::Button::new(RichText::new("+ Directory").color(TEXT_PRIMARY).size(13.0))
                                             .fill(BTN_SECONDARY)
                                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                                            .rounding(Rounding::same(6.0))
+                                            .corner_radius(CornerRadius::same(6))
                                             .min_size(Vec2::new(98.0, 32.0));
                                         if ui.add(save_btn).clicked() {
                                             prefill_rec = Some(rec.clone());
@@ -7757,11 +7781,11 @@ impl StreamerApp {
     ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             // Card 1: Valorant Servers & Detection (GitHub owner/repo intentionally hidden from end users)
-            Frame::none()
+            Frame::NONE
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(Margin::same(18.0))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new("Valorant Servers & Region Detection")
@@ -7822,11 +7846,11 @@ impl StreamerApp {
             ui.add_space(12.0);
 
             // Card 2: Features & Windows Integration (left-to-right ON/OFF toggle sliders)
-            Frame::none()
+            Frame::NONE
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(Margin::same(18.0))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new("Features & Windows Integration")
@@ -7875,11 +7899,11 @@ impl StreamerApp {
             ui.add_space(12.0);
 
             // Card 3: Optional Platform API Keys
-            Frame::none()
+            Frame::NONE
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(Margin::same(18.0))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Optional Platform API Keys").font(FontId::proportional(16.5)).strong().color(Color32::WHITE));
@@ -7900,7 +7924,7 @@ impl StreamerApp {
                             let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(4.0));
+                                .corner_radius(CornerRadius::same(4));
                             if ui.add_enabled(!yt_busy, test_yt).clicked() {
                                 lock(&self.state).yt_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestYouTubeKey(self.cfg_draft.youtube_api_key.clone()));
@@ -7908,7 +7932,7 @@ impl StreamerApp {
                             let get_yt = egui::Button::new(RichText::new("Get YouTube Key").color(ACCENT_BLUSH).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(5.0))
+                                .corner_radius(CornerRadius::same(5))
                                 .min_size(Vec2::new(124.0, 28.0));
                             if ui
                                 .add(get_yt)
@@ -7926,7 +7950,7 @@ impl StreamerApp {
                                 .password(!self.show_api_secrets)
                                 .hint_text("AIza... (optional)")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(10.0, 7.0)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -7946,7 +7970,7 @@ impl StreamerApp {
                             let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(5.0));
+                                .corner_radius(CornerRadius::same(5));
                             if ui.add_enabled(!tw_busy, test_tw).clicked() {
                                 lock(&self.state).twitch_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestTwitchKeys {
@@ -7957,7 +7981,7 @@ impl StreamerApp {
                             let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(ACCENT_BLUSH).size(13.0))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(5.0))
+                                .corner_radius(CornerRadius::same(5))
                                 .min_size(Vec2::new(124.0, 28.0));
                             if ui.add(get_tw).on_hover_text("Opens Twitch Developer Console -> Applications").clicked() {
                                 let _ = open::that("https://dev.twitch.tv/console/apps");
@@ -7972,7 +7996,7 @@ impl StreamerApp {
                                 .password(!self.show_api_secrets)
                                 .hint_text("Optional Helix Client ID")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(10.0, 7.0)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -7986,7 +8010,7 @@ impl StreamerApp {
                                 .password(!self.show_api_secrets)
                                 .hint_text("Optional Helix Client Secret")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(10.0, 7.0)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -8006,11 +8030,11 @@ impl StreamerApp {
                     )
                     .default_open(false)
                     .show(ui, |ui| {
-                        Frame::none()
+                        Frame::NONE
                             .fill(BG_DARK)
                             .stroke(Stroke::new(1.0, CARD_BORDER))
-                            .rounding(Rounding::same(6.0))
-                            .inner_margin(Margin::same(14.0))
+                            .corner_radius(CornerRadius::same(6))
+                            .inner_margin(Margin::same(14))
                             .show(ui, |ui| {
                                 ui.label(RichText::new("1. YouTube Data API v3 (Free - 10,000 units/day, no credit card needed)").strong().color(ACCENT_PINK).size(13.5));
                                 ui.add_space(3.0);
@@ -8049,11 +8073,11 @@ impl StreamerApp {
             ui.add_space(12.0);
 
             // Card 4: App Updates & Version
-            Frame::none()
+            Frame::NONE
                 .fill(CARD_BG)
                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(Margin::same(18.0))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -8076,7 +8100,7 @@ impl StreamerApp {
                             let open_rel = egui::Button::new(RichText::new("Open Releases").color(TEXT_PRIMARY).size(13.5))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .rounding(Rounding::same(6.0))
+                                .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(118.0, 34.0));
                             if ui.add(open_rel).clicked() {
                                 let _ = open::that(format!(
@@ -8161,84 +8185,330 @@ impl StreamerApp {
 // ENTRY POINT
 // ============================================================================
 
-/// Configures wgpu on Windows to render via Microsoft Basic Render Driver (WARP software DX12)
-/// so NVIDIA's driver never hooks the window, never activates G-SYNC, never draws the top-right
-/// "NORMAL" visual indicator, and consumes zero GPU VRAM while Valorant is running.
-fn build_non_gsync_wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
-    use eframe::wgpu;
+// ============================================================================
+// PURE WIN32 GDI SOFTWARE WINDOW HOST (ZERO DXGI / OPENGL / VULKAN / G-SYNC)
+// ============================================================================
 
-    #[cfg(windows)]
-    {
-        if let Ok(rt) = tokio::runtime::Builder::new_current_thread().build() {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::DX12,
-                ..Default::default()
-            });
-            let maybe_warp = rt.block_on(async {
-                let adapter = instance
-                    .request_adapter(&wgpu::RequestAdapterOptions {
-                        power_preference: wgpu::PowerPreference::LowPower,
-                        compatible_surface: None,
-                        force_fallback_adapter: true,
-                    })
-                    .await?;
-                let (device, queue) = adapter
-                    .request_device(
-                        &wgpu::DeviceDescriptor {
-                            label: Some("radar-warp-device"),
-                            required_features: wgpu::Features::default(),
-                            required_limits: wgpu::Limits {
-                                max_texture_dimension_2d: 8192,
-                                ..wgpu::Limits::default()
-                            },
-                            memory_hints: wgpu::MemoryHints::MemoryUsage,
-                        },
-                        None,
-                    )
-                    .await
-                    .ok()?;
-                Some((adapter, device, queue))
-            });
+struct SoftwareWindowHost {
+    softbuffer_context: softbuffer::Context<winit::event_loop::OwnedDisplayHandle>,
+    viewport_builder: egui::ViewportBuilder,
+    egui_ctx: egui::Context,
+    app: StreamerApp,
+    renderer: EguiSoftwareRender,
+    window: Option<Rc<winit::window::Window>>,
+    surface: Option<softbuffer::Surface<winit::event_loop::OwnedDisplayHandle, Rc<winit::window::Window>>>,
+    egui_winit: Option<egui_winit::State>,
+    viewport_info: egui::ViewportInfo,
+    surface_size: (u32, u32),
+    next_repaint: Option<Instant>,
+}
 
-            if let Some((adapter, device, queue)) = maybe_warp {
-                let info = adapter.get_info();
-                log(format!(
-                    "Using non-GSYNC Windows software adapter: {} ({:?}, {:?})",
-                    info.name, info.backend, info.device_type
-                ));
-                return eframe::egui_wgpu::WgpuConfiguration {
-                    wgpu_setup: eframe::egui_wgpu::WgpuSetup::Existing {
-                        instance: Arc::new(instance),
-                        adapter: Arc::new(adapter),
-                        device: Arc::new(device),
-                        queue: Arc::new(queue),
-                    },
-                    ..Default::default()
-                };
-            }
-            log("Windows WARP software adapter unavailable; falling back to LowPower DX12");
+impl SoftwareWindowHost {
+    fn new(
+        softbuffer_context: softbuffer::Context<winit::event_loop::OwnedDisplayHandle>,
+        viewport_builder: egui::ViewportBuilder,
+        egui_ctx: egui::Context,
+        app: StreamerApp,
+    ) -> Self {
+        Self {
+            softbuffer_context,
+            viewport_builder,
+            egui_ctx,
+            app,
+            renderer: EguiSoftwareRender::new(ColorFieldOrder::Bgra),
+            window: None,
+            surface: None,
+            egui_winit: None,
+            viewport_info: egui::ViewportInfo::default(),
+            surface_size: (0, 0),
+            next_repaint: None,
         }
     }
 
-    eframe::egui_wgpu::WgpuConfiguration {
-        wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew {
-            supported_backends: if cfg!(windows) {
-                wgpu::Backends::DX12
+    fn render_frame(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if QUIT.load(Ordering::Relaxed) {
+            if let Some(window) = &self.window {
+                window.set_visible(false);
+            }
+            event_loop.exit();
+            return;
+        }
+        if !WINDOW_VISIBLE.load(Ordering::Relaxed) {
+            return;
+        }
+        let (Some(window), Some(surface), Some(egui_winit)) = (
+            self.window.as_ref(),
+            self.surface.as_mut(),
+            self.egui_winit.as_mut(),
+        ) else {
+            return;
+        };
+
+        let size = window.inner_size();
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        let (Some(w_nz), Some(h_nz)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
+            return;
+        };
+        if self.surface_size != (size.width, size.height) {
+            if let Err(e) = surface.resize(w_nz, h_nz) {
+                log(format!("softbuffer resize failed: {e}"));
+                return;
+            }
+            self.surface_size = (size.width, size.height);
+        }
+
+        let raw_input = egui_winit.take_egui_input(window);
+        let mut full_output = self.egui_ctx.run(raw_input, |ctx| {
+            self.app.update_ui(ctx);
+        });
+        egui_winit.handle_platform_output(window, full_output.platform_output);
+
+        if let Some(vp_out) = full_output.viewport_output.remove(&egui::ViewportId::ROOT) {
+            let mut should_exit = false;
+            let mut filtered_cmds: Vec<egui::ViewportCommand> = Vec::with_capacity(vp_out.commands.len());
+            for cmd in vp_out.commands {
+                match cmd {
+                    egui::ViewportCommand::Close => {
+                        if QUIT.load(Ordering::Relaxed) {
+                            should_exit = true;
+                        } else {
+                            win32_window::cache_main_hwnd();
+                            WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+                            window.set_visible(false);
+                        }
+                    }
+                    egui::ViewportCommand::CancelClose => {}
+                    egui::ViewportCommand::Visible(false) => {
+                        win32_window::cache_main_hwnd();
+                        WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+                        window.set_visible(false);
+                    }
+                    egui::ViewportCommand::Visible(true) => {
+                        WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+                        window.set_visible(true);
+                    }
+                    other => filtered_cmds.push(other),
+                }
+            }
+            if !filtered_cmds.is_empty() {
+                let mut actions = Vec::new();
+                egui_winit::process_viewport_commands(
+                    &self.egui_ctx,
+                    &mut self.viewport_info,
+                    filtered_cmds,
+                    window,
+                    &mut actions,
+                );
+            }
+            if should_exit {
+                window.set_visible(false);
+                event_loop.exit();
+                return;
+            }
+            if WINDOW_VISIBLE.load(Ordering::Relaxed) {
+                if vp_out.repaint_delay.is_zero() {
+                    window.request_redraw();
+                } else if vp_out.repaint_delay < Duration::from_secs(3600) {
+                    let when = Instant::now() + vp_out.repaint_delay;
+                    self.next_repaint = Some(match self.next_repaint {
+                        Some(prev) => prev.min(when),
+                        None => when,
+                    });
+                }
+            }
+        }
+
+        if !WINDOW_VISIBLE.load(Ordering::Relaxed) {
+            return;
+        }
+
+        let clipped_primitives = self.egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        match surface.buffer_mut() {
+            Ok(mut buffer) => {
+                // Pure AMOLED Black (#000000) background
+                buffer.fill(0);
+                let mut buf_ref = BufferMutRef::new(
+                    bytemuck::cast_slice_mut(&mut *buffer),
+                    size.width as usize,
+                    size.height as usize,
+                );
+                self.renderer.render(
+                    &mut buf_ref,
+                    &clipped_primitives,
+                    &full_output.textures_delta,
+                    full_output.pixels_per_point,
+                );
+                if let Err(e) = buffer.present() {
+                    log(format!("softbuffer present failed: {e}"));
+                }
+            }
+            Err(e) => {
+                log(format!("softbuffer buffer_mut failed: {e}"));
+            }
+        }
+    }
+}
+
+impl winit::application::ApplicationHandler<AppUserEvent> for SoftwareWindowHost {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        match egui_winit::create_window(&self.egui_ctx, event_loop, &self.viewport_builder) {
+            Ok(win) => {
+                let win = Rc::new(win);
+                let surface = match softbuffer::Surface::new(&self.softbuffer_context, win.clone()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log(format!("Failed to create Win32 GDI softbuffer surface: {e}"));
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                let egui_winit = egui_winit::State::new(
+                    self.egui_ctx.clone(),
+                    egui::ViewportId::ROOT,
+                    &*win,
+                    Some(win.scale_factor() as f32),
+                    None,
+                    None,
+                );
+                win32_window::cache_main_hwnd();
+                if WINDOW_VISIBLE.load(Ordering::Relaxed) {
+                    win.request_redraw();
+                } else {
+                    win.set_visible(false);
+                }
+                self.window = Some(win);
+                self.surface = Some(surface);
+                self.egui_winit = Some(egui_winit);
+                log("Initialized pure Win32 GDI software UI (zero DXGI/OpenGL/G-SYNC)");
+            }
+            Err(e) => {
+                log(format!("Failed to create application window: {e}"));
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, event: AppUserEvent) {
+        if event_loop.exiting() {
+            return;
+        }
+        match event {
+            AppUserEvent::ShowWindow => {
+                WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+                if let Some(window) = &self.window {
+                    window.set_visible(true);
+                    window.set_minimized(false);
+                    window.focus_window();
+                    window.request_redraw();
+                }
+            }
+            AppUserEvent::Quit => {
+                QUIT.store(true, Ordering::Relaxed);
+                if let Some(window) = &self.window {
+                    window.set_visible(false);
+                }
+                event_loop.exit();
+            }
+            AppUserEvent::RequestRepaint { when, cumulative_pass_nr } => {
+                if !WINDOW_VISIBLE.load(Ordering::Relaxed) {
+                    return;
+                }
+                let current_pass = self.egui_ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+                if current_pass == cumulative_pass_nr || current_pass == cumulative_pass_nr.saturating_add(1) {
+                    if when <= Instant::now() {
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    } else {
+                        self.next_repaint = Some(match self.next_repaint {
+                            Some(prev) => prev.min(when),
+                            None => when,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        if event_loop.exiting() {
+            return;
+        }
+        let Some(window) = self.window.as_ref().cloned() else {
+            return;
+        };
+        if window_id != window.id() {
+            return;
+        }
+
+        match event {
+            winit::event::WindowEvent::CloseRequested => {
+                if QUIT.load(Ordering::Relaxed) {
+                    window.set_visible(false);
+                    event_loop.exit();
+                } else {
+                    win32_window::cache_main_hwnd();
+                    WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+                    window.set_visible(false);
+                }
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+                self.render_frame(event_loop);
+            }
+            other => {
+                if matches!(other, winit::event::WindowEvent::Focused(true)) {
+                    WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+                }
+                if let Some(egui_winit) = self.egui_winit.as_mut() {
+                    let resp = egui_winit.on_window_event(&window, &other);
+                    if resp.repaint && WINDOW_VISIBLE.load(Ordering::Relaxed) {
+                        window.request_redraw();
+                    }
+                }
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if event_loop.exiting() {
+            return;
+        }
+        if QUIT.load(Ordering::Relaxed) {
+            if let Some(window) = &self.window {
+                window.set_visible(false);
+            }
+            event_loop.exit();
+            return;
+        }
+        if !WINDOW_VISIBLE.load(Ordering::Relaxed) {
+            self.next_repaint = None;
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+            return;
+        }
+        if let Some(when) = self.next_repaint {
+            let now = Instant::now();
+            if now >= when {
+                self.next_repaint = None;
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
             } else {
-                wgpu::Backends::PRIMARY
-            },
-            power_preference: wgpu::PowerPreference::LowPower,
-            device_descriptor: Arc::new(|_adapter| wgpu::DeviceDescriptor {
-                label: Some("radar-wgpu-device"),
-                required_features: wgpu::Features::default(),
-                required_limits: wgpu::Limits {
-                    max_texture_dimension_2d: 8192,
-                    ..wgpu::Limits::default()
-                },
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-            }),
-        },
-        ..Default::default()
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(when));
+            }
+        } else {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        }
     }
 }
 
@@ -8313,7 +8583,7 @@ fn main() -> Result<()> {
         quit_item.id().clone(),
     );
 
-    // Keep alive for the whole run; dropped (icon removed) when run_native returns.
+    // Keep alive for the whole run; dropped (icon removed) when event_loop.run_app returns.
     let _tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu))
         .with_tooltip("Valorant Streamer Radar")
@@ -8329,296 +8599,301 @@ fn main() -> Result<()> {
         height: 32,
     });
 
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Valorant Streamer Radar")
-            .with_icon(window_icon)
-            .with_decorations(false)
-            .with_resizable(true)
-            .with_inner_size([1120.0, 740.0])
-            .with_min_inner_size([860.0, 560.0])
-            .with_visible(!start_hidden),
-        renderer: eframe::Renderer::Wgpu,
-        wgpu_options: build_non_gsync_wgpu_options(),
-        ..Default::default()
-    };
+    let viewport_builder = egui::ViewportBuilder::default()
+        .with_title("Valorant Streamer Radar")
+        .with_icon(window_icon)
+        .with_decorations(false)
+        .with_resizable(true)
+        .with_inner_size([1120.0, 740.0])
+        .with_min_inner_size([860.0, 560.0])
+        .with_visible(!start_hidden);
 
-    let state_for_app = state.clone();
-    let tx_for_app = scan_tx.clone();
-    let bg_tx_for_app = bg_tx.clone();
+    let event_loop: winit::event_loop::EventLoop<AppUserEvent> =
+        winit::event_loop::EventLoop::with_user_event()
+            .build()
+            .map_err(|e| anyhow!("Failed to create event loop: {e}"))?;
+    let proxy = event_loop.create_proxy();
+    let _ = EVENT_LOOP_PROXY.set(proxy.clone());
 
-    eframe::run_native(
-        "Valorant Streamer Radar",
-        native_options,
-        Box::new(move |cc| {
-            let ctx = cc.egui_ctx.clone();
+    let softbuffer_context = softbuffer::Context::new(event_loop.owned_display_handle())
+        .map_err(|e| anyhow!("Failed to initialize Win32 GDI softbuffer context: {e}"))?;
 
-            // Keep single-instance port bound and wake this window if the user launches the exe again.
-            let ctx_wake = ctx.clone();
-            let _ = std::thread::Builder::new().name("radar-ipc".into()).spawn(move || {
-                for stream in instance_listener.incoming().flatten() {
-                    drop(stream);
-                    show_window(&ctx_wake);
-                }
-            });
+    let ctx = egui::Context::default();
+    let repaint_proxy = proxy.clone();
+    ctx.set_request_repaint_callback(move |info| {
+        let _ = repaint_proxy.send_event(AppUserEvent::RequestRepaint {
+            when: Instant::now() + info.delay,
+            cumulative_pass_nr: info.current_cumulative_pass_nr,
+        });
+    });
 
-            // Event-driven tray handling: works while the window is hidden and costs no polling.
-            let ctx_tray = ctx.clone();
-            TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| match event {
-                TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    ..
-                }
-                | TrayIconEvent::DoubleClick {
-                    button: MouseButton::Left,
-                    ..
-                } => {
-                    show_window(&ctx_tray);
-                }
-                _ => {}
-            }));
-            let ctx_menu = ctx.clone();
-            let tx_menu = scan_tx.clone();
-            let bg_menu = bg_tx.clone();
-            let st_menu = state.clone();
-            MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-                if event.id == open_id {
-                    show_window(&ctx_menu);
-                } else if event.id == scan_id {
-                    let _ = tx_menu.send(ScanTrigger::Manual);
-                } else if event.id == update_id {
-                    lock(&st_menu).update_state = UpdateState::Checking;
-                    let _ = bg_menu.send(BgTask::CheckForUpdates { silent: false });
-                    show_window(&ctx_menu);
-                } else if event.id == quit_id {
-                    quit_app(&ctx_menu);
-                }
-            }));
+    // Keep single-instance port bound and wake this window if the user launches the exe again.
+    let ctx_wake = ctx.clone();
+    let _ = std::thread::Builder::new().name("radar-ipc".into()).spawn(move || {
+        for stream in instance_listener.incoming().flatten() {
+            drop(stream);
+            show_window(&ctx_wake);
+        }
+    });
 
-            let state_bg = state.clone();
-            let ctx_bg = ctx.clone();
-            let tx_bg = scan_tx.clone();
-            let bg_startup = bg_tx.clone();
+    // Event-driven tray handling: works while the window is hidden and costs no polling.
+    let ctx_tray = ctx.clone();
+    TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| match event {
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+        | TrayIconEvent::DoubleClick {
+            button: MouseButton::Left,
+            ..
+        } => {
+            show_window(&ctx_tray);
+        }
+        _ => {}
+    }));
+    let ctx_menu = ctx.clone();
+    let tx_menu = scan_tx.clone();
+    let bg_menu = bg_tx.clone();
+    let st_menu = state.clone();
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        if event.id == open_id {
+            show_window(&ctx_menu);
+        } else if event.id == scan_id {
+            let _ = tx_menu.send(ScanTrigger::Manual);
+        } else if event.id == update_id {
+            lock(&st_menu).update_state = UpdateState::Checking;
+            let _ = bg_menu.send(BgTask::CheckForUpdates { silent: false });
+            show_window(&ctx_menu);
+        } else if event.id == quit_id {
+            quit_app(&ctx_menu);
+        }
+    }));
 
-            let spawned = std::thread::Builder::new().name("radar-bg".into()).spawn(move || {
-                let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        log(format!("Failed to start async runtime: {e}"));
-                        return;
-                    }
-                };
-                rt.block_on(async move {
-                    let local_client = Client::builder()
-                        .danger_accept_invalid_certs(true) // Riot's local API uses a self-signed cert
-                        .http1_only()
-                        .no_proxy()
-                        .timeout(Duration::from_secs(10))
-                        .build()
-                        .expect("local HTTP client");
-                    let public_client = Client::builder()
-                        .connect_timeout(Duration::from_secs(5))
-                        .timeout(Duration::from_secs(10))
-                        .build()
-                        .expect("public HTTP client");
+    let state_bg = state.clone();
+    let ctx_bg = ctx.clone();
+    let tx_bg = scan_tx.clone();
+    let bg_startup = bg_tx.clone();
 
-                    // Non-blocking worker for API key tests, verification, updates, & live recommendations.
-                    let (st_check, cx_check, pub_check) = (state_bg.clone(), ctx_bg.clone(), public_client.clone());
+    let spawned = std::thread::Builder::new().name("radar-bg".into()).spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => {
+                log(format!("Failed to start async runtime: {e}"));
+                return;
+            }
+        };
+        rt.block_on(async move {
+            let local_client = Client::builder()
+                .danger_accept_invalid_certs(true) // Riot's local API uses a self-signed cert
+                .http1_only()
+                .no_proxy()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .expect("local HTTP client");
+            let public_client = Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(10))
+                .build()
+                .expect("public HTTP client");
+
+            // Non-blocking worker for API key tests, verification, updates, & live recommendations.
+            let (st_check, cx_check, pub_check) = (state_bg.clone(), ctx_bg.clone(), public_client.clone());
+            tokio::spawn(async move {
+                while let Some(task) = bg_rx.recv().await {
+                    let (st, cx, client) = (st_check.clone(), cx_check.clone(), pub_check.clone());
                     tokio::spawn(async move {
-                        while let Some(task) = bg_rx.recv().await {
-                            let (st, cx, client) = (st_check.clone(), cx_check.clone(), pub_check.clone());
-                            tokio::spawn(async move {
-                                match task {
-                                    BgTask::TestYouTubeKey(key) => {
-                                        let res = test_youtube_api_key(&client, &key).await;
-                                        lock(&st).yt_key_check = res;
-                                        repaint(&cx);
-                                    }
-                                    BgTask::TestTwitchKeys { client_id, client_secret } => {
-                                        let res = test_twitch_api_keys(&client, &client_id, &client_secret).await;
-                                        lock(&st).twitch_key_check = res;
-                                        repaint(&cx);
-                                    }
-                                    BgTask::VerifyStreamer { riot_id, platform, channel_name, channel_url } => {
-                                        let res = verify_streamer_entry(&client, &riot_id, &platform, &channel_name, &channel_url).await;
-                                        lock(&st).streamer_verify = res;
-                                        repaint(&cx);
-                                    }
-                                    BgTask::CheckForUpdates { silent } => {
-                                        let res = check_for_app_update(&client).await;
-                                        let mut s = lock(&st);
-                                        match res {
-                                            UpdateState::Available(info) => {
-                                                let key = format!(
-                                                    "{}|{}",
-                                                    info.tag_name,
-                                                    info.remote_sha.clone().unwrap_or_default()
-                                                );
-                                                let already_notified =
-                                                    s.notified_update_key.as_deref() == Some(key.as_str());
-                                                s.update_state = UpdateState::Available(info);
-                                                if !already_notified {
-                                                    s.notified_update_key = Some(key);
-                                                }
-                                            }
-                                            UpdateState::UpToDate(msg) => {
-                                                s.notified_update_key = None;
-                                                // Auto-hide notification when no update is available; only show inline in Settings on manual check
-                                                s.update_state = if silent {
-                                                    UpdateState::Idle
-                                                } else {
-                                                    UpdateState::UpToDate(msg)
-                                                };
-                                            }
-                                            UpdateState::Error(msg) => {
-                                                // Never misreport failed checks as up-to-date; quiet on background startup, visible on manual check
-                                                if !silent {
-                                                    s.update_state = UpdateState::Error(msg);
-                                                } else {
-                                                    log(format!("Silent update check failed: {msg}"));
-                                                }
-                                            }
-                                            other => {
-                                                s.update_state = other;
-                                            }
-                                        }
-                                        drop(s);
-                                        repaint(&cx);
-                                    }
-                                    BgTask::InstallUpdate(info) => {
-                                        download_and_install_update(info, st, cx).await;
-                                    }
-                                    BgTask::FetchRecommendations {
-                                        server_region,
-                                        youtube_api_key,
-                                        twitch_client_id,
-                                        twitch_client_secret,
-                                        force,
-                                    } => {
-                                        // Guard: zero network calls if recommendations were turned OFF before task ran
-                                        if !lock(&st).config.enable_recommendations {
-                                            lock(&st).recommendations = RecommendationsState::Idle;
-                                            repaint(&cx);
-                                            return;
-                                        }
-                                        if !force {
-                                            let cached = {
-                                                let s = lock(&st);
-                                                s.recommendations_cache.as_ref().and_then(|(reg, at, list, lbl)| {
-                                                    if reg.eq_ignore_ascii_case(&server_region)
-                                                        && at.elapsed() < RECOMMENDATIONS_CACHE_TTL
-                                                    {
-                                                        Some((list.clone(), lbl.clone()))
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                            };
-                                            if let Some((list, lbl)) = cached {
-                                                lock(&st).recommendations = RecommendationsState::Loaded(list, lbl);
-                                                repaint(&cx);
-                                                return;
-                                            }
-                                        }
-                                        let reg = server_region_by_code(&server_region)
-                                            .unwrap_or(&SERVER_REGIONS[0]);
-                                        match fetch_live_recommendations(
-                                            &client,
-                                            reg,
-                                            &youtube_api_key,
-                                            &twitch_client_id,
-                                            &twitch_client_secret,
-                                        )
-                                        .await
-                                        {
-                                            Ok(list) => {
-                                                let at = Local::now().format("%I:%M %p").to_string();
-                                                let mut s = lock(&st);
-                                                s.recommendations_cache = Some((
-                                                    reg.code.to_string(),
-                                                    Instant::now(),
-                                                    list.clone(),
-                                                    at.clone(),
-                                                ));
-                                                s.recommendations = RecommendationsState::Loaded(list, at);
-                                            }
-                                            Err(e) => {
-                                                lock(&st).recommendations = RecommendationsState::Error(format!(
-                                                    "Could not fetch recommendations: {}",
-                                                    short(&e.to_string(), 120)
-                                                ));
-                                            }
-                                        }
-                                        repaint(&cx);
-                                    }
-                                }
-                            });
-                        }
-                    });
-
-                    // Automatic silent update check once at startup (auto-hides if up to date)
-                    let _ = bg_startup.send(BgTask::CheckForUpdates { silent: true });
-
-                    // Single worker serializes all scans (manual + post-match) and survives panics.
-                    let (st, cx, local_scan) = (state_bg.clone(), ctx_bg.clone(), local_client.clone());
-                    tokio::spawn(async move {
-                        while let Some(first) = scan_rx.recv().await {
-                            let mut trigger = first;
-                            while let Ok(t) = scan_rx.try_recv() {
-                                if t == ScanTrigger::PostMatch {
-                                    trigger = t;
-                                } else if trigger == ScanTrigger::RefreshDirectory && t == ScanTrigger::Manual {
-                                    trigger = t;
-                                }
+                        match task {
+                            BgTask::TestYouTubeKey(key) => {
+                                let res = test_youtube_api_key(&client, &key).await;
+                                lock(&st).yt_key_check = res;
+                                repaint(&cx);
                             }
-                            if trigger == ScanTrigger::RefreshDirectory {
-                                let handle = tokio::spawn(sync_directory_only(
-                                    public_client.clone(),
-                                    st.clone(),
-                                    cx.clone(),
-                                ));
-                                if let Err(e) = handle.await {
-                                    log(format!("Directory sync crashed: {e}"));
-                                    lock(&st).is_syncing_directory = false;
+                            BgTask::TestTwitchKeys { client_id, client_secret } => {
+                                let res = test_twitch_api_keys(&client, &client_id, &client_secret).await;
+                                lock(&st).twitch_key_check = res;
+                                repaint(&cx);
+                            }
+                            BgTask::VerifyStreamer { riot_id, platform, channel_name, channel_url } => {
+                                let res = verify_streamer_entry(&client, &riot_id, &platform, &channel_name, &channel_url).await;
+                                lock(&st).streamer_verify = res;
+                                repaint(&cx);
+                            }
+                            BgTask::CheckForUpdates { silent } => {
+                                let res = check_for_app_update(&client).await;
+                                let mut s = lock(&st);
+                                match res {
+                                    UpdateState::Available(info) => {
+                                        let key = format!(
+                                            "{}|{}",
+                                            info.tag_name,
+                                            info.remote_sha.clone().unwrap_or_default()
+                                        );
+                                        let already_notified =
+                                            s.notified_update_key.as_deref() == Some(key.as_str());
+                                        s.update_state = UpdateState::Available(info);
+                                        if !already_notified {
+                                            s.notified_update_key = Some(key);
+                                        }
+                                    }
+                                    UpdateState::UpToDate(msg) => {
+                                        s.notified_update_key = None;
+                                        // Auto-hide notification when no update is available; only show inline in Settings on manual check
+                                        s.update_state = if silent {
+                                            UpdateState::Idle
+                                        } else {
+                                            UpdateState::UpToDate(msg)
+                                        };
+                                    }
+                                    UpdateState::Error(msg) => {
+                                        // Never misreport failed checks as up-to-date; quiet on background startup, visible on manual check
+                                        if !silent {
+                                            s.update_state = UpdateState::Error(msg);
+                                        } else {
+                                            log(format!("Silent update check failed: {msg}"));
+                                        }
+                                    }
+                                    other => {
+                                        s.update_state = other;
+                                    }
+                                }
+                                drop(s);
+                                repaint(&cx);
+                            }
+                            BgTask::InstallUpdate(info) => {
+                                download_and_install_update(info, st, cx).await;
+                            }
+                            BgTask::FetchRecommendations {
+                                server_region,
+                                youtube_api_key,
+                                twitch_client_id,
+                                twitch_client_secret,
+                                force,
+                            } => {
+                                // Guard: zero network calls if recommendations were turned OFF before task ran
+                                if !lock(&st).config.enable_recommendations {
+                                    lock(&st).recommendations = RecommendationsState::Idle;
+                                    repaint(&cx);
+                                    return;
+                                }
+                                if !force {
+                                    let cached = {
+                                        let s = lock(&st);
+                                        s.recommendations_cache.as_ref().and_then(|(reg, at, list, lbl)| {
+                                            if reg.eq_ignore_ascii_case(&server_region)
+                                                && at.elapsed() < RECOMMENDATIONS_CACHE_TTL
+                                            {
+                                                Some((list.clone(), lbl.clone()))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    };
+                                    if let Some((list, lbl)) = cached {
+                                        lock(&st).recommendations = RecommendationsState::Loaded(list, lbl);
+                                        repaint(&cx);
+                                        return;
+                                    }
+                                }
+                                let reg = server_region_by_code(&server_region)
+                                    .unwrap_or(&SERVER_REGIONS[0]);
+                                match fetch_live_recommendations(
+                                    &client,
+                                    reg,
+                                    &youtube_api_key,
+                                    &twitch_client_id,
+                                    &twitch_client_secret,
+                                )
+                                .await
+                                {
+                                    Ok(list) => {
+                                        let at = Local::now().format("%I:%M %p").to_string();
+                                        let mut s = lock(&st);
+                                        s.recommendations_cache = Some((
+                                            reg.code.to_string(),
+                                            Instant::now(),
+                                            list.clone(),
+                                            at.clone(),
+                                        ));
+                                        s.recommendations = RecommendationsState::Loaded(list, at);
+                                    }
+                                    Err(e) => {
+                                        lock(&st).recommendations = RecommendationsState::Error(format!(
+                                            "Could not fetch recommendations: {}",
+                                            short(&e.to_string(), 120)
+                                        ));
+                                    }
                                 }
                                 repaint(&cx);
-                                continue;
                             }
-
-                            lock(&st).is_scanning = true;
-                            let handle = tokio::spawn(scan_last_match(
-                                local_scan.clone(),
-                                public_client.clone(),
-                                st.clone(),
-                                cx.clone(),
-                                trigger,
-                            ));
-                            if let Err(e) = handle.await {
-                                log(format!("Scan task crashed: {e}"));
-                                lock(&st).status = "Scan failed unexpectedly (see radar.log)".into();
-                            }
-                            lock(&st).is_scanning = false;
-                            repaint(&cx);
                         }
                     });
-
-                    let log_path = PathBuf::from(env::var_os("LOCALAPPDATA").unwrap_or_default())
-                        .join("VALORANT")
-                        .join("Saved")
-                        .join("Logs")
-                        .join("ShooterGame.log");
-                    watch_log(log_path, local_client, state_bg, ctx_bg, tx_bg).await;
-                });
+                }
             });
-            if let Err(e) = spawned {
-                log(format!("Failed to spawn background thread: {e}"));
-            }
 
-            Ok(Box::new(StreamerApp::new(cc, state_for_app, tx_for_app, bg_tx_for_app, start_hidden)))
-        }),
-    )
-    .map_err(|e| anyhow!("GUI error: {e}"))
+            // Automatic silent update check once at startup (auto-hides if up to date)
+            let _ = bg_startup.send(BgTask::CheckForUpdates { silent: true });
+
+            // Single worker serializes all scans (manual + post-match) and survives panics.
+            let (st, cx, local_scan) = (state_bg.clone(), ctx_bg.clone(), local_client.clone());
+            tokio::spawn(async move {
+                while let Some(first) = scan_rx.recv().await {
+                    let mut trigger = first;
+                    while let Ok(t) = scan_rx.try_recv() {
+                        if t == ScanTrigger::PostMatch {
+                            trigger = t;
+                        } else if trigger == ScanTrigger::RefreshDirectory && t == ScanTrigger::Manual {
+                            trigger = t;
+                        }
+                    }
+                    if trigger == ScanTrigger::RefreshDirectory {
+                        let handle = tokio::spawn(sync_directory_only(
+                            public_client.clone(),
+                            st.clone(),
+                            cx.clone(),
+                        ));
+                        if let Err(e) = handle.await {
+                            log(format!("Directory sync crashed: {e}"));
+                            lock(&st).is_syncing_directory = false;
+                        }
+                        repaint(&cx);
+                        continue;
+                    }
+
+                    lock(&st).is_scanning = true;
+                    let handle = tokio::spawn(scan_last_match(
+                        local_scan.clone(),
+                        public_client.clone(),
+                        st.clone(),
+                        cx.clone(),
+                        trigger,
+                    ));
+                    if let Err(e) = handle.await {
+                        log(format!("Scan task crashed: {e}"));
+                        lock(&st).status = "Scan failed unexpectedly (see radar.log)".into();
+                    }
+                    lock(&st).is_scanning = false;
+                    repaint(&cx);
+                }
+            });
+
+            let log_path = PathBuf::from(env::var_os("LOCALAPPDATA").unwrap_or_default())
+                .join("VALORANT")
+                .join("Saved")
+                .join("Logs")
+                .join("ShooterGame.log");
+            watch_log(log_path, local_client, state_bg, ctx_bg, tx_bg).await;
+        });
+    });
+    if let Err(e) = spawned {
+        log(format!("Failed to spawn background thread: {e}"));
+    }
+
+    let app = StreamerApp::new(&ctx, state, scan_tx, bg_tx, start_hidden);
+    let mut host = SoftwareWindowHost::new(softbuffer_context, viewport_builder, ctx, app);
+    event_loop
+        .run_app(&mut host)
+        .map_err(|e| anyhow!("GUI error: {e}"))
 }
 
 #[cfg(test)]

@@ -3,6 +3,11 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.4] - 2026-11-25
+
+### Fixed
+- **Permanently Eliminated NVIDIA G-SYNC & Top-Right Overlay (`G-SYNC` / `NORMAL`):** Removed DirectX/DXGI (`wgpu`) and OpenGL (`glow`) swapchains completely and switched the Windows UI to a pure CPU software rasterizer (`egui_software_backend`) presenting via Win32 GDI (`softbuffer` `CreateDIBSection` + `BitBlt`). Because the executable no longer creates any 3D/DXGI/OpenGL swapchain, NVIDIA's driver cannot hook the window, activate G-SYNC, or draw the top-right `G-SYNC`/`NORMAL` indicator — while also reducing binary size and using zero GPU VRAM.
+
 ## [1.2.3] - 2026-11-25
 
 ### Fixed

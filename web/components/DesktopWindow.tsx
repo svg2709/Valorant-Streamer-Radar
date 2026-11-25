@@ -1849,9 +1849,10 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                   />
                   <ToggleSettingRow
                     checked={draft.enable_recommendations}
-                    onChange={(next) =>
-                      setDraft({ ...draft, enable_recommendations: next })
-                    }
+                    onChange={(next) => {
+                      setDraft({ ...draft, enable_recommendations: next });
+                      onToggleRecommendationsImmediate(next);
+                    }}
                     title="Live Streamer Recommendations"
                     description="OFF by default to conserve bandwidth. Turn ON to show the Discover tab with cached regional suggestions."
                   />

@@ -3,6 +3,13 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.9] - 2026-11-25
+
+### Fixed
+- **Immediate Discover Tab Toggle in Settings:** Turning **Live Streamer Recommendations** ON or OFF in **Settings** now saves and applies immediately instead of waiting for **Save Settings**, so the **Discover** sidebar tab appears or hides right away.
+- **Restored Top Pink-to-Pearl Gradient Bar:** Painted the curved top accent hairline on the foreground layer directly inside the 1px rounded window border (and removed the titlebar's redundant top border) so it stays crisp and clearly visible on Windows 10/11 curved windows.
+- **Unified AMOLED Dark Theme Across Controls:** Fixed washed-out gray `ComboBox` dropdowns (such as **Active Server**), replaced bright neon-pink `selectable_value` blocks in **Directory**, **Filters**, **Discover**, and the **Add Streamer** modal with matching dark rounded segmented tab switchers, rounded all text inputs (`6px` corners with `#08080B` fill), added proper spacing between the History search box and **Filters** button, and updated API key sub-labels and guide headings to use embedded Plus Jakarta Sans weights.
+
 ## [1.2.8] - 2026-11-25
 
 ### Changed

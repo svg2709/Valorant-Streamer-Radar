@@ -5766,22 +5766,65 @@ fn handle_frameless_resize(ctx: &egui::Context) {
     }
 }
 
-fn paint_gradient_strip(ui: &mut egui::Ui, height: f32) {
-    let width = ui.available_width().max(1.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
-    let painter = ui.painter();
-    let steps = 28usize;
-    let step_w = rect.width() / steps as f32;
+fn paint_top_gradient_bar(painter: &egui::Painter, screen: egui::Rect, corner_r: f32, height: f32) {
+    let left = screen.left() + 1.0;
+    let right = screen.right() - 1.0;
+    let top_y = screen.top() + 1.0;
+    let bottom_y = top_y + height;
+    let width = (right - left).max(1.0);
+    let steps = 64usize;
+    let step_w = width / steps as f32;
     for i in 0..steps {
-        let t = (i as f32 + 0.5) / steps as f32;
-        let x0 = rect.left() + i as f32 * step_w;
-        let x1 = (x0 + step_w + 0.6).min(rect.right());
-        painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(x0, rect.top()), egui::pos2(x1, rect.bottom())),
-            CornerRadius::ZERO,
-            pink_white_color(t),
-        );
+        let x0 = left + i as f32 * step_w;
+        let x1 = (x0 + step_w + 0.6).min(right);
+        let xm = (x0 + x1) * 0.5;
+        let edge_d = (xm - screen.left()).min(screen.right() - xm).max(0.0);
+        let curve_top = if edge_d < corner_r {
+            screen.top() + corner_r - (corner_r * corner_r - (corner_r - edge_d).powi(2)).max(0.0).sqrt()
+        } else {
+            screen.top()
+        };
+        let y0 = top_y.max(curve_top + 0.7);
+        if bottom_y > y0 {
+            let t = (i as f32 + 0.5) / steps as f32;
+            painter.rect_filled(
+                egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, bottom_y)),
+                CornerRadius::ZERO,
+                pink_white_color(t),
+            );
+        }
     }
+}
+
+fn segmented_tab_btn<T: PartialEq>(
+    ui: &mut egui::Ui,
+    current: &mut T,
+    value: T,
+    label: &str,
+) -> bool {
+    let selected = *current == value;
+    let fill = if selected { SURFACE_HOVER } else { Color32::TRANSPARENT };
+    let text_col = if selected { ACCENT_PEARL } else { TEXT_MUTED };
+    let font = if selected { font_semibold(13.0) } else { font_medium(13.0) };
+    let stroke = if selected {
+        Stroke::new(1.0, Color32::from_rgb(44, 44, 54))
+    } else {
+        Stroke::NONE
+    };
+    let btn = egui::Button::new(RichText::new(label).font(font).color(text_col))
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(CornerRadius::same(5))
+        .min_size(Vec2::new(0.0, 28.0));
+    let resp = ui.add(btn);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if resp.clicked() && !selected {
+        *current = value;
+        return true;
+    }
+    false
 }
 
 fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, font_size: f32) -> egui::Response {
@@ -5879,7 +5922,9 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
                     if let Some(name) = suggested_name {
                         ui.add_space(5.0);
                         let use_btn = egui::Button::new(
-                            RichText::new(format!("Use detected name: {name}")).color(Color32::WHITE).strong().size(11.5),
+                            RichText::new(format!("Use detected name: {name}"))
+                                .font(font_semibold(11.5))
+                                .color(Color32::WHITE),
                         )
                         .fill(BTN_SECONDARY)
                         .stroke(Stroke::new(1.0, ENEMY_AMBER))
@@ -5957,29 +6002,58 @@ impl StreamerApp {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = BG_DARK;
         visuals.window_fill = CARD_BG;
-        visuals.extreme_bg_color = BG_DARK;
+        visuals.window_stroke = Stroke::new(1.0, CARD_BORDER);
+        visuals.window_corner_radius = CornerRadius::same(8);
+        visuals.menu_corner_radius = CornerRadius::same(6);
+        visuals.extreme_bg_color = Color32::from_rgb(8, 8, 11);
         visuals.faint_bg_color = CARD_BG;
+
         visuals.widgets.noninteractive.bg_fill = CARD_BG;
+        visuals.widgets.noninteractive.weak_bg_fill = CARD_BG;
         visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, CARD_BORDER);
         visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+        visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
+
         visuals.widgets.inactive.bg_fill = BTN_SECONDARY;
+        visuals.widgets.inactive.weak_bg_fill = BTN_SECONDARY;
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CARD_BORDER);
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+        visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+
         visuals.widgets.hovered.bg_fill = SURFACE_HOVER;
+        visuals.widgets.hovered.weak_bg_fill = SURFACE_HOVER;
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.55));
-        visuals.widgets.active.bg_fill = Color32::from_rgb(34, 34, 42);
-        visuals.selection.bg_fill = ACCENT_PINK;
-        visuals.selection.stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.active.bg_fill = Color32::from_rgb(28, 28, 36);
+        visuals.widgets.active.weak_bg_fill = Color32::from_rgb(28, 28, 36);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.8));
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.active.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.open.bg_fill = BTN_SECONDARY;
+        visuals.widgets.open.weak_bg_fill = BTN_SECONDARY;
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.7));
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.open.corner_radius = CornerRadius::same(6);
+
+        visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(255, 92, 168, 56);
+        visuals.selection.stroke = Stroke::new(1.0, ACCENT_PINK);
         egui_ctx.set_visuals(visuals);
 
         install_preview_fonts(egui_ctx);
 
-        // Typography scale & weights matching the Plus Jakarta Sans / Barlow Condensed / JetBrains Mono preview
+        // Typography scale, weights, and input/dropdown sizing matching the preview
         egui_ctx.style_mut(|style| {
             style.text_styles.insert(egui::TextStyle::Small, FontId::proportional(12.0));
             style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.5));
             style.text_styles.insert(egui::TextStyle::Button, font_medium(13.0));
             style.text_styles.insert(egui::TextStyle::Monospace, font_mono(12.5));
             style.text_styles.insert(egui::TextStyle::Heading, font_bold(18.0));
+            style.spacing.button_padding = Vec2::new(10.0, 6.0);
+            style.spacing.interact_size.y = 30.0;
+            style.spacing.combo_height = 240.0;
         });
 
         let initial_cfg = lock(&state).config.clone();
@@ -6316,22 +6390,18 @@ impl StreamerApp {
             self.active_tab = ActiveTab::History;
         }
 
-        // Thin 2px Pink-to-Pearl top brand accent hairline
+        // Reserve 3.5px at the top for the curved Pink-to-Pearl foreground accent hairline
         egui::TopBottomPanel::top("accent_strip")
-            .exact_height(2.0)
+            .exact_height(3.5)
+            .show_separator_line(false)
             .frame(Frame::NONE.fill(BG_DARK))
-            .show(ctx, |ui| {
-                paint_gradient_strip(ui, 2.0);
-            });
+            .show(ctx, |_ui| {});
 
         // Custom 38px AMOLED Black draggable title bar (Minimize & Close-to-tray only)
         egui::TopBottomPanel::top("custom_titlebar")
             .exact_height(38.0)
-            .frame(
-                Frame::NONE
-                    .fill(BG_DARK)
-                    .stroke(Stroke::new(1.0, CARD_BORDER)),
-            )
+            .show_separator_line(false)
+            .frame(Frame::NONE.fill(BG_DARK))
             .show(ctx, |ui| {
                 let bar_rect = ui.max_rect();
                 let drag_rect = egui::Rect::from_min_max(
@@ -6378,6 +6448,15 @@ impl StreamerApp {
                         }
                     });
                 });
+
+                // Subtle 1px bottom divider under the title bar only
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(bar_rect.left(), bar_rect.bottom() - 0.5),
+                        egui::pos2(bar_rect.right(), bar_rect.bottom() - 0.5),
+                    ],
+                    Stroke::new(1.0, CARD_BORDER),
+                );
             });
 
         // Left Sidebar Navigation Rail (236px AMOLED Black)
@@ -6610,13 +6689,14 @@ impl StreamerApp {
                     );
                     ui.add_space(12.0);
 
-                    ui.label(RichText::new("Primary Riot ID (IGN#TAG)").strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Primary Riot ID (IGN#TAG)").font(font_semibold(13.0)).color(TEXT_PRIMARY));
+                    ui.add_space(3.0);
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.input_riot_id)
-                                .hint_text("e.g. RohanYT#IND")
+                                .hint_text("e.g. TylerFPS#NA1")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8, 6)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -6624,13 +6704,14 @@ impl StreamerApp {
                     }
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Known Aliases / Alt Riot IDs (Optional, comma-separated)").strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Known Aliases / Alt Riot IDs (Optional, comma-separated)").font(font_semibold(13.0)).color(TEXT_PRIMARY));
+                    ui.add_space(3.0);
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.input_aliases)
-                                .hint_text("e.g. RohanAlt#IND, RohanSmurf#AP")
+                                .hint_text("e.g. TylerAlt#NA1, TylerSmurf#USA")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8, 6)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -6638,17 +6719,27 @@ impl StreamerApp {
                     }
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Platform").strong().color(TEXT_PRIMARY));
-                    ui.horizontal(|ui| {
-                        for plat in ["YouTube", "Twitch", "Kick"] {
-                            if ui.selectable_value(&mut self.input_platform, plat.to_string(), plat).changed() {
-                                changed_input = true;
-                            }
-                        }
-                    });
+                    ui.label(RichText::new("Platform").font(font_semibold(13.0)).color(TEXT_PRIMARY));
+                    ui.add_space(3.0);
+                    Frame::NONE
+                        .fill(BG_DARK)
+                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::same(3))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 3.0;
+                                for plat in ["YouTube", "Twitch", "Kick"] {
+                                    if segmented_tab_btn(ui, &mut self.input_platform, plat.to_string(), plat) {
+                                        changed_input = true;
+                                    }
+                                }
+                            });
+                        });
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Primary Valorant Server (prevents cross-region false positives)").strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Primary Valorant Server (prevents cross-region false positives)").font(font_semibold(13.0)).color(TEXT_PRIMARY));
+                    ui.add_space(3.0);
                     let selected_reg_label = if self.input_server_region.is_empty() {
                         "Any / Global".to_string()
                     } else {
@@ -6667,13 +6758,14 @@ impl StreamerApp {
                         });
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Channel Display Name (or leave blank & click Verify to auto-fill)").strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Channel Display Name (or leave blank & click Verify to auto-fill)").font(font_semibold(13.0)).color(TEXT_PRIMARY));
+                    ui.add_space(3.0);
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.input_channel_name)
-                                .hint_text("e.g. Rohan Gaming")
+                                .hint_text("e.g. TylerFPS")
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8, 6)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -6681,18 +6773,19 @@ impl StreamerApp {
                     }
                     ui.add_space(8.0);
 
-                    ui.label(RichText::new("Channel URL").strong().color(TEXT_PRIMARY));
+                    ui.label(RichText::new("Channel URL").font(font_semibold(13.0)).color(TEXT_PRIMARY));
+                    ui.add_space(3.0);
                     let url_hint = match self.input_platform.as_str() {
                         "Twitch" => "e.g. https://www.twitch.tv/tenz",
-                        "Kick" => "e.g. https://kick.com/kairoclutch",
-                        _ => "e.g. https://www.youtube.com/@RohanGaming",
+                        "Kick" => "e.g. https://kick.com/masonclutch",
+                        _ => "e.g. https://www.youtube.com/@TylerFPS",
                     };
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.input_channel_url)
                                 .hint_text(url_hint)
                                 .desired_width(f32::INFINITY)
-                                .margin(Margin::symmetric(8, 6)),
+                                .margin(Margin::symmetric(10, 7)),
                         )
                         .changed()
                     {
@@ -6702,11 +6795,11 @@ impl StreamerApp {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         let verify_label = if is_verifying { "Verifying..." } else { "Verify Link & Name" };
-                        let verify_btn = egui::Button::new(RichText::new(verify_label).color(Color32::WHITE).strong().size(12.0))
+                        let verify_btn = egui::Button::new(RichText::new(verify_label).font(font_semibold(12.0)).color(Color32::WHITE))
                             .fill(BTN_SECONDARY)
                             .stroke(Stroke::new(1.0, ALLY_TEAL))
-                            .corner_radius(CornerRadius::same(5))
-                            .min_size(Vec2::new(140.0, 28.0));
+                            .corner_radius(CornerRadius::same(6))
+                            .min_size(Vec2::new(140.0, 30.0));
                         if ui.add_enabled(!is_verifying, verify_btn).clicked() {
                             trigger_verify = true;
                         }
@@ -6808,17 +6901,19 @@ impl StreamerApp {
                 }
             });
 
-        // Subtle 1px curved perimeter border matching the rounded desktop window
-        ctx.layer_painter(egui::LayerId::new(
+        // Subtle 1px curved perimeter border + foreground Pink-to-Pearl top accent hairline
+        let fg_painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             egui::Id::new("frameless_window_border"),
-        ))
-        .rect_stroke(
-            ctx.screen_rect().shrink(0.5),
+        ));
+        let screen = ctx.screen_rect();
+        fg_painter.rect_stroke(
+            screen.shrink(0.5),
             CornerRadius::same(8),
             Stroke::new(1.0, CARD_BORDER),
             StrokeKind::Inside,
         );
+        paint_top_gradient_bar(&fg_painter, screen, 8.0, 2.5);
     }
 }
 
@@ -6838,14 +6933,12 @@ impl StreamerApp {
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new("UPDATE AVAILABLE")
-                                            .size(10.5)
-                                            .strong()
+                                            .font(font_bold(10.5))
                                             .color(ACCENT_PINK),
                                     );
                                     ui.label(
                                         RichText::new(format!("{} (Installed: v{APP_VERSION})", info.release_name))
-                                            .size(13.0)
-                                            .strong()
+                                            .font(font_semibold(13.0))
                                             .color(ACCENT_PEARL),
                                     );
                                 });
@@ -6904,8 +6997,7 @@ impl StreamerApp {
                                 .show(ui, |ui| {
                                     ui.label(
                                         RichText::new(format!("RELEASE CHANGELOG ({})", info.tag_name))
-                                            .size(10.0)
-                                            .strong()
+                                            .font(font_bold(10.5))
                                             .color(ACCENT_BLUSH),
                                     );
                                     ui.add_space(4.0);
@@ -6930,7 +7022,7 @@ impl StreamerApp {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.add_space(6.0);
-                            ui.label(RichText::new(msg).size(12.5).strong().color(ACCENT_PEARL));
+                            ui.label(RichText::new(msg).font(font_semibold(12.5)).color(ACCENT_PEARL));
                         });
                     });
                 ui.add_space(10.0);
@@ -7223,18 +7315,19 @@ impl StreamerApp {
 
         // Single clean toolbar row: Search + Collapsible Filters trigger + Clear
         ui.horizontal(|ui| {
-            let reserved = if history.is_empty() { 126.0 } else { 196.0 };
-            let search_w = (ui.available_width() - reserved).max(200.0);
+            let reserved = if history.is_empty() { 134.0 } else { 214.0 };
+            let search_w = (ui.available_width() - reserved).max(180.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
                     .hint_text("Search Riot ID, channel, map, server, or title...")
                     .desired_width(search_w)
                     .margin(Margin::symmetric(12, 8)),
             );
+            ui.add_space(10.0);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if !history.is_empty() {
-                    let clear = egui::Button::new(RichText::new("Clear").color(TEXT_MUTED).size(13.5))
+                    let clear = egui::Button::new(RichText::new("Clear").font(font_medium(13.0)).color(TEXT_MUTED))
                         .fill(Color32::TRANSPARENT)
                         .stroke(Stroke::new(1.0, CARD_BORDER))
                         .corner_radius(CornerRadius::same(6))
@@ -7244,6 +7337,7 @@ impl StreamerApp {
                         s.history.clear();
                         save_json("streamer_history.json", &s.history);
                     }
+                    ui.add_space(8.0);
                 }
 
                 let filter_label = if active_filter_count > 0 {
@@ -7254,16 +7348,16 @@ impl StreamerApp {
                 let filter_active = self.show_filters_popover || active_filter_count > 0;
                 let filter_btn = egui::Button::new(
                     RichText::new(filter_label)
-                        .color(if filter_active { ACCENT_PEARL } else { TEXT_PRIMARY })
-                        .size(13.5),
+                        .font(font_medium(13.0))
+                        .color(if filter_active { ACCENT_PEARL } else { TEXT_PRIMARY }),
                 )
-                .fill(BTN_SECONDARY)
+                .fill(if filter_active { SURFACE_HOVER } else { CARD_BG })
                 .stroke(Stroke::new(
                     1.0,
                     if filter_active { ACCENT_PINK.linear_multiply(0.65) } else { CARD_BORDER },
                 ))
                 .corner_radius(CornerRadius::same(6))
-                .min_size(Vec2::new(102.0, 34.0));
+                .min_size(Vec2::new(98.0, 34.0));
                 if ui.add(filter_btn).clicked() {
                     self.show_filters_popover = !self.show_filters_popover;
                 }
@@ -7310,15 +7404,25 @@ impl StreamerApp {
                 .inner_margin(Margin::symmetric(14, 12))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Team").color(TEXT_MUTED).size(13.0));
+                        ui.label(RichText::new("Team").font(font_medium(13.0)).color(TEXT_MUTED));
                         ui.add_space(6.0);
-                        for (f, label) in [
-                            (TeamFilter::All, "All"),
-                            (TeamFilter::Ally, "Ally"),
-                            (TeamFilter::Enemy, "Enemy"),
-                        ] {
-                            ui.selectable_value(&mut self.team_filter, f, label);
-                        }
+                        Frame::NONE
+                            .fill(BG_DARK)
+                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .corner_radius(CornerRadius::same(6))
+                            .inner_margin(Margin::same(3))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 3.0;
+                                    for (f, label) in [
+                                        (TeamFilter::All, "All"),
+                                        (TeamFilter::Ally, "Ally"),
+                                        (TeamFilter::Enemy, "Enemy"),
+                                    ] {
+                                        segmented_tab_btn(ui, &mut self.team_filter, f, label);
+                                    }
+                                });
+                            });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let done_btn = egui::Button::new(RichText::new("Done").color(TEXT_PRIMARY).size(13.0))
@@ -7536,31 +7640,43 @@ impl StreamerApp {
         is_syncing: bool,
     ) {
         ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut self.dir_source_tab,
-                DirectorySourceTab::Custom,
-                format!("My Custom Streamers ({})", local_dir.len()),
-            );
-            ui.selectable_value(
-                &mut self.dir_source_tab,
-                DirectorySourceTab::Community,
-                format!("Community Database ({})", remote_dir.len()),
-            );
+            Frame::NONE
+                .fill(CARD_BG)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(3))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        segmented_tab_btn(
+                            ui,
+                            &mut self.dir_source_tab,
+                            DirectorySourceTab::Custom,
+                            &format!("My Custom Streamers ({})", local_dir.len()),
+                        );
+                        segmented_tab_btn(
+                            ui,
+                            &mut self.dir_source_tab,
+                            DirectorySourceTab::Community,
+                            &format!("Community Database ({})", remote_dir.len()),
+                        );
+                    });
+                });
             ui.add_space(10.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.dir_search)
                     .hint_text("Filter Riot ID, alias, channel, or server...")
                     .desired_width(230.0)
-                    .margin(Margin::symmetric(8, 6)),
+                    .margin(Margin::symmetric(10, 7)),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let sync_label = if is_syncing { "Syncing..." } else { "Sync Database" };
-                let sync_btn = egui::Button::new(RichText::new(sync_label).color(TEXT_PRIMARY).size(13.5))
+                let sync_btn = egui::Button::new(RichText::new(sync_label).font(font_medium(13.0)).color(TEXT_PRIMARY))
                     .fill(BTN_SECONDARY)
                     .stroke(Stroke::new(1.0, CARD_BORDER))
-                    .corner_radius(CornerRadius::same(5))
-                    .min_size(Vec2::new(124.0, 32.0));
+                    .corner_radius(CornerRadius::same(6))
+                    .min_size(Vec2::new(124.0, 34.0));
                 if ui.add_enabled(!is_syncing, sync_btn).clicked() {
                     let _ = self.manual_scan_tx.send(ScanTrigger::RefreshDirectory);
                 }
@@ -7716,8 +7832,7 @@ impl StreamerApp {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new("Live Streamer Recommendations are OFF")
-                                    .font(FontId::proportional(18.5))
-                                    .strong()
+                                    .font(font_bold(17.5))
                                     .color(ACCENT_PEARL),
                             );
                             ui.add_space(6.0);
@@ -7766,18 +7881,28 @@ impl StreamerApp {
         };
 
         ui.horizontal(|ui| {
-            for (plat, lbl) in [
-                (DiscoverPlatformFilter::All, "All Platforms"),
-                (DiscoverPlatformFilter::Twitch, "Twitch"),
-                (DiscoverPlatformFilter::YouTube, "YouTube"),
-            ] {
-                ui.selectable_value(&mut self.discover_platform, plat, lbl);
-            }
-            ui.add_space(8.0);
-            ui.label(RichText::new("Server").size(13.0).color(TEXT_MUTED));
+            Frame::NONE
+                .fill(CARD_BG)
+                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(3))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        for (plat, lbl) in [
+                            (DiscoverPlatformFilter::All, "All Platforms"),
+                            (DiscoverPlatformFilter::Twitch, "Twitch"),
+                            (DiscoverPlatformFilter::YouTube, "YouTube"),
+                        ] {
+                            segmented_tab_btn(ui, &mut self.discover_platform, plat, lbl);
+                        }
+                    });
+                });
+            ui.add_space(10.0);
+            ui.label(RichText::new("Server").font(font_medium(13.0)).color(TEXT_MUTED));
             egui::ComboBox::from_id_salt("discover_server_region_combo")
                 .width(210.0)
-                .selected_text(RichText::new(discover_selected_label).color(ALLY_TEAL))
+                .selected_text(RichText::new(discover_selected_label).font(font_medium(13.0)).color(ALLY_TEAL))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut self.discover_server_override,
@@ -7807,7 +7932,7 @@ impl StreamerApp {
                     self.active_tab = ActiveTab::History;
                     return;
                 }
-                ui.label(RichText::new("ON").size(12.0).strong().color(ACCENT_BLUSH));
+                ui.label(RichText::new("ON").font(font_semibold(12.0)).color(ACCENT_BLUSH));
                 ui.add_space(8.0);
 
                 let busy = matches!(recommendations, RecommendationsState::Loading);
@@ -7924,9 +8049,9 @@ impl StreamerApp {
                                         ui.horizontal_wrapped(|ui| {
                                             ui.spacing_mut().item_spacing.x = 7.0;
                                             paint_status_dot(ui, LIVE_GREEN, true);
-                                            ui.label(RichText::new(&rec.channel).strong().color(ACCENT_PEARL).size(15.5));
+                                            ui.label(RichText::new(&rec.channel).font(font_bold(15.0)).color(ACCENT_PEARL));
                                             ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
-                                            ui.label(RichText::new(&rec.platform).size(13.0).strong().color(badge));
+                                            ui.label(RichText::new(&rec.platform).font(font_bold(12.5)).color(badge));
                                             if let Some(v) = rec.viewers {
                                                 ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
                                                 ui.label(RichText::new(format_viewers(v)).size(13.0).color(LIVE_GREEN));
@@ -8062,12 +8187,27 @@ impl StreamerApp {
                         "ON by default. Uses match-details partyId (zero extra Riot calls) to skip scanning your premade teammates on YouTube, Twitch, and Kick.",
                     );
                     ui.add_space(8.0);
-                    toggle_row(
+                    if toggle_row(
                         ui,
                         &mut self.cfg_draft.enable_recommendations,
                         "Live Streamer Recommendations (Twitch & YouTube)",
                         "OFF by default to save internet bandwidth. Turn ON to show the Discover tab and browse optional regional Valorant streams.",
-                    );
+                    ) {
+                        let enabled = self.cfg_draft.enable_recommendations;
+                        {
+                            let mut s = lock(&self.state);
+                            s.config.enable_recommendations = enabled;
+                            if !enabled {
+                                s.recommendations = RecommendationsState::Idle;
+                                s.recommendations_cache = None;
+                            }
+                            save_json("config.json", &s.config);
+                        }
+                        if !enabled && self.active_tab == ActiveTab::Discover {
+                            self.active_tab = ActiveTab::History;
+                        }
+                        ui.ctx().request_repaint();
+                    }
                     ui.add_space(8.0);
                     toggle_row(
                         ui,
@@ -8109,18 +8249,19 @@ impl StreamerApp {
                         ui.label(RichText::new("YouTube Data API v3 Key").font(font_semibold(13.5)).color(TEXT_PRIMARY));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let yt_busy = matches!(yt_check, CheckState::Checking);
-                            let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).color(TEXT_PRIMARY).size(13.0))
+                            let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).font(font_medium(12.5)).color(TEXT_PRIMARY))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .corner_radius(CornerRadius::same(4));
+                                .corner_radius(CornerRadius::same(6))
+                                .min_size(Vec2::new(78.0, 28.0));
                             if ui.add_enabled(!yt_busy, test_yt).clicked() {
                                 lock(&self.state).yt_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestYouTubeKey(self.cfg_draft.youtube_api_key.clone()));
                             }
-                            let get_yt = egui::Button::new(RichText::new("Get YouTube Key").color(ACCENT_BLUSH).size(13.0))
+                            let get_yt = egui::Button::new(RichText::new("Get YouTube Key").font(font_medium(12.5)).color(ACCENT_BLUSH))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .corner_radius(CornerRadius::same(5))
+                                .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(124.0, 28.0));
                             if ui
                                 .add(get_yt)
@@ -8152,13 +8293,14 @@ impl StreamerApp {
 
                     // Twitch Helix Client ID + Secret row
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Twitch Helix API (Client ID & Secret)").strong().color(TEXT_PRIMARY).size(14.0));
+                        ui.label(RichText::new("Twitch Helix API (Client ID & Secret)").font(font_semibold(13.5)).color(TEXT_PRIMARY));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let tw_busy = matches!(twitch_check, CheckState::Checking);
-                            let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).color(TEXT_PRIMARY).size(13.0))
+                            let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).font(font_medium(12.5)).color(TEXT_PRIMARY))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .corner_radius(CornerRadius::same(5));
+                                .corner_radius(CornerRadius::same(6))
+                                .min_size(Vec2::new(88.0, 28.0));
                             if ui.add_enabled(!tw_busy, test_tw).clicked() {
                                 lock(&self.state).twitch_key_check = CheckState::Checking;
                                 let _ = self.bg_tx.send(BgTask::TestTwitchKeys {
@@ -8166,18 +8308,19 @@ impl StreamerApp {
                                     client_secret: self.cfg_draft.twitch_client_secret.clone(),
                                 });
                             }
-                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").color(ACCENT_BLUSH).size(13.0))
+                            let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").font(font_medium(12.5)).color(ACCENT_BLUSH))
                                 .fill(BTN_SECONDARY)
                                 .stroke(Stroke::new(1.0, CARD_BORDER))
-                                .corner_radius(CornerRadius::same(5))
+                                .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(124.0, 28.0));
                             if ui.add(get_tw).on_hover_text("Opens Twitch Developer Console -> Applications").clicked() {
                                 let _ = open::that("https://dev.twitch.tv/console/apps");
                             }
                         });
                     });
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Twitch Client ID").font(font_medium(12.5)).color(TEXT_MUTED));
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Twitch Client ID").color(TEXT_MUTED).size(13.0));
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_id)
@@ -8190,8 +8333,9 @@ impl StreamerApp {
                     {
                         lock(&self.state).twitch_key_check = CheckState::Idle;
                     }
-                    ui.add_space(6.0);
-                    ui.label(RichText::new("Twitch Client Secret").color(TEXT_MUTED).size(13.0));
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Twitch Client Secret").font(font_medium(12.5)).color(TEXT_MUTED));
+                    ui.add_space(4.0);
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.cfg_draft.twitch_client_secret)
@@ -8212,9 +8356,8 @@ impl StreamerApp {
                     ui.add_space(12.0);
                     egui::CollapsingHeader::new(
                         RichText::new("How to get free API keys (Step-by-Step Guide)")
-                            .color(ACCENT_BLUSH)
-                            .strong()
-                            .size(13.5),
+                            .font(font_semibold(13.0))
+                            .color(ACCENT_BLUSH),
                     )
                     .default_open(false)
                     .show(ui, |ui| {
@@ -8224,7 +8367,7 @@ impl StreamerApp {
                             .corner_radius(CornerRadius::same(6))
                             .inner_margin(Margin::same(14))
                             .show(ui, |ui| {
-                                ui.label(RichText::new("1. YouTube Data API v3 (Free - 10,000 units/day, no credit card needed)").strong().color(ACCENT_PINK).size(13.5));
+                                ui.label(RichText::new("1. YouTube Data API v3 (Free - 10,000 units/day, no credit card needed)").font(font_semibold(13.5)).color(ACCENT_PINK));
                                 ui.add_space(3.0);
                                 ui.label(RichText::new("1) Click 'Get YouTube Key' above to open Google Cloud Console and sign in.").color(TEXT_PRIMARY).size(13.0));
                                 ui.label(RichText::new("2) Click the project picker (top-left) -> New Project -> name it 'Valorant-Radar' -> Create, then select it.").color(TEXT_PRIMARY).size(13.0));
@@ -8238,7 +8381,7 @@ impl StreamerApp {
                                 ui.separator();
                                 ui.add_space(8.0);
 
-                                ui.label(RichText::new("2. Twitch Helix API (Free - requires 2FA on your Twitch account)").strong().color(TWITCH_PURPLE).size(13.5));
+                                ui.label(RichText::new("2. Twitch Helix API (Free - requires 2FA on your Twitch account)").font(font_semibold(13.5)).color(TWITCH_PURPLE));
                                 ui.add_space(3.0);
                                 ui.label(RichText::new("1) Enable Two-Factor Authentication (2FA) at twitch.tv/settings/security (required by Twitch).").color(TEXT_PRIMARY).size(13.0));
                                 ui.label(RichText::new("2) Click 'Get Twitch Keys' above to open Twitch Developer Console -> + Register Your Application.").color(TEXT_PRIMARY).size(13.0));
@@ -8329,9 +8472,8 @@ impl StreamerApp {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(format!("New release ready: {} ({})", info.release_name, info.tag_name))
-                                        .color(ACCENT_BLUSH)
-                                        .strong()
-                                        .size(12.0),
+                                        .font(font_semibold(12.5))
+                                        .color(ACCENT_BLUSH),
                                 );
                                 ui.add_space(8.0);
                                 if gradient_button(ui, "Download & Install", Vec2::new(132.0, 26.0), true, 11.5).clicked() {

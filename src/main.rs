@@ -1489,7 +1489,6 @@ struct MatchPlayerInfo {
     record: RiotNameRecord,
     team_relation: String,
     agent_name: String,
-    party_id: String,
     is_party_member: bool,
 }
 
@@ -1715,7 +1714,6 @@ fn resolve_match_players(
                 },
                 team_relation,
                 agent_name: p.agent,
-                party_id: p.party_id,
                 is_party_member,
             }
         })
@@ -9964,7 +9962,7 @@ mod tests {
 
     #[test]
     fn test_party_member_exclusion_and_dynamic_changes() {
-        let mk = |sub: &str, name: &str, party: &str, is_party: bool| MatchPlayerInfo {
+        let mk = |sub: &str, name: &str, is_party: bool| MatchPlayerInfo {
             record: RiotNameRecord {
                 subject: sub.to_string(),
                 game_name: name.to_string(),
@@ -9972,16 +9970,15 @@ mod tests {
             },
             team_relation: "Ally".to_string(),
             agent_name: "Omen".to_string(),
-            party_id: party.to_string(),
             is_party_member: is_party,
         };
 
         let players = vec![
-            mk("me", "MySelf", "party-1", false),
-            mk("p1", "FriendOne", "party-1", true),
-            mk("p2", "FriendTwo", "party-1", true),
-            mk("r1", "RandomAlly", "party-2", false),
-            mk("e1", "EnemyStreamer", "party-3", false),
+            mk("me", "MySelf", false),
+            mk("p1", "FriendOne", true),
+            mk("p2", "FriendTwo", true),
+            mk("r1", "RandomAlly", false),
+            mk("e1", "EnemyStreamer", false),
         ];
 
         let (scannable_skip, skipped, hidden_skip) = filter_scannable_players(players.clone(), "me", true);

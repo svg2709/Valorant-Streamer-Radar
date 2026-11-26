@@ -1976,7 +1976,7 @@ fn parse_client_version_from_log_text(text: &str) -> Option<String> {
 }
 
 fn read_client_version_from_log() -> Option<String> {
-    let mut f = File::open(valorant_log_path()).ok()?;
+    let f = File::open(valorant_log_path()).ok()?;
     let mut buf = Vec::new();
     f.take(128 * 1024).read_to_end(&mut buf).ok()?;
     let text = String::from_utf8_lossy(&buf);
@@ -5216,7 +5216,7 @@ fn detect_initial_log_state(path: &Path) -> (Option<String>, Option<String>, boo
 
     // 1. Head (up to 64 KB) captures initial startup PD shard even if the log grew huge
     let mut head = Vec::new();
-    if f.by_ref().take(64 * 1024).read_to_end(&mut head).is_ok() {
+    if Read::take(&mut f, 64 * 1024).read_to_end(&mut head).is_ok() {
         let text = String::from_utf8_lossy(&head);
         scan_chunk(&text, &mut api_region, &mut server, &mut in_match);
     }

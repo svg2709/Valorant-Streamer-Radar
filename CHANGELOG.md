@@ -8,6 +8,9 @@ GitHub Releases automatically pull the matching version notes from this file.
 ### Added
 - **Latest Match Scan Review Window (Latest Match Only):** Clicking the **LATEST MATCH** header bar in History now opens an AMOLED Black **Latest Match Scan Review** window showing a per-player breakdown of how the app checked every lobby member (Directory lookup, IGN filter, YouTube/Twitch/Kick ML heuristic checks, Match Chat plugs, Party Guard skips, and Hidden/Streamer Mode names) with `All / Detected / No Match / Skipped` filter tabs. Scan traces are stored strictly on `last_match.json` for your latest match only (never bloating previous history).
 
+### Fixed
+- **Click Outside Modal to Close:** Clicking the dimmed empty space behind modal windows (**Add / Edit Streamer** and **Latest Match Scan Review**) or pressing `Esc` now cleanly closes the modal while preventing accidental clicks on panels behind it.
+
 ## [1.2.11] - 2026-11-26
 
 ### Added

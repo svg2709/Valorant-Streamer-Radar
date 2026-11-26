@@ -101,6 +101,18 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
     }
   }, [isOpen, editingEntry, prefillRecommendation, defaultServerRegion]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const trimmedUrl = channelUrl.trim();
@@ -242,6 +254,9 @@ export const StreamerModal: React.FC<StreamerModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="streamer-modal-title"

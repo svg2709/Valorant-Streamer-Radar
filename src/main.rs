@@ -7655,6 +7655,46 @@ enum AuditFilter {
     Skipped,
 }
 
+/// Renders a dimmed backdrop below the custom titlebar behind a modal `egui::Window`,
+/// blocking clicks to underlying panels and returning `true` when the empty backdrop is clicked.
+fn render_modal_backdrop(ctx: &egui::Context, id_salt: &str) -> bool {
+    let screen = ctx.content_rect();
+    let top_inset = 41.5_f32;
+    let backdrop_rect = egui::Rect::from_min_max(
+        egui::pos2(screen.min.x, (screen.min.y + top_inset).min(screen.max.y)),
+        screen.max,
+    );
+    let resp = egui::Area::new(egui::Id::new(id_salt))
+        .order(egui::Order::Middle)
+        .fixed_pos(backdrop_rect.min)
+        .movable(false)
+        .constrain(false)
+        .interactable(true)
+        .show(ctx, |ui| {
+            let (rect, response) = ui.allocate_exact_size(backdrop_rect.size(), egui::Sense::click());
+            ui.painter()
+                .rect_filled(rect, CornerRadius::ZERO, Color32::from_black_alpha(165));
+            response
+        });
+    resp.inner.clicked() || resp.response.clicked()
+}
+
+/// Returns `true` when the primary mouse button is pressed or clicked outside `modal_rect`
+/// in the dimmed client area below the custom titlebar.
+fn clicked_outside_modal_rect(ctx: &egui::Context, modal_rect: egui::Rect) -> bool {
+    let screen = ctx.content_rect();
+    ctx.input(|i| {
+        if !(i.pointer.primary_pressed() || i.pointer.primary_clicked()) {
+            return false;
+        }
+        let pos = i.pointer.interact_pos().or_else(|| i.pointer.latest_pos());
+        match pos {
+            Some(p) => !modal_rect.contains(p) && p.y >= screen.min.y + 41.5_f32,
+            None => false,
+        }
+    })
+}
+
 struct StreamerApp {
     state: Arc<Mutex<AppState>>,
     manual_scan_tx: mpsc::UnboundedSender<ScanTrigger>,
@@ -7683,6 +7723,9 @@ struct StreamerApp {
     discover_server_override: String,
     // Add / Edit modal state
     show_add_modal: bool,
+    add_modal_combo_was_open: bool,
+    modal_closed_this_frame: bool,
+    active_modal_rect: Option<egui::Rect>,
     editing_original: Option<(String, String)>,
     input_riot_id: String,
     input_aliases: String,
@@ -7786,6 +7829,9 @@ impl StreamerApp {
             discover_platform: DiscoverPlatformFilter::All,
             discover_server_override: "auto".to_string(),
             show_add_modal: false,
+            add_modal_combo_was_open: false,
+            modal_closed_this_frame: false,
+            active_modal_rect: None,
             editing_original: None,
             input_riot_id: String::new(),
             input_aliases: String::new(),
@@ -7894,6 +7940,7 @@ impl StreamerApp {
             self.input_server_region = active_code;
         }
         self.modal_error = None;
+        self.add_modal_combo_was_open = false;
         lock(&self.state).streamer_verify = CheckState::Idle;
         self.show_add_modal = true;
     }
@@ -7907,8 +7954,46 @@ impl StreamerApp {
         self.input_channel_url = rec.url.clone();
         self.input_server_region = region_code.to_string();
         self.modal_error = None;
+        self.add_modal_combo_was_open = false;
         lock(&self.state).streamer_verify = CheckState::Idle;
         self.show_add_modal = true;
+    }
+
+    fn close_active_modal(&mut self) -> bool {
+        if self.show_add_modal {
+            self.show_add_modal = false;
+            self.add_modal_combo_was_open = false;
+            self.editing_original = None;
+            self.active_modal_rect = None;
+            self.modal_closed_this_frame = true;
+            lock(&self.state).streamer_verify = CheckState::Idle;
+            true
+        } else if self.show_last_match_modal {
+            self.show_last_match_modal = false;
+            self.active_modal_rect = None;
+            self.modal_closed_this_frame = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn try_close_modal_on_outside_press(&mut self, pos: egui::Pos2) -> bool {
+        if !(self.show_add_modal || self.show_last_match_modal) {
+            return false;
+        }
+        if self.show_add_modal && self.add_modal_combo_was_open {
+            return false;
+        }
+        if pos.y < 41.5_f32 {
+            return false;
+        }
+        if let Some(rect) = self.active_modal_rect {
+            if !rect.contains(pos) {
+                return self.close_active_modal();
+            }
+        }
+        false
     }
 
     fn submit_modal(&mut self, open_github: bool) {
@@ -8098,6 +8183,25 @@ impl StreamerApp {
             self.active_tab = ActiveTab::History;
         }
 
+        // Handle Escape BEFORE any TextEdit/panel consumes it so modals close immediately on this frame
+        self.modal_closed_this_frame = false;
+        let escape_pressed = ctx.input(|i| {
+            i.key_pressed(egui::Key::Escape)
+                || i.events.iter().any(|ev| {
+                    matches!(
+                        ev,
+                        egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                })
+        });
+        if escape_pressed && self.close_active_modal() {
+            ctx.request_repaint();
+        }
+
         // Reserve 3.5px at the top for the curved Pink-to-Pearl foreground accent hairline
         egui::TopBottomPanel::top("accent_strip")
             .exact_height(3.5)
@@ -8166,6 +8270,9 @@ impl StreamerApp {
                     Stroke::new(1.0_f32, CARD_BORDER),
                 );
             });
+
+        let was_add_modal_open = self.show_add_modal;
+        let was_last_match_modal_open = self.show_last_match_modal;
 
         // Left Sidebar Navigation Rail (236px AMOLED Black)
         egui::SidePanel::left("nav_sidebar")
@@ -8362,8 +8469,11 @@ impl StreamerApp {
                 });
             });
 
+        self.active_modal_rect = None;
+
         // Add / Edit streamer modal
         if self.show_add_modal {
+            let backdrop_clicked = render_modal_backdrop(ctx, "add_streamer_modal_backdrop");
             let is_edit = self.editing_original.is_some();
             let modal_title = if is_edit {
                 "Edit Custom Streamer Entry"
@@ -8373,9 +8483,10 @@ impl StreamerApp {
             let (mut submit_gh, mut submit_local, mut cancel, mut trigger_verify) = (false, false, false, false);
             let mut apply_suggested_name: Option<String> = None;
             let mut changed_input = false;
+            let mut combo_open = false;
             let is_verifying = matches!(streamer_verify, CheckState::Checking);
 
-            egui::Window::new(modal_title)
+            let win_resp = egui::Window::new(modal_title)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -8459,6 +8570,7 @@ impl StreamerApp {
                         .width(430.0)
                         .selected_text(selected_reg_label)
                         .show_ui(ui, |ui| {
+                            combo_open = true;
                             ui.selectable_value(&mut self.input_server_region, String::new(), "Any / Global");
                             for reg in SERVER_REGIONS {
                                 ui.selectable_value(&mut self.input_server_region, reg.code.to_string(), reg.label);
@@ -8557,6 +8669,25 @@ impl StreamerApp {
                     });
                 });
 
+            let combo_popup_active = combo_open || self.add_modal_combo_was_open;
+            self.add_modal_combo_was_open = combo_open;
+
+            let mut clicked_outside = false;
+            if let Some(ir) = win_resp {
+                let win_rect = ir.response.rect;
+                self.active_modal_rect = Some(win_rect);
+                ctx.move_to_top(ir.response.layer_id);
+                if was_add_modal_open
+                    && !combo_popup_active
+                    && (backdrop_clicked || clicked_outside_modal_rect(ctx, win_rect))
+                {
+                    clicked_outside = true;
+                }
+            }
+            if clicked_outside {
+                cancel = true;
+            }
+
             if changed_input {
                 self.modal_error = None;
                 lock(&self.state).streamer_verify = CheckState::Idle;
@@ -8578,18 +8709,29 @@ impl StreamerApp {
             }
             if submit_gh {
                 self.submit_modal(true);
+                if !self.show_add_modal {
+                    self.active_modal_rect = None;
+                }
+                ctx.request_repaint();
             } else if submit_local {
                 self.submit_modal(false);
+                if !self.show_add_modal {
+                    self.active_modal_rect = None;
+                }
+                ctx.request_repaint();
             } else if cancel {
-                self.show_add_modal = false;
-                self.editing_original = None;
-                lock(&self.state).streamer_verify = CheckState::Idle;
+                self.close_active_modal();
+                ctx.request_repaint();
             }
         }
 
         // Latest Match Scan Review window (only for the most recent scanned match)
         if self.show_last_match_modal {
-            self.render_last_match_audit_window(ctx, last_match_summary.as_ref());
+            self.render_last_match_audit_window(
+                ctx,
+                last_match_summary.as_ref(),
+                was_last_match_modal_open,
+            );
         }
 
         // Main panel (AMOLED Black canvas)
@@ -8773,10 +8915,12 @@ impl StreamerApp {
         &mut self,
         ctx: &egui::Context,
         last_match: Option<&LastMatchSummary>,
+        allow_backdrop_close: bool,
     ) {
-        let mut close_modal = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let backdrop_clicked = render_modal_backdrop(ctx, "last_match_modal_backdrop");
+        let mut close_modal = false;
 
-        egui::Window::new("Latest Match Scan Review")
+        let win_resp = egui::Window::new("Latest Match Scan Review")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -9085,8 +9229,20 @@ impl StreamerApp {
                 });
             });
 
+        if let Some(ir) = win_resp {
+            let win_rect = ir.response.rect;
+            self.active_modal_rect = Some(win_rect);
+            ctx.move_to_top(ir.response.layer_id);
+            if allow_backdrop_close
+                && (backdrop_clicked || clicked_outside_modal_rect(ctx, win_rect))
+            {
+                close_modal = true;
+            }
+        }
+
         if close_modal {
-            self.show_last_match_modal = false;
+            self.close_active_modal();
+            ctx.request_repaint();
         }
     }
 
@@ -9319,7 +9475,8 @@ impl StreamerApp {
         let pointer_on_button = pointer_pos
             .map(|pos| button_rects.iter().any(|r| r.contains(pos)))
             .unwrap_or(false);
-        if ui.rect_contains_pointer(card_rect) && !pointer_on_button {
+        let modal_busy = self.show_add_modal || self.show_last_match_modal || self.modal_closed_this_frame;
+        if !modal_busy && ui.rect_contains_pointer(card_rect) && !pointer_on_button {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if !is_expanded {
                 ui.painter().rect_stroke(
@@ -9621,7 +9778,7 @@ impl StreamerApp {
                     });
 
                 let latest_rect = latest_frame.response.rect;
-                let modal_busy = self.show_add_modal || self.show_last_match_modal;
+                let modal_busy = self.show_add_modal || self.show_last_match_modal || self.modal_closed_this_frame;
                 if !modal_busy && ui.rect_contains_pointer(latest_rect) {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     ui.painter().rect_stroke(
@@ -9633,6 +9790,7 @@ impl StreamerApp {
                     if ui.input(|i| i.pointer.primary_clicked()) {
                         self.audit_filter = AuditFilter::All;
                         self.show_last_match_modal = true;
+                        ui.ctx().request_repaint();
                     }
                 }
                 latest_frame.response.on_hover_text(
@@ -9874,6 +10032,7 @@ impl StreamerApp {
 
         if let Some(item) = to_edit {
             self.open_add_modal(Some(&item));
+            ui.ctx().request_repaint();
         }
         if let Some((rid, plat)) = to_delete {
             let mut s = lock(&self.state);
@@ -10161,6 +10320,7 @@ impl StreamerApp {
 
                 if let Some(rec) = prefill_rec {
                     self.open_add_modal_from_rec(&rec, target_region.code);
+                    ui.ctx().request_repaint();
                 }
             }
         }
@@ -10612,6 +10772,8 @@ struct SoftwareWindowHost {
     viewport_info: egui::ViewportInfo,
     surface_size: (u32, u32),
     next_repaint: Option<Instant>,
+    last_cursor_pos: Option<egui::Pos2>,
+    suppress_next_left_release: bool,
 }
 
 impl SoftwareWindowHost {
@@ -10633,6 +10795,8 @@ impl SoftwareWindowHost {
             viewport_info: egui::ViewportInfo::default(),
             surface_size: (0, 0),
             next_repaint: None,
+            last_cursor_pos: None,
+            suppress_next_left_release: false,
         }
     }
 
@@ -10890,6 +11054,57 @@ impl winit::application::ApplicationHandler<AppUserEvent> for SoftwareWindowHost
                 }
                 if matches!(other, winit::event::WindowEvent::Focused(true)) {
                     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+                }
+                if let winit::event::WindowEvent::CursorMoved { position, .. } = &other {
+                    let ppp = self.egui_ctx.pixels_per_point().max(0.5);
+                    self.last_cursor_pos = Some(egui::pos2(
+                        position.x as f32 / ppp,
+                        position.y as f32 / ppp,
+                    ));
+                }
+                if let winit::event::WindowEvent::KeyboardInput { event: key_ev, .. } = &other {
+                    let is_escape = matches!(
+                        key_ev.logical_key,
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape)
+                    ) || matches!(
+                        key_ev.physical_key,
+                        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape)
+                    );
+                    if key_ev.state == winit::event::ElementState::Pressed
+                        && is_escape
+                        && self.app.close_active_modal()
+                    {
+                        if WINDOW_VISIBLE.load(Ordering::Relaxed) {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                }
+                if let winit::event::WindowEvent::MouseInput {
+                    state,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } = &other
+                {
+                    match state {
+                        winit::event::ElementState::Pressed => {
+                            if let Some(pos) = self.last_cursor_pos {
+                                if self.app.try_close_modal_on_outside_press(pos) {
+                                    self.suppress_next_left_release = true;
+                                    if WINDOW_VISIBLE.load(Ordering::Relaxed) {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                        winit::event::ElementState::Released => {
+                            if self.suppress_next_left_release {
+                                self.suppress_next_left_release = false;
+                                return;
+                            }
+                        }
+                    }
                 }
                 if let Some(egui_winit) = self.egui_winit.as_mut() {
                     let resp = egui_winit.on_window_event(&window, &other);

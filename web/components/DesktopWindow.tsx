@@ -276,10 +276,13 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   useEffect(() => {
     if (!lastMatchModalOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLastMatchModalOpen(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setLastMatchModalOpen(false);
+      }
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [lastMatchModalOpen]);
 
   // Close filters popover on outside click or Escape

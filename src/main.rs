@@ -6251,7 +6251,7 @@ fn paint_close_button(ui: &mut egui::Ui) -> egui::Response {
 
 /// Handles perimeter edge & corner resizing for the frameless custom Windows viewport.
 fn handle_frameless_resize(ctx: &egui::Context) {
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     let edge = 5.0;
     let corner = 10.0;
     let (hover_pos, primary_pressed) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.primary_pressed()));
@@ -7435,7 +7435,7 @@ impl StreamerApp {
             egui::Order::Foreground,
             egui::Id::new("frameless_window_border"),
         ));
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         fg_painter.rect_stroke(
             screen.shrink(0.5),
             CornerRadius::same(8),
@@ -9543,7 +9543,7 @@ fn main() -> Result<()> {
     let tx_menu = scan_tx.clone();
     let bg_menu = bg_tx.clone();
     let st_menu = state.clone();
-    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+    MenuEvent::set_event_handler(Some(Arc::new(move |event: MenuEvent| {
         if event.id == open_id {
             show_window(&ctx_menu);
         } else if event.id == scan_id {
@@ -9555,7 +9555,7 @@ fn main() -> Result<()> {
         } else if event.id == quit_id {
             quit_app(&ctx_menu);
         }
-    }));
+    })));
 
     let state_bg = state.clone();
     let ctx_bg = ctx.clone();

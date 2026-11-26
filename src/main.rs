@@ -621,6 +621,8 @@ struct LastMatchSummary {
     players_checked: usize,
     #[serde(default)]
     party_skipped: usize,
+    #[serde(default)]
+    hidden_skipped: usize,
     streamers_found: usize,
     scanned_at: String,
     #[serde(default, alias = "shard")]
@@ -1397,8 +1399,12 @@ fn score_heuristic_candidate(
             return None;
         }
         RegionEvidence::Unknown => {
-            // Unknown server/region: NEVER confirm; only surface as Unverified if exact handle + confirmed VALORANT
-            if !is_exact_name || !game_confirmed {
+            // Unknown server/region: NEVER confirm; surface as Unverified only for exact handle +
+            // confirmed VALORANT category or explicit "valorant"/"valo" in the live stream title.
+            let title_low = title.to_ascii_lowercase();
+            let title_mentions_val =
+                has_ascii_word(&title_low, "valorant") || has_ascii_word(&title_low, "valo");
+            if !is_exact_name || (!game_confirmed && !title_mentions_val) {
                 return None;
             }
             score = score.min(58);
@@ -1497,6 +1503,87 @@ fn is_valid_party_id(party_id: &str) -> bool {
     trimmed.chars().any(|c| c != '0' && c != '-')
 }
 
+/// Returns true if a Riot GameName contains at least one visible non-whitespace character
+/// (filters out empty strings and invisible filler names such as Hangul Filler U+3164).
+fn is_visible_game_name(name: &str) -> bool {
+    name.chars().any(|c| {
+        !c.is_whitespace()
+            && !c.is_control()
+            && !matches!(
+                c,
+                '\u{115F}'
+                    | '\u{1160}'
+                    | '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{2800}'
+                    | '\u{3164}'
+                    | '\u{FEFF}'
+                    | '\u{FFA0}'
+            )
+    })
+}
+
+/// Null-tolerant parser for Riot's `name-service/v2/players` response so a `null` field on
+/// one player never breaks deserialization for the rest of the lobby, while supporting
+/// PascalCase, camelCase, and `DisplayName` fallbacks.
+fn parse_name_service_records(val: &Value) -> Vec<RiotNameRecord> {
+    let Some(arr) = val.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let subject = item["Subject"]
+            .as_str()
+            .or_else(|| item["subject"].as_str())
+            .or_else(|| item["puuid"].as_str())
+            .or_else(|| item["Puuid"].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if subject.is_empty() {
+            continue;
+        }
+        let mut game_name = item["GameName"]
+            .as_str()
+            .or_else(|| item["gameName"].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let mut tag_line = item["TagLine"]
+            .as_str()
+            .or_else(|| item["tagLine"].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !is_visible_game_name(&game_name) {
+            if let Some(disp) = item["DisplayName"]
+                .as_str()
+                .or_else(|| item["displayName"].as_str())
+                .map(str::trim)
+                .filter(|s| is_visible_game_name(s))
+            {
+                if let Some((gn, tl)) = disp.split_once('#') {
+                    if is_visible_game_name(gn.trim()) {
+                        game_name = gn.trim().to_string();
+                        if tag_line.is_empty() {
+                            tag_line = tl.trim().to_string();
+                        }
+                    }
+                } else {
+                    game_name = disp.to_string();
+                }
+            }
+        }
+        out.push(RiotNameRecord {
+            subject,
+            game_name,
+            tag_line,
+        });
+    }
+    out
+}
+
 /// Builds the complete match roster from `match-details["players"]` first, enriching names from
 /// `name-service/v2/players` as best-effort so partial or failed name-service responses NEVER drop
 /// players, and enforces strict same-team + non-nil + <=5-member party verification.
@@ -1531,11 +1618,21 @@ fn resolve_match_players(
             continue;
         };
         let sub_low = subj.to_ascii_lowercase();
-        let details_name = p["gameName"].as_str().unwrap_or("").trim().to_string();
-        let details_tag = p["tagLine"].as_str().unwrap_or("").trim().to_string();
+        let details_name = p["gameName"]
+            .as_str()
+            .or_else(|| p["GameName"].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let details_tag = p["tagLine"]
+            .as_str()
+            .or_else(|| p["TagLine"].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         let (game_name, tag_line) = match name_by_sub.get(&sub_low) {
             Some(rec) => {
-                let gn = if !rec.game_name.trim().is_empty() {
+                let gn = if is_visible_game_name(&rec.game_name) {
                     rec.game_name.trim().to_string()
                 } else {
                     details_name
@@ -1627,31 +1724,34 @@ fn resolve_match_players(
     (my_agent, players)
 }
 
-/// Excludes self, blank names, duplicates, and (when enabled) party members before external scans.
+/// Excludes self, duplicates, (when enabled) party members, and hidden/blank Riot IDs
+/// before external scans, returning `(scannable, party_skipped, hidden_skipped)`.
 fn filter_scannable_players(
     players: Vec<MatchPlayerInfo>,
     my_puuid: &str,
     skip_party_members: bool,
-) -> (Vec<MatchPlayerInfo>, usize) {
+) -> (Vec<MatchPlayerInfo>, usize, usize) {
     let mut seen = HashSet::new();
     let mut scannable = Vec::new();
     let mut party_skipped = 0usize;
+    let mut hidden_skipped = 0usize;
     let my_low = my_puuid.trim().to_ascii_lowercase();
     for player_info in players {
         let sub_low = player_info.record.subject.trim().to_ascii_lowercase();
-        if sub_low == my_low
-            || player_info.record.game_name.trim().is_empty()
-            || !seen.insert(sub_low)
-        {
+        if sub_low == my_low || !seen.insert(sub_low) {
             continue;
         }
         if skip_party_members && player_info.is_party_member {
             party_skipped += 1;
             continue;
         }
+        if !is_visible_game_name(&player_info.record.game_name) {
+            hidden_skipped += 1;
+            continue;
+        }
         scannable.push(player_info);
     }
-    (scannable, party_skipped)
+    (scannable, party_skipped, hidden_skipped)
 }
 
 struct RiotAuth {
@@ -1845,6 +1945,44 @@ fn read_riot_lockfile() -> Result<(String, String, String)> {
     Ok((parts[2].trim().to_string(), parts[3].trim().to_string(), protocol.to_string()))
 }
 
+fn valorant_log_path() -> PathBuf {
+    PathBuf::from(env::var_os("LOCALAPPDATA").unwrap_or_default())
+        .join("VALORANT")
+        .join("Saved")
+        .join("Logs")
+        .join("ShooterGame.log")
+}
+
+/// Extracts Riot's client version string from `ShooterGame.log` (`CI server version: ...`)
+/// as a zero-dependency local fallback if `valorant-api.com` is temporarily unreachable.
+fn parse_client_version_from_log_text(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if let Some((_, rest)) = line.split_once("CI server version:") {
+            let raw = rest.trim().split_whitespace().next().unwrap_or("").trim();
+            if raw.is_empty() {
+                continue;
+            }
+            if raw.contains("-shipping-") {
+                return Some(raw.to_string());
+            }
+            let parts: Vec<&str> = raw.split('-').collect();
+            if parts.len() >= 4 && parts[0].eq_ignore_ascii_case("release") {
+                return Some(format!("{}-{}-shipping-{}", parts[0], parts[1], parts[2..].join("-")));
+            }
+            return Some(raw.to_string());
+        }
+    }
+    None
+}
+
+fn read_client_version_from_log() -> Option<String> {
+    let mut f = File::open(valorant_log_path()).ok()?;
+    let mut buf = Vec::new();
+    f.take(128 * 1024).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    parse_client_version_from_log_text(&text)
+}
+
 static CLIENT_VERSION: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 
 async fn client_version(client: &Client) -> Result<String> {
@@ -1879,7 +2017,14 @@ async fn client_version(client: &Client) -> Result<String> {
             log(format!("Version refresh failed ({e}); using cached {stale}"));
             Ok(stale)
         }
-        (Err(e), None) => Err(e),
+        (Err(e), None) => {
+            if let Some(local_ver) = read_client_version_from_log() {
+                log(format!("Version API failed ({e}); using ShooterGame.log version {local_ver}"));
+                *lock(&CLIENT_VERSION) = Some((local_ver.clone(), Instant::now()));
+                return Ok(local_ver);
+            }
+            Err(e)
+        }
     }
 }
 
@@ -2043,6 +2188,28 @@ async fn fetch_local_entitlements(local: &Client) -> Result<EntitlementsResponse
     Ok(ent)
 }
 
+/// Null-tolerant parser for Riot's `/chat/v6/messages` response so `null` fields on
+/// anonymous/system messages never drop valid chat records.
+fn parse_chat_messages(val: &Value) -> Vec<ChatMessage> {
+    val["messages"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|v| ChatMessage {
+                    id: v["id"].as_str().unwrap_or("").to_string(),
+                    mid: v["mid"].as_str().unwrap_or("").to_string(),
+                    cid: v["cid"].as_str().unwrap_or("").to_string(),
+                    puuid: v["puuid"].as_str().unwrap_or("").to_string(),
+                    game_name: v["game_name"].as_str().unwrap_or("").to_string(),
+                    game_tag: v["game_tag"].as_str().unwrap_or("").to_string(),
+                    body: v["body"].as_str().unwrap_or("").to_string(),
+                    msg_type: v["type"].as_str().unwrap_or("").to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 async fn fetch_local_chat_messages(local: &Client) -> Result<Vec<ChatMessage>> {
     let (port, password, protocol) = read_riot_lockfile()?;
     let auth_header = format!("Basic {}", STANDARD.encode(format!("riot:{password}")));
@@ -2060,11 +2227,7 @@ async fn fetch_local_chat_messages(local: &Client) -> Result<Vec<ChatMessage>> {
         return Err(anyhow!("Local chat API returned HTTP {}", resp.status().as_u16()));
     }
     let val: Value = resp.json().await?;
-    let msgs: Vec<ChatMessage> = val["messages"]
-        .as_array()
-        .map(|arr| arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect())
-        .unwrap_or_default();
-    Ok(msgs)
+    Ok(parse_chat_messages(&val))
 }
 
 fn is_match_chat_message(m: &ChatMessage) -> bool {
@@ -2073,6 +2236,9 @@ fn is_match_chat_message(m: &ChatMessage) -> bool {
     }
     let cid = m.cid.to_ascii_lowercase();
     let ty = m.msg_type.to_ascii_lowercase();
+    if cid.contains("ares-parties") || cid.contains("ares-lobby") {
+        return false;
+    }
     cid.contains("ares-coregame") || cid.contains("ares-pregame") || ty == "groupchat"
 }
 
@@ -2291,7 +2457,7 @@ async fn has_active_valorant_session(local: &Client) -> bool {
     let Ok((port, password, protocol)) = read_riot_lockfile() else {
         return false;
     };
-    let auth = format!("Basic {}", BASE64.encode(format!("riot:{password}")));
+    let auth = format!("Basic {}", STANDARD.encode(format!("riot:{password}")));
     let url = format!("{protocol}://127.0.0.1:{port}/product-session/v1/external-sessions");
     let Ok(resp) = local
         .get(url)
@@ -2395,37 +2561,50 @@ async fn fetch_match_context(
         return Err(anyhow!("Match details contained no player subjects yet"));
     }
 
-    // Best-effort name-service enrichment: match-details["players"] already contains gameName/tagLine,
-    // so partial responses or transient name-service errors never drop players from the scan.
-    let records: Vec<RiotNameRecord> = match riot_json(riot_headers(
-        public.put(format!("https://pd.{api_region}.a.pvp.net/name-service/v2/players")).json(&puuids),
-        auth,
-    ))
+    // Best-effort name-service enrichment with null-tolerant parsing + retry + targeted follow-up
+    // for any players whose names were blank/hidden in match-details.
+    let name_url = format!("https://pd.{api_region}.a.pvp.net/name-service/v2/players");
+    let mut records: Vec<RiotNameRecord> = match retry(2, Duration::from_millis(900), || {
+        riot_json(riot_headers(public.put(&name_url).json(&puuids), auth))
+    })
     .await
     {
-        Ok(names_val) => match serde_json::from_value::<Vec<RiotNameRecord>>(names_val) {
-            Ok(recs) => {
-                if recs.len() < puuids.len() {
-                    log(format!(
-                        "name-service returned {}/{} players; filling remaining names directly from match-details",
-                        recs.len(),
-                        puuids.len()
-                    ));
-                }
-                recs
+        Ok(names_val) => {
+            let recs = parse_name_service_records(&names_val);
+            if recs.len() < puuids.len() {
+                log(format!(
+                    "name-service returned {}/{} players; filling remaining names from match-details",
+                    recs.len(),
+                    puuids.len()
+                ));
             }
-            Err(e) => {
-                log(format!("name-service parse fallback to match-details: {e}"));
-                Vec::new()
-            }
-        },
+            recs
+        }
         Err(e) => {
             log(format!("name-service unavailable ({e}); using match-details player names directly"));
             Vec::new()
         }
     };
 
-    let (my_agent, players) = resolve_match_players(details_players, &records, &auth.subject);
+    let (mut my_agent, mut players) = resolve_match_players(details_players, &records, &auth.subject);
+
+    // Targeted second pass for any players still missing a visible Riot ID
+    let missing_puuids: Vec<String> = players
+        .iter()
+        .filter(|p| !is_visible_game_name(&p.record.game_name))
+        .map(|p| p.record.subject.clone())
+        .collect();
+    if !missing_puuids.is_empty() {
+        if let Ok(extra_val) = riot_json(riot_headers(public.put(&name_url).json(&missing_puuids), auth)).await {
+            let extra_recs = parse_name_service_records(&extra_val);
+            if !extra_recs.is_empty() {
+                records.extend(extra_recs);
+                let (re_agent, re_players) = resolve_match_players(details_players, &records, &auth.subject);
+                my_agent = re_agent;
+                players = re_players;
+            }
+        }
+    }
 
     Ok(MatchContext {
         match_id: match_id.to_string(),
@@ -2438,18 +2617,37 @@ async fn fetch_match_context(
 }
 
 /// For post-match scans the latest MatchID may still be the *previous* match while history
-/// propagates, so poll until it changes instead of trusting a fixed sleep.
+/// propagates, so poll until it changes instead of trusting a fixed sleep. When running in Auto
+/// mode and the initial shard has no history (e.g., NA/EU/KR user on first run before the log
+/// records a PD URL), automatically probes the other Riot shards once to find the active shard.
 async fn fetch_match_and_names(
     local: &Client,
     public: &Client,
     api_region: &str,
+    allow_region_fallback: bool,
     previous: Option<&str>,
     wait_for_new: bool,
-) -> Result<(String, MatchContext)> {
+) -> Result<(String, String, MatchContext)> {
     let auth = riot_authenticate(local, public).await?;
-    let attempts = if wait_for_new { 6 } else { 2 };
+    let mut active_region = api_region.to_string();
+
+    // Fast shard discovery on Auto mode if the initial shard has no match history at all
+    if allow_region_fallback && latest_match_id(public, &auth, &active_region).await.is_err() {
+        for cand in ["na", "eu", "ap", "kr"] {
+            if cand.eq_ignore_ascii_case(&active_region) {
+                continue;
+            }
+            if latest_match_id(public, &auth, cand).await.is_ok() {
+                log(format!("Auto-discovered active Riot shard '{cand}' (was '{active_region}')"));
+                active_region = cand.to_string();
+                break;
+            }
+        }
+    }
+
+    let attempts = if wait_for_new { 8 } else { 2 };
     let match_id = retry(attempts, Duration::from_secs(3), || async {
-        let id = latest_match_id(public, &auth, api_region).await?;
+        let id = latest_match_id(public, &auth, &active_region).await?;
         if wait_for_new && Some(id.as_str()) == previous {
             return Err(anyhow!("Match history has not updated yet"));
         }
@@ -2457,16 +2655,20 @@ async fn fetch_match_and_names(
     })
     .await?;
     let ctx = retry(3, Duration::from_secs(3), || {
-        fetch_match_context(public, &auth, api_region, &match_id)
+        fetch_match_context(public, &auth, &active_region, &match_id)
     })
     .await?;
-    Ok((auth.subject, ctx))
+    Ok((auth.subject, active_region, ctx))
 }
 
 // ============================================================================
 // STREAMING PLATFORM DETECTORS (YOUTUBE, TWITCH, KICK)
 // ============================================================================
 
+static PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // Unambiguous leading stream tags ("TTV Jake", "YT_Rohan", "twitch.tv/shroud", "Kick-Kairo").
+    Regex::new(r"(?i)^(?:ttv|twitch(?:\.tv)?|yt|youtube|kick)[\s._/-]+").unwrap()
+});
 static SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
     // Separator-delimited suffixes ("Foo_TV", "Foo Gaming") plus unambiguous glued ones ("FooYT").
     // Avoids mangling normal names such as "Desktop" or "Alive".
@@ -2483,7 +2685,15 @@ static CANON_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"<link rel="canonical" href="([^"]+)""#).unwrap());
 
 fn clean_ign(game_name: &str) -> String {
-    SUFFIX_RE.replace(game_name.trim(), "").trim().to_string()
+    let trimmed = game_name.trim();
+    let without_prefix = PREFIX_RE.replace(trimmed, "");
+    let without_suffix = SUFFIX_RE.replace(without_prefix.trim(), "");
+    let cleaned = without_suffix.trim().to_string();
+    if cleaned.is_empty() {
+        trimmed.to_string()
+    } else {
+        cleaned
+    }
 }
 
 fn normalize(s: &str) -> String {
@@ -2503,12 +2713,21 @@ async fn http_get_text_status_lang(
     url: &str,
     accept_lang: &str,
 ) -> Result<(reqwest::StatusCode, String)> {
-    let resp = client
+    let mut req = client
         .get(url)
         .header("User-Agent", BROWSER_UA)
-        .header("Accept-Language", accept_lang)
-        .send()
-        .await?;
+        .header("Accept-Language", accept_lang);
+    if host_of(url)
+        .map(|h| {
+            let h = h.trim_start_matches("www.").trim_start_matches("m.");
+            h == "youtube.com" || h == "youtu.be"
+        })
+        .unwrap_or(false)
+    {
+        // Bypass YouTube EU/UK GDPR consent interstitial so keyless YouTube checks work globally.
+        req = req.header("Cookie", "SOCS=CAI");
+    }
+    let resp = req.send().await?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     Ok((status, body))
@@ -3206,23 +3425,74 @@ async fn download_and_install_update(
     quit_app(&ctx);
 }
 
+/// Verifies that a YouTube `videoRenderer` from keyless search is actively LIVE (not an
+/// upcoming scheduled stream or ended VOD mixed into results).
+fn is_yt_search_video_live(video: &Value) -> bool {
+    if video.get("upcomingEventData").is_some() {
+        return false;
+    }
+    let has_live_badge = video["badges"]
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|b| {
+                let r = &b["metadataBadgeRenderer"];
+                let style = r["style"].as_str().unwrap_or("");
+                let label = r["label"].as_str().unwrap_or("");
+                style.eq_ignore_ascii_case("BADGE_STYLE_TYPE_LIVE_NOW")
+                    || label.eq_ignore_ascii_case("LIVE")
+            })
+        })
+        .unwrap_or(false);
+    if has_live_badge {
+        return true;
+    }
+    let has_live_overlay = video["thumbnailOverlays"]
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|o| {
+                o["thumbnailOverlayTimeStatusRenderer"]["style"]
+                    .as_str()
+                    .unwrap_or("")
+                    .eq_ignore_ascii_case("LIVE")
+            })
+        })
+        .unwrap_or(false);
+    if has_live_overlay {
+        return true;
+    }
+    video["viewCountText"]["runs"]
+        .as_array()
+        .map(|runs| {
+            runs.iter().any(|r| {
+                r["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .contains("watching")
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Directory-linked YouTube channel: check its `/live` endpoint directly.
 async fn check_youtube_channel_live(client: &Client, channel_url: &str) -> Option<(String, String)> {
     let live_tab = format!("{}/live", strip_query(channel_url).trim_end_matches('/'));
     let html = http_get_text(client, &live_tab).await?;
-    if !html.contains(r#""isLive":true"#) {
+    let is_live = html.contains(r#""isLive":true"#) || html.contains(r#""isLiveNow":true"#);
+    let is_only_upcoming = html.contains(r#""isUpcoming":true"#) && !html.contains(r#""isLiveNow":true"#);
+    if !is_live || is_only_upcoming {
         return None;
     }
+    // YouTube's `/live` endpoint sets canonical to `/watch?v=...` only when the channel itself is live.
+    // Requiring a watch URL prevents sidebar recommended streams from false-positiving offline channels.
+    let url = CANON_RE
+        .captures(&html)
+        .map(|c| c[1].to_string())
+        .filter(|u| u.starts_with("https://www.youtube.com/watch"))?;
     let title = TITLE_RE
         .captures(&html)
         .map(|c| decode_entities(&c[1]))
         .unwrap_or_else(|| "Live Stream".to_string());
-    // Prefer the concrete watch URL so the link survives the stream ending.
-    let url = CANON_RE
-        .captures(&html)
-        .map(|c| c[1].to_string())
-        .filter(|u| u.starts_with("https://www.youtube.com/watch"))
-        .unwrap_or(live_tab);
     Some((title, url))
 }
 
@@ -3302,6 +3572,9 @@ async fn check_youtube_live_candidates(
                                 let Some(video) = item.get("videoRenderer") else {
                                     continue;
                                 };
+                                if !is_yt_search_video_live(video) {
+                                    continue;
+                                }
                                 let video_id = video["videoId"].as_str().unwrap_or("");
                                 let title = video["title"]["runs"][0]["text"].as_str().unwrap_or("");
                                 let channel = video["ownerText"]["runs"][0]["text"].as_str().unwrap_or("");
@@ -3505,6 +3778,116 @@ async fn check_twitch_live(
         .map(|(d, t, u, _, _, _)| (d, t, u))
 }
 
+/// Batched Twitch live check for up to 4 candidate logins in ONE HTTP request (Helix multi-param
+/// or aliased public GraphQL), returning all live VALORANT streams found.
+async fn fetch_twitch_streams_batch(
+    client: &Client,
+    logins: &[String],
+    client_id: &str,
+    bearer_token: Option<&str>,
+) -> Vec<(String, String, String, String, String, bool)> {
+    let valid: Vec<String> = logins
+        .iter()
+        .map(|l| l.trim().to_ascii_lowercase())
+        .filter(|l| l.len() >= 4 && l.len() <= 25 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .take(4)
+        .collect();
+    if valid.is_empty() {
+        return Vec::new();
+    }
+
+    // 1. Official Helix API (supports repeated `user_login` params in a single call)
+    if let Some(token) = bearer_token {
+        let params: Vec<(&str, &str)> = valid.iter().map(|l| ("user_login", l.as_str())).collect();
+        match client
+            .get("https://api.twitch.tv/helix/streams")
+            .header("Client-Id", client_id.trim())
+            .header("Authorization", format!("Bearer {token}"))
+            .query(&params)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(data) = resp.json::<Value>().await {
+                    let mut hits = Vec::new();
+                    if let Some(arr) = data["data"].as_array() {
+                        for stream in arr {
+                            let game = stream["game_name"].as_str().unwrap_or("");
+                            let is_val = game.eq_ignore_ascii_case("VALORANT");
+                            if !is_val {
+                                continue;
+                            }
+                            let login = stream["user_login"].as_str().unwrap_or("").to_ascii_lowercase();
+                            if login.is_empty() {
+                                continue;
+                            }
+                            let display = stream["user_name"].as_str().unwrap_or(&login).to_string();
+                            let title = stream["title"].as_str().unwrap_or("Live on Twitch").to_string();
+                            let lang = stream["language"].as_str().unwrap_or("").to_string();
+                            let tags = stream["tags"]
+                                .as_array()
+                                .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" "))
+                                .unwrap_or_default();
+                            hits.push((display, title, format!("https://www.twitch.tv/{login}"), lang, tags, true));
+                        }
+                    }
+                    return hits;
+                }
+            }
+            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                *lock(&TWITCH_TOKEN) = None;
+            }
+            _ => {}
+        }
+    }
+
+    // 2. Keyless public GraphQL aliased batch query (logins are strictly [a-z0-9_])
+    let mut query = String::from("query { ");
+    for (idx, login) in valid.iter().enumerate() {
+        query.push_str(&format!(
+            "u{idx}: user(login: \"{login}\") {{ displayName broadcastSettings {{ language }} stream {{ title game {{ name }} tags {{ localizedName }} }} }} "
+        ));
+    }
+    query.push('}');
+    let body = serde_json::json!({ "query": query });
+    let Ok(resp) = client
+        .post("https://gql.twitch.tv/gql")
+        .header("Client-Id", "kimne78kx3ncx6brgo4mv6wki5h1ko")
+        .json(&body)
+        .send()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(v) = resp.json::<Value>().await else {
+        return Vec::new();
+    };
+    let mut hits = Vec::new();
+    for (idx, login) in valid.iter().enumerate() {
+        let user = &v["data"][format!("u{idx}")];
+        let stream = &user["stream"];
+        if !stream.is_object() {
+            continue;
+        }
+        let game = stream["game"]["name"].as_str().unwrap_or("");
+        if !game.eq_ignore_ascii_case("VALORANT") {
+            continue;
+        }
+        let display = user["displayName"].as_str().unwrap_or(login).to_string();
+        let title = stream["title"].as_str().unwrap_or("Live on Twitch").to_string();
+        let lang = user["broadcastSettings"]["language"].as_str().unwrap_or("").to_string();
+        let tags = stream["tags"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|t| t["localizedName"].as_str()).collect::<Vec<_>>().join(" "))
+            .unwrap_or_default();
+        hits.push((display, title, format!("https://www.twitch.tv/{login}"), lang, tags, true));
+    }
+    hits
+}
+
 async fn check_twitch_live_candidates(
     client: &Client,
     game_name: &str,
@@ -3522,40 +3905,53 @@ async fn check_twitch_live_candidates(
         return Vec::new();
     }
 
-    let mut logins = vec![base.clone()];
-    if base.len() <= 16 && !base.ends_with("tv") && !base.ends_with("ttv") {
-        logins.push(format!("{base}_tv"));
-        logins.push(format!("{base}ttv"));
+    let raw_login: String = game_name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+
+    let mut logins = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push_login = |s: String| {
+        if s.len() >= 4 && s.len() <= 25 && seen.insert(s.clone()) {
+            logins.push(s);
+        }
+    };
+    push_login(base.clone());
+    if raw_login != base {
+        push_login(raw_login);
     }
+    if base.len() <= 18 && !base.ends_with("tv") && !base.ends_with("ttv") {
+        push_login(format!("{base}tv"));
+        push_login(format!("{base}_tv"));
+        push_login(format!("{base}ttv"));
+    }
+    logins.truncate(4);
 
     let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for login in logins {
-        if !seen.insert(login.clone()) {
-            continue;
-        }
-        if let Some((display, title, url, lang, tags, is_val)) =
-            fetch_twitch_stream_meta(client, &login, false, client_id, bearer_token).await
-        {
-            let title_with_tags = if tags.is_empty() {
-                title.clone()
-            } else {
-                format!("{title} {tags}")
-            };
-            let lang_opt = if lang.is_empty() { None } else { Some(lang.as_str()) };
-            if let Some(mut cand) = score_heuristic_candidate(
-                "Twitch",
-                &cleaned,
-                &display,
-                &title_with_tags,
-                &url,
-                lang_opt,
-                is_val,
-                region,
-            ) {
-                cand.title = title;
-                out.push(cand);
-            }
+    for (display, title, url, lang, tags, is_val) in
+        fetch_twitch_streams_batch(client, &logins, client_id, bearer_token).await
+    {
+        let title_with_tags = if tags.is_empty() {
+            title.clone()
+        } else {
+            format!("{title} {tags}")
+        };
+        let lang_opt = if lang.is_empty() { None } else { Some(lang.as_str()) };
+        if let Some(mut cand) = score_heuristic_candidate(
+            "Twitch",
+            &cleaned,
+            &display,
+            &title_with_tags,
+            &url,
+            lang_opt,
+            is_val,
+            region,
+        ) {
+            cand.title = title;
+            out.push(cand);
         }
     }
     out.sort_by(|a, b| b.confidence.cmp(&a.confidence));
@@ -3724,6 +4120,9 @@ async fn fetch_live_recommendations(
                                     let Some(video) = item.get("videoRenderer") else {
                                         continue;
                                     };
+                                    if !is_yt_search_video_live(video) {
+                                        continue;
+                                    }
                                     let vid = video["videoId"].as_str().unwrap_or("");
                                     let title = decode_entities(video["title"]["runs"][0]["text"].as_str().unwrap_or(""));
                                     let channel = decode_entities(video["ownerText"]["runs"][0]["text"].as_str().unwrap_or(""));
@@ -4213,8 +4612,12 @@ async fn scan_player(
         .iter()
         .filter_map(|d| directory_entry_matches_player(d, &riot_id).map(|kind| (d, kind)))
         .collect();
+    let mut checked_dir_platforms: HashSet<&'static str> = HashSet::new();
     if !linked.is_empty() {
         for (d, match_kind) in linked {
+            if let Some(cp) = canonical_platform(&d.platform) {
+                checked_dir_platforms.insert(cp);
+            }
             let handle = if !d.channel_id.is_empty() {
                 d.channel_id.clone()
             } else {
@@ -4244,19 +4647,45 @@ async fn scan_player(
                 ));
             }
         }
-    } else {
-        // Phase 2: server-aware multi-signal heuristic fallback (produces ranked likely streamers)
+    }
+
+    // Phase 2: server-aware multi-signal heuristic fallback.
+    // If a Directory streamer was offline on their registered platform, still check other platforms
+    // without re-heuristically guessing on the already-verified offline platform.
+    if out.is_empty() {
         ran_heuristics = true;
+        let check_yt = !checked_dir_platforms.contains("YouTube");
+        let check_tw = !checked_dir_platforms.contains("Twitch");
+        let check_kick = !checked_dir_platforms.contains("Kick");
         let (yt_cands, tw_cands, kick_cands) = tokio::join!(
-            check_youtube_live_candidates(&client, &player.game_name, &config.youtube_api_key, region),
-            check_twitch_live_candidates(
-                &client,
-                &player.game_name,
-                &config.twitch_client_id,
-                twitch_token.as_deref(),
-                region
-            ),
-            check_kick_live_candidates(&client, &player.game_name, region),
+            async {
+                if check_yt {
+                    check_youtube_live_candidates(&client, &player.game_name, &config.youtube_api_key, region).await
+                } else {
+                    Vec::new()
+                }
+            },
+            async {
+                if check_tw {
+                    check_twitch_live_candidates(
+                        &client,
+                        &player.game_name,
+                        &config.twitch_client_id,
+                        twitch_token.as_deref(),
+                        region,
+                    )
+                    .await
+                } else {
+                    Vec::new()
+                }
+            },
+            async {
+                if check_kick {
+                    check_kick_live_candidates(&client, &player.game_name, region).await
+                } else {
+                    Vec::new()
+                }
+            },
         );
         let mut all_cands: Vec<LikelyStreamerCandidate> = Vec::new();
         all_cands.extend(yt_cands);
@@ -4453,16 +4882,18 @@ async fn scan_last_match(
         format!("Syncing database & scanning last match ({})...", initial_region.label),
     );
 
+    let allow_region_fallback = config.server_override.eq_ignore_ascii_case("auto");
     let fetched = fetch_match_and_names(
         &local_client,
         &public_client,
         api_region,
+        allow_region_fallback,
         previous.as_deref(),
         trigger == ScanTrigger::PostMatch,
     )
     .await;
 
-    let (my_puuid, match_ctx) = match fetched {
+    let (my_puuid, resolved_api_region, match_ctx) = match fetched {
         Ok(v) => v,
         Err(e) => {
             log(format!("Match fetch failed on {api_region}: {e:#}"));
@@ -4479,16 +4910,29 @@ async fn scan_last_match(
         players,
     } = match_ctx;
 
-    if let Some(pod_srv) = &match_pod_server {
-        lock(&state).detected_server = pod_srv.clone();
+    {
+        let mut s = lock(&state);
+        if resolved_api_region != s.detected_api_region {
+            s.detected_api_region = resolved_api_region.clone();
+        }
+        if let Some(pod_srv) = &match_pod_server {
+            s.detected_server = pod_srv.clone();
+        }
+        s.last_scanned_match = Some(match_id.clone());
     }
-    lock(&state).last_scanned_match = Some(match_id.clone());
 
     let effective_region = if config.server_override.eq_ignore_ascii_case("auto") {
         match_pod_server
             .as_deref()
             .and_then(server_region_by_code)
-            .unwrap_or(initial_region)
+            .unwrap_or_else(|| {
+                let srv = if resolved_api_region == detected_api_region {
+                    detected_server.as_str()
+                } else {
+                    ""
+                };
+                effective_server_region(&config, srv, &resolved_api_region)
+            })
     } else {
         initial_region
     };
@@ -4505,7 +4949,11 @@ async fn scan_last_match(
     let (local_dir, mut match_chat) = {
         let mut s = lock(&state);
         s.remote_directory = remote.clone();
-        (s.local_directory.clone(), s.chat_buffer.clone())
+        let chat_snapshot = s.chat_buffer.clone();
+        if trigger == ScanTrigger::PostMatch {
+            s.chat_buffer.clear();
+        }
+        (s.local_directory.clone(), chat_snapshot)
     };
     if config.capture_in_game_chat {
         if let Ok(fresh_msgs) = fetch_local_chat_messages(&local_client).await {
@@ -4519,17 +4967,45 @@ async fn scan_last_match(
     let twitch_token =
         get_twitch_app_token(&public_client, &config.twitch_client_id, &config.twitch_client_secret).await;
 
-    // Exclude self, blank/duplicate entries, and (when enabled) party members before external platform calls
+    let mut players = players;
+    // Recover any missing/hidden Riot IDs from captured match chat (matched by PUUID)
+    if !match_chat.is_empty() {
+        for p in &mut players {
+            if is_visible_game_name(&p.record.game_name) {
+                continue;
+            }
+            if let Some(msg) = match_chat.iter().find(|m| {
+                !m.puuid.is_empty()
+                    && m.puuid.eq_ignore_ascii_case(&p.record.subject)
+                    && is_visible_game_name(&m.game_name)
+            }) {
+                p.record.game_name = msg.game_name.trim().to_string();
+                if p.record.tag_line.trim().is_empty() && !msg.game_tag.trim().is_empty() {
+                    p.record.tag_line = msg.game_tag.trim().to_string();
+                }
+            } else if match_chat.iter().any(|m| {
+                !m.puuid.is_empty()
+                    && m.puuid.eq_ignore_ascii_case(&p.record.subject)
+                    && extract_chat_stream_plug(&m.body).is_some()
+            }) {
+                // Hidden/Streamer Mode player still plugged their stream in chat: synthesize label
+                let label = if !p.agent_name.is_empty() {
+                    format!("Hidden ({})", p.agent_name)
+                } else {
+                    "Hidden Player".to_string()
+                };
+                p.record.game_name = label;
+            }
+        }
+    }
+
+    // Exclude self, duplicates, (when enabled) party members, and hidden/blank Riot IDs
     let total_roster = players.len();
-    let missing_names = players
-        .iter()
-        .filter(|p| !p.record.subject.eq_ignore_ascii_case(&my_puuid) && p.record.game_name.trim().is_empty())
-        .count();
-    let (scannable_players, party_skipped) =
+    let (scannable_players, party_skipped, hidden_skipped) =
         filter_scannable_players(players, &my_puuid, config.skip_party_members);
     let players_checked = scannable_players.len();
     log(format!(
-        "Match roster {match_id}: total={total_roster}, checked={players_checked}, party_skipped={party_skipped}, missing_names={missing_names}"
+        "Match roster {match_id}: total={total_roster}, checked={players_checked}, party_skipped={party_skipped}, hidden_skipped={hidden_skipped}"
     ));
 
     let sem = Arc::new(Semaphore::new(4));
@@ -4538,7 +5014,7 @@ async fn scan_last_match(
         let mut best_plug: Option<ChatStreamPlug> = None;
         if config.capture_in_game_chat {
             for msg in &match_chat {
-                let sender_matches = (!msg.puuid.is_empty() && msg.puuid == player_info.record.subject)
+                let sender_matches = (!msg.puuid.is_empty() && msg.puuid.eq_ignore_ascii_case(&player_info.record.subject))
                     || (!msg.game_name.is_empty()
                         && msg.game_name.eq_ignore_ascii_case(&player_info.record.game_name)
                         && (msg.game_tag.is_empty()
@@ -4613,6 +5089,7 @@ async fn scan_last_match(
         my_agent,
         players_checked,
         party_skipped,
+        hidden_skipped,
         streamers_found: found,
         scanned_at: checked_time,
         server_name: effective_region.label.to_string(),
@@ -4620,19 +5097,26 @@ async fn scan_last_match(
     save_json("last_match.json", &summary);
     lock(&state).last_match_summary = Some(summary);
 
-    let party_note = if party_skipped > 0 {
-        format!(", {party_skipped} party skipped")
-    } else {
+    let mut skip_notes = Vec::new();
+    if party_skipped > 0 {
+        skip_notes.push(format!("{party_skipped} party skipped"));
+    }
+    if hidden_skipped > 0 {
+        skip_notes.push(format!("{hidden_skipped} hidden"));
+    }
+    let extra_note = if skip_notes.is_empty() {
         String::new()
+    } else {
+        format!(", {}", skip_notes.join(", "))
     };
     let status = if found > 0 {
         format!(
-            "Found {found} match result(s) in {display_queue} on {display_map} ({}{party_note})!",
+            "Found {found} match result(s) in {display_queue} on {display_map} ({}{extra_note})!",
             effective_region.short_label
         )
     } else {
         format!(
-            "Scanned {display_queue} on {display_map} ({players_checked} checked{party_note}, {}) | No live streamers found",
+            "Scanned {display_queue} on {display_map} ({players_checked} checked{extra_note}, {}) | No live streamers found",
             effective_region.short_label
         )
     };
@@ -4692,30 +5176,64 @@ fn read_new_log_events(
     Ok((reconcile_lines, detected_api_region, detected_server, start + end as u64))
 }
 
-/// Scans the head of ShooterGame.log once at startup so we know the server even before a new line lands.
-fn detect_initial_server(path: &Path) -> (Option<String>, Option<String>) {
+/// Scans both the head (64 KB) and tail (512 KB) of `ShooterGame.log` at startup so long gaming
+/// sessions still detect the latest server pod, Riot API shard, and whether Valorant is already
+/// `InGame` when the app launches mid-match.
+fn detect_initial_log_state(path: &Path) -> (Option<String>, Option<String>, bool) {
     let Ok(mut f) = File::open(path) else {
-        return (None, None);
+        return (None, None, false);
     };
-    let mut buf = Vec::new();
-    if f.take(256 * 1024).read_to_end(&mut buf).is_err() {
-        return (None, None);
-    }
-    let text = String::from_utf8_lossy(&buf);
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let mut api_region = None;
     let mut server = None;
-    for caps in API_REGION_RE.captures_iter(&text) {
-        if let Some(s) = canonical_api_region(&caps[1]) {
-            api_region = Some(s.to_string());
-            break;
+    let mut in_match = false;
+
+    let scan_chunk = |text: &str, api_region: &mut Option<String>, server: &mut Option<String>, in_match: &mut bool| {
+        for line in text.lines() {
+            if line.contains(".a.pvp.net") {
+                if let Some(caps) = API_REGION_RE.captures(line) {
+                    if let Some(s) = canonical_api_region(&caps[1]) {
+                        *api_region = Some(s.to_string());
+                    }
+                }
+            }
+            if line.contains("aresriot.") {
+                if let Some(m) = POD_RE.find(line) {
+                    if let Some(srv) = parse_game_pod_to_server(m.as_str()) {
+                        *server = Some(srv.to_string());
+                    }
+                }
+            }
+            if line.contains("Reconcile") {
+                if line.contains("InGame") {
+                    *in_match = true;
+                } else if line.contains("MainMenu") {
+                    *in_match = false;
+                }
+            }
+        }
+    };
+
+    // 1. Head (up to 64 KB) captures initial startup PD shard even if the log grew huge
+    let mut head = Vec::new();
+    if f.by_ref().take(64 * 1024).read_to_end(&mut head).is_ok() {
+        let text = String::from_utf8_lossy(&head);
+        scan_chunk(&text, &mut api_region, &mut server, &mut in_match);
+    }
+
+    // 2. Tail (last 512 KB) captures the latest server pod and live InGame/MainMenu state
+    if len > 64 * 1024 {
+        let tail_start = len.saturating_sub(512 * 1024);
+        if f.seek(SeekFrom::Start(tail_start)).is_ok() {
+            let mut tail = Vec::new();
+            if f.read_to_end(&mut tail).is_ok() {
+                let text = String::from_utf8_lossy(&tail);
+                scan_chunk(&text, &mut api_region, &mut server, &mut in_match);
+            }
         }
     }
-    for m in POD_RE.find_iter(&text) {
-        if let Some(srv) = parse_game_pod_to_server(m.as_str()) {
-            server = Some(srv.to_string());
-        }
-    }
-    (api_region, server)
+
+    (api_region, server, in_match)
 }
 
 async fn watch_log(
@@ -4725,23 +5243,29 @@ async fn watch_log(
     ctx: egui::Context,
     tx: mpsc::UnboundedSender<ScanTrigger>,
 ) {
-    let mut in_match = false;
-    let (init_api_region, init_server) = detect_initial_server(&log_path);
+    let (init_api_region, init_server, init_log_in_match) = detect_initial_log_state(&log_path);
+    let init_riot_status = probe_riot_session(&local_client).await;
+    let mut in_match = init_log_in_match && init_riot_status == RiotStatus::ValorantActive;
     {
         let mut s = lock(&state);
+        s.riot_status = init_riot_status;
         if let Some(reg) = init_api_region {
             s.detected_api_region = reg;
         }
         if let Some(server) = init_server {
             s.detected_server = server;
         }
+        if in_match {
+            s.status = "In Match | Waiting for match end...".to_string();
+        }
     }
+    repaint(&ctx);
 
     let initial = fs::metadata(&log_path).ok();
     let mut last_pos = initial.as_ref().map(|m| m.len()).unwrap_or(0);
     let mut last_created = initial.and_then(|m| m.created().ok());
-    let mut last_riot_status: Option<RiotStatus> = None;
-    let mut last_probe: Option<Instant> = None;
+    let mut last_riot_status: Option<RiotStatus> = Some(init_riot_status);
+    let mut last_probe: Option<Instant> = Some(Instant::now());
     let mut last_chat_poll: Option<Instant> = None;
 
     loop {
@@ -4818,11 +5342,16 @@ async fn watch_log(
                         }
                     }
                     for line in lines {
-                        if line.contains("InGame") {
+                        if line.contains("Pregame") {
+                            lock(&state).chat_buffer.clear();
+                        } else if line.contains("InGame") {
                             if !in_match {
                                 in_match = true;
                                 last_chat_poll = None;
-                                lock(&state).chat_buffer.clear();
+                                // Keep any pregame chat messages from this lobby while clearing stale coregame chat.
+                                lock(&state)
+                                    .chat_buffer
+                                    .retain(|m| m.cid.to_ascii_lowercase().contains("ares-pregame"));
                                 set_status(&state, &ctx, "In Match | Waiting for match end...");
                             }
                         } else if in_match && line.contains("MainMenu") {
@@ -7547,12 +8076,20 @@ impl StreamerApp {
                         ui.label(RichText::new(&m.server_name).font(font_semibold(12.5)).color(ALLY_TEAL));
                     }
                     ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                    let summary_counts = if m.party_skipped > 0 {
-                        format!("{} scanned, {} party skipped", m.players_checked, m.party_skipped)
-                    } else {
-                        format!("{} scanned", m.players_checked)
-                    };
-                    ui.label(RichText::new(summary_counts).font(font_mono(12.0)).color(TEXT_MUTED));
+                    let mut count_parts = vec![format!("{} scanned", m.players_checked)];
+                    if m.party_skipped > 0 {
+                        count_parts.push(format!("{} party skipped", m.party_skipped));
+                    }
+                    if m.hidden_skipped > 0 {
+                        count_parts.push(format!("{} hidden", m.hidden_skipped));
+                    }
+                    let summary_counts = count_parts.join(", ");
+                    let count_lbl = ui.label(RichText::new(summary_counts).font(font_mono(12.0)).color(TEXT_MUTED));
+                    if m.hidden_skipped > 0 {
+                        count_lbl.on_hover_text(
+                            "Riot returned blank or invisible names (e.g. Streamer Mode / privacy) for these player(s).",
+                        );
+                    }
                     ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
                     if m.streamers_found > 0 {
                         ui.label(
@@ -9229,12 +9766,7 @@ fn main() -> Result<()> {
                 }
             });
 
-            let log_path = PathBuf::from(env::var_os("LOCALAPPDATA").unwrap_or_default())
-                .join("VALORANT")
-                .join("Saved")
-                .join("Logs")
-                .join("ShooterGame.log");
-            watch_log(log_path, local_client, state_bg, ctx_bg, tx_bg).await;
+            watch_log(valorant_log_path(), local_client, state_bg, ctx_bg, tx_bg).await;
         });
     });
     if let Err(e) = spawned {
@@ -9451,13 +9983,15 @@ mod tests {
             mk("e1", "EnemyStreamer", "party-3", false),
         ];
 
-        let (scannable_skip, skipped) = filter_scannable_players(players.clone(), "me", true);
+        let (scannable_skip, skipped, hidden_skip) = filter_scannable_players(players.clone(), "me", true);
         assert_eq!(skipped, 2);
+        assert_eq!(hidden_skip, 0);
         assert_eq!(scannable_skip.len(), 2);
         assert!(scannable_skip.iter().all(|p| !p.is_party_member));
 
-        let (scannable_all, skipped_none) = filter_scannable_players(players, "me", false);
+        let (scannable_all, skipped_none, hidden_none) = filter_scannable_players(players, "me", false);
         assert_eq!(skipped_none, 0);
+        assert_eq!(hidden_none, 0);
         assert_eq!(scannable_all.len(), 4);
     }
 
@@ -9502,13 +10036,30 @@ mod tests {
             RiotNameRecord { subject: "p2".to_string(), game_name: String::new(), tag_line: String::new() },
         ];
         let (_, players) = resolve_match_players(&details_players, &name_records, "me-uuid");
-        let (scannable, party_skipped) = filter_scannable_players(players, "me-uuid", true);
+        let (scannable, party_skipped, hidden_skipped) = filter_scannable_players(players, "me-uuid", true);
 
         assert_eq!(party_skipped, 1, "Only true same-team duo mate should be skipped");
+        assert_eq!(hidden_skipped, 0);
         assert_eq!(scannable.len(), 3, "All 3 non-party players (including omitted name-service and enemy) must be scanned");
         assert!(scannable.iter().any(|p| p.record.game_name == "SoloAlly"));
         assert!(scannable.iter().any(|p| p.record.game_name == "MissingFromNameService"));
         assert!(scannable.iter().any(|p| p.record.game_name == "EnemyWithSamePartyId"));
+    }
+
+    #[test]
+    fn test_parse_name_service_records_handles_nulls_and_display_name() {
+        let payload = serde_json::json!([
+            {"Subject": "u1", "GameName": null, "TagLine": null, "DisplayName": "StreamerOne#NA1"},
+            {"puuid": "u2", "gameName": "NormalGuy", "tagLine": "IND"},
+            {"Subject": "u3", "GameName": "\u{3164}", "TagLine": "0000"}
+        ]);
+        let recs = parse_name_service_records(&payload);
+        assert_eq!(recs.len(), 3, "Null fields must not fail parsing for the whole batch");
+        assert_eq!(recs[0].game_name, "StreamerOne");
+        assert_eq!(recs[0].tag_line, "NA1");
+        assert_eq!(recs[1].subject, "u2");
+        assert_eq!(recs[1].game_name, "NormalGuy");
+        assert!(!is_visible_game_name(&recs[2].game_name));
     }
 
     #[test]
@@ -9531,8 +10082,9 @@ mod tests {
             })
             .collect();
         let (_, players) = resolve_match_players(&dm_players, &[], "sub-0");
-        let (scannable, party_skipped) = filter_scannable_players(players, "sub-0", true);
+        let (scannable, party_skipped, hidden_skipped) = filter_scannable_players(players, "sub-0", true);
         assert_eq!(party_skipped, 0, "Nil partyId must never skip any players");
+        assert_eq!(hidden_skipped, 0);
         assert_eq!(scannable.len(), 9, "All 9 other players must be checked");
     }
 
@@ -9570,6 +10122,76 @@ mod tests {
         let disabled: AppConfig =
             serde_json::from_str(r#"{"check_updates_on_boot": false}"#).expect("disabled config");
         assert!(!disabled.check_updates_on_boot);
+    }
+
+    #[test]
+    fn test_clean_ign_strips_leading_and_trailing_platform_tags() {
+        assert_eq!(clean_ign("TTV JakeFPS"), "JakeFPS");
+        assert_eq!(clean_ign("YT_Rohan"), "Rohan");
+        assert_eq!(clean_ign("twitch.tv/shroud"), "shroud");
+        assert_eq!(clean_ign("Kick-Kairo"), "Kairo");
+        assert_eq!(clean_ign("RohanYT"), "Rohan");
+        assert_eq!(clean_ign("Desktop"), "Desktop");
+    }
+
+    #[test]
+    fn test_chat_parsing_handles_nulls_and_excludes_party_chat() {
+        let payload = serde_json::json!({
+            "messages": [
+                {"id": null, "cid": "123@ares-coregame.ap.pvp.net", "puuid": "p1", "game_name": null, "body": "live on twitch.tv/foo", "type": "groupchat"},
+                {"id": "2", "cid": "456@ares-parties.ap.pvp.net", "puuid": "p2", "game_name": "Friend", "body": "check twitch.tv/bar", "type": "groupchat"}
+            ]
+        });
+        let msgs = parse_chat_messages(&payload);
+        assert_eq!(msgs.len(), 2);
+        assert!(is_match_chat_message(&msgs[0]));
+        assert!(!is_match_chat_message(&msgs[1]), "Party chat must never leak into match lobby scan");
+    }
+
+    #[test]
+    fn test_client_version_log_fallback_formats_shipping_correctly() {
+        let line = "[2026.05.01] LogShooter: CI server version: release-10.08-9-3416843\n";
+        assert_eq!(
+            parse_client_version_from_log_text(line).as_deref(),
+            Some("release-10.08-shipping-9-3416843")
+        );
+        let already = "CI server version: release-10.08-shipping-9-3416843";
+        assert_eq!(
+            parse_client_version_from_log_text(already).as_deref(),
+            Some("release-10.08-shipping-9-3416843")
+        );
+    }
+
+    #[test]
+    fn test_youtube_live_search_filter_and_exact_handle_unverified_scoring() {
+        let live_video = serde_json::json!({
+            "videoId": "abc",
+            "badges": [{"metadataBadgeRenderer": {"style": "BADGE_STYLE_TYPE_LIVE_NOW", "label": "LIVE"}}]
+        });
+        let upcoming_video = serde_json::json!({
+            "videoId": "def",
+            "upcomingEventData": {"startTime": "1790000000"},
+            "badges": [{"metadataBadgeRenderer": {"label": "UPCOMING"}}]
+        });
+        let vod_video = serde_json::json!({"videoId": "ghi"});
+        assert!(is_yt_search_video_live(&live_video));
+        assert!(!is_yt_search_video_live(&upcoming_video));
+        assert!(!is_yt_search_video_live(&vod_video));
+
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai");
+        let exact_yt = score_heuristic_candidate(
+            "YouTube",
+            "UniqueValCreator",
+            "UniqueValCreator",
+            "VALORANT Ranked Grind!",
+            "https://www.youtube.com/watch?v=abc",
+            None,
+            false,
+            mumbai,
+        )
+        .expect("Exact-handle YouTube Valorant stream should surface as Unverified");
+        assert_eq!(exact_yt.confidence_tier, "Unverified");
+        assert!(exact_yt.confidence <= 58);
     }
 }
 

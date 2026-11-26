@@ -3,6 +3,16 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.10] - 2026-11-26
+
+### Fixed
+- **Full Competitive Lobby Player Resolution & Hidden Name Transparency:** Replaced rigid `name-service/v2/players` deserialization with a null-tolerant parser (supporting `PascalCase`, `camelCase`, and `DisplayName` fallbacks), added automatic retries + a targeted second pass for unresolved PUUIDs, recovered names/stream plugs from post-match chat by PUUID, checked party exclusion before blank/invisible-character names (e.g., Hangul Filler `U+3164`), and surfaced any remaining hidden/Streamer Mode players transparently in the `LATEST MATCH` summary and status bar (`X scanned, Y party skipped, Z hidden`).
+- **Auto-Shard Discovery for Non-AP Regions (NA / EU / KR / LATAM / BR):** When **Active Server** is set to **Auto** and the initial default shard has no match history on first boot, the post-match scanner now automatically discovers your active Riot shard instead of failing with "No recent match found on ap server region", and extends post-match propagation polling to better handle slower Competitive match writes.
+- **Long-Session Log Tail & Mid-Match Launch Detection:** Upgraded startup `ShooterGame.log` inspection to read both the head (64 KB) and tail (512 KB) instead of only the first 256 KB—fixing stale server-pod detection in long sessions and ensuring post-match auto-scans still trigger when the app is launched mid-match while Valorant is already running.
+- **YouTube EU/UK GDPR Consent Bypass & Live-Only Filtering:** Added the `SOCS=CAI` cookie on keyless YouTube requests so European/UK users are no longer blocked by consent redirects, verified live badges/canonical `/watch?v=` URLs to reject upcoming premieres, ended VODs, and offline sidebar recommendations, and allowed exact-handle keyless YouTube Valorant streams with unknown server regions to surface cleanly as `Unverified` instead of being silently dropped.
+- **Faster Batched Twitch Detection & Leading IGN Tag Stripping:** Updated IGN cleaning to strip leading platform prefixes (`TTV `, `YT_`, `twitch.tv/`, `Kick-`) in addition to trailing suffixes, and batched Twitch candidate checks (`base`, raw login, `tv`, `_tv`, `ttv`) into a single Helix or aliased GraphQL HTTP request per player.
+- **Cross-Platform Directory Fallback, Resilient Chat Parsing & Offline Version Fallback:** Players registered in the streamer directory who are offline on their listed platform now still get checked on other platforms; `/chat/v6/messages` parsing now tolerates `null` fields, excludes `ares-parties`/`ares-lobby` chat from leaking into match scans, and preserves `ares-pregame` stream plugs; `client_version` now falls back to `CI server version` in `ShooterGame.log` if `valorant-api.com` is temporarily unreachable.
+
 ## [1.2.9] - 2026-11-25
 
 ### Fixed

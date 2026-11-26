@@ -5901,7 +5901,7 @@ fn paint_status_dot(ui: &mut egui::Ui, color: Color32, glowing: bool) {
 fn paint_check_icon(ui: &mut egui::Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
     let p = ui.painter();
-    let stroke = Stroke::new(1.8, color);
+    let stroke = Stroke::new(1.8_f32, color);
     let a = egui::pos2(rect.left() + 2.5, rect.center().y + 0.5);
     let b = egui::pos2(rect.left() + 5.5, rect.bottom() - 3.0);
     let c = egui::pos2(rect.right() - 2.0, rect.top() + 3.0);
@@ -5912,7 +5912,7 @@ fn paint_check_icon(ui: &mut egui::Ui, color: Color32) {
 fn paint_cross_icon(ui: &mut egui::Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
     let p = ui.painter();
-    let stroke = Stroke::new(1.8, color);
+    let stroke = Stroke::new(1.8_f32, color);
     let r = rect.shrink(3.0);
     p.line_segment([r.left_top(), r.right_bottom()], stroke);
     p.line_segment([r.right_top(), r.left_bottom()], stroke);
@@ -5921,7 +5921,7 @@ fn paint_cross_icon(ui: &mut egui::Ui, color: Color32) {
 fn paint_warn_icon(ui: &mut egui::Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
     let p = ui.painter();
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let top = egui::pos2(rect.center().x, rect.top() + 1.5);
     let bl = egui::pos2(rect.left() + 1.5, rect.bottom() - 2.0);
     let br = egui::pos2(rect.right() - 1.5, rect.bottom() - 2.0);
@@ -5961,14 +5961,14 @@ fn toggle_slider(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
         let painter = ui.painter();
         let track_cr = CornerRadius::same(radius.round() as u8);
         painter.rect_filled(rect, track_cr, track_bg);
-        painter.rect_stroke(rect, track_cr, Stroke::new(1.0, border_col), StrokeKind::Inside);
+        painter.rect_stroke(rect, track_cr, Stroke::new(1.0_f32, border_col), StrokeKind::Inside);
 
         let thumb_x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), how_on);
         let thumb_center = egui::pos2(thumb_x, rect.center().y);
         let thumb_r = radius - 3.0;
         painter.circle_filled(thumb_center, thumb_r, ACCENT_PEARL);
         if *on {
-            painter.circle_stroke(thumb_center, thumb_r, Stroke::new(0.8, ACCENT_PINK.linear_multiply(0.45)));
+            painter.circle_stroke(thumb_center, thumb_r, Stroke::new(0.8_f32, ACCENT_PINK.linear_multiply(0.45)));
         }
     }
     response
@@ -6100,7 +6100,7 @@ fn toggle_row(ui: &mut egui::Ui, on: &mut bool, title: &str, subtitle: &str) -> 
     let mut changed = false;
     Frame::NONE
         .fill(BG_DARK)
-        .stroke(Stroke::new(1.0, if *on { ACCENT_PINK.linear_multiply(0.35) } else { CARD_BORDER }))
+        .stroke(Stroke::new(1.0_f32, if *on { ACCENT_PINK.linear_multiply(0.35) } else { CARD_BORDER }))
         .corner_radius(CornerRadius::same(6))
         .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
@@ -6133,7 +6133,7 @@ fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
     let box_rect = rect.shrink(0.5);
     let r = (box_rect.width() * 0.18).max(3.0).round() as u8;
     p.rect_filled(box_rect, CornerRadius::same(r), BG_DARK);
-    p.rect_stroke(box_rect, CornerRadius::same(r), Stroke::new(1.3, ACCENT_PINK), StrokeKind::Inside);
+    p.rect_stroke(box_rect, CornerRadius::same(r), Stroke::new(1.3_f32, ACCENT_PINK), StrokeKind::Inside);
     let cx = box_rect.center().x;
     let cy = box_rect.center().y;
     let half_w = box_rect.width() * 0.24;
@@ -6141,7 +6141,7 @@ fn paint_brand_mark(ui: &mut egui::Ui, size: f32) {
     let l = egui::pos2(cx - half_w, cy - half_h);
     let b = egui::pos2(cx, cy + half_h);
     let r_pt = egui::pos2(cx + half_w, cy - half_h);
-    let stroke = Stroke::new(1.9, ACCENT_PEARL);
+    let stroke = Stroke::new(1.9_f32, ACCENT_PEARL);
     p.line_segment([l, b], stroke);
     p.line_segment([b, r_pt], stroke);
     p.circle_filled(egui::pos2(cx, cy - half_h + 0.8), 1.45, ACCENT_PINK);
@@ -6159,10 +6159,10 @@ fn paint_copy_icon_button(ui: &mut egui::Ui) -> egui::Response {
     let icon_col = if hovered { ACCENT_PEARL } else { TEXT_MUTED };
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(6), fill);
-    p.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, border), StrokeKind::Inside);
+    p.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0_f32, border), StrokeKind::Inside);
 
     let c = rect.center();
-    let stroke = Stroke::new(1.4, icon_col);
+    let stroke = Stroke::new(1.4_f32, icon_col);
     // Front sheet (bottom-right)
     let front = egui::Rect::from_min_size(egui::pos2(c.x - 2.5, c.y - 2.5), Vec2::new(8.5, 9.5));
     p.rect_stroke(front, CornerRadius::same(2), stroke, StrokeKind::Inside);
@@ -6179,7 +6179,7 @@ fn paint_copy_icon_button(ui: &mut egui::Ui) -> egui::Response {
 fn paint_chevron_icon(ui: &mut egui::Ui, expanded: bool, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
     let c = rect.center();
-    let s = Stroke::new(1.5, color);
+    let s = Stroke::new(1.5_f32, color);
     if expanded {
         ui.painter().line_segment([egui::pos2(c.x - 4.0, c.y + 2.0), egui::pos2(c.x, c.y - 2.0)], s);
         ui.painter().line_segment([egui::pos2(c.x, c.y - 2.0), egui::pos2(c.x + 4.0, c.y + 2.0)], s);
@@ -6191,7 +6191,7 @@ fn paint_chevron_icon(ui: &mut egui::Ui, expanded: bool, color: Color32) {
 
 /// Minimal vector sidebar icons matching the preview (Clock, Book, Compass, Gear).
 fn paint_nav_icon(p: &egui::Painter, c: egui::Pos2, tab: ActiveTab, color: Color32) {
-    let s = Stroke::new(1.4, color);
+    let s = Stroke::new(1.4_f32, color);
     match tab {
         ActiveTab::History => {
             p.circle_stroke(c, 5.8, s);
@@ -6210,7 +6210,7 @@ fn paint_nav_icon(p: &egui::Painter, c: egui::Pos2, tab: ActiveTab, color: Color
         }
         ActiveTab::Settings => {
             p.circle_stroke(c, 2.3, s);
-            p.circle_stroke(c, 5.4, Stroke::new(1.3, color));
+            p.circle_stroke(c, 5.4, Stroke::new(1.3_f32, color));
         }
     }
 }
@@ -6227,7 +6227,7 @@ fn paint_minimize_button(ui: &mut egui::Ui) -> egui::Response {
     let cy = rect.center().y + 1.0;
     ui.painter().line_segment(
         [egui::pos2(rect.center().x - 5.5, cy), egui::pos2(rect.center().x + 5.5, cy)],
-        Stroke::new(1.5, col),
+        Stroke::new(1.5_f32, col),
     );
     resp.on_hover_text("Minimize")
 }
@@ -6243,7 +6243,7 @@ fn paint_close_button(ui: &mut egui::Ui) -> egui::Response {
     let col = if hovered { Color32::WHITE } else { TEXT_MUTED };
     let c = rect.center();
     let d = 5.0;
-    let stroke = Stroke::new(1.5, col);
+    let stroke = Stroke::new(1.5_f32, col);
     ui.painter().line_segment([egui::pos2(c.x - d, c.y - d), egui::pos2(c.x + d, c.y + d)], stroke);
     ui.painter().line_segment([egui::pos2(c.x + d, c.y - d), egui::pos2(c.x - d, c.y + d)], stroke);
     resp.on_hover_text("Hide to system tray")
@@ -6336,7 +6336,7 @@ fn segmented_tab_btn<T: PartialEq>(
     let text_col = if selected { ACCENT_PEARL } else { TEXT_MUTED };
     let font = if selected { font_semibold(13.0) } else { font_medium(13.0) };
     let stroke = if selected {
-        Stroke::new(1.0, Color32::from_rgb(44, 44, 54))
+        Stroke::new(1.0_f32, Color32::from_rgb(44, 44, 54))
     } else {
         Stroke::NONE
     };
@@ -6398,7 +6398,7 @@ fn gradient_button(ui: &mut egui::Ui, label: &str, size: Vec2, enabled: bool, fo
     painter.rect_stroke(
         rect,
         cr,
-        Stroke::new(1.0, ACCENT_PEARL.linear_multiply(if response.hovered() { 0.9 } else { 0.5 })),
+        Stroke::new(1.0_f32, ACCENT_PEARL.linear_multiply(if response.hovered() { 0.9 } else { 0.5 })),
         StrokeKind::Inside,
     );
     painter.text(
@@ -6427,7 +6427,7 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
         CheckState::Ok(msg) => {
             Frame::NONE
                 .fill(LIVE_GREEN.linear_multiply(0.12))
-                .stroke(Stroke::new(1.0, LIVE_GREEN.linear_multiply(0.55)))
+                .stroke(Stroke::new(1.0_f32, LIVE_GREEN.linear_multiply(0.55)))
                 .corner_radius(CornerRadius::same(5))
                 .inner_margin(Margin::symmetric(8, 6))
                 .show(ui, |ui| {
@@ -6440,7 +6440,7 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
         CheckState::Warn { msg, suggested_name } => {
             Frame::NONE
                 .fill(ENEMY_AMBER.linear_multiply(0.12))
-                .stroke(Stroke::new(1.0, ENEMY_AMBER.linear_multiply(0.55)))
+                .stroke(Stroke::new(1.0_f32, ENEMY_AMBER.linear_multiply(0.55)))
                 .corner_radius(CornerRadius::same(5))
                 .inner_margin(Margin::symmetric(8, 6))
                 .show(ui, |ui| {
@@ -6456,7 +6456,7 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
                                 .color(Color32::WHITE),
                         )
                         .fill(BTN_SECONDARY)
-                        .stroke(Stroke::new(1.0, ENEMY_AMBER))
+                        .stroke(Stroke::new(1.0_f32, ENEMY_AMBER))
                         .corner_radius(CornerRadius::same(4));
                         if ui.add(use_btn).clicked() {
                             apply_name = Some(name.clone());
@@ -6467,7 +6467,7 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
         CheckState::Err(msg) => {
             Frame::NONE
                 .fill(ERR_ROSE.linear_multiply(0.12))
-                .stroke(Stroke::new(1.0, ERR_ROSE.linear_multiply(0.6)))
+                .stroke(Stroke::new(1.0_f32, ERR_ROSE.linear_multiply(0.6)))
                 .corner_radius(CornerRadius::same(5))
                 .inner_margin(Margin::symmetric(8, 6))
                 .show(ui, |ui| {
@@ -6531,7 +6531,7 @@ impl StreamerApp {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = BG_DARK;
         visuals.window_fill = CARD_BG;
-        visuals.window_stroke = Stroke::new(1.0, CARD_BORDER);
+        visuals.window_stroke = Stroke::new(1.0_f32, CARD_BORDER);
         visuals.window_corner_radius = CornerRadius::same(8);
         visuals.menu_corner_radius = CornerRadius::same(6);
         visuals.extreme_bg_color = Color32::from_rgb(8, 8, 11);
@@ -6539,36 +6539,36 @@ impl StreamerApp {
 
         visuals.widgets.noninteractive.bg_fill = CARD_BG;
         visuals.widgets.noninteractive.weak_bg_fill = CARD_BG;
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, CARD_BORDER);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, CARD_BORDER);
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT_PRIMARY);
         visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
 
         visuals.widgets.inactive.bg_fill = BTN_SECONDARY;
         visuals.widgets.inactive.weak_bg_fill = BTN_SECONDARY;
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CARD_BORDER);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, CARD_BORDER);
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT_PRIMARY);
         visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
 
         visuals.widgets.hovered.bg_fill = SURFACE_HOVER;
         visuals.widgets.hovered.weak_bg_fill = SURFACE_HOVER;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.55));
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.55));
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, ACCENT_PEARL);
         visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
 
         visuals.widgets.active.bg_fill = Color32::from_rgb(28, 28, 36);
         visuals.widgets.active.weak_bg_fill = Color32::from_rgb(28, 28, 36);
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.8));
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.8));
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, ACCENT_PEARL);
         visuals.widgets.active.corner_radius = CornerRadius::same(6);
 
         visuals.widgets.open.bg_fill = BTN_SECONDARY;
         visuals.widgets.open.weak_bg_fill = BTN_SECONDARY;
-        visuals.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.7));
-        visuals.widgets.open.fg_stroke = Stroke::new(1.0, ACCENT_PEARL);
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.7));
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, ACCENT_PEARL);
         visuals.widgets.open.corner_radius = CornerRadius::same(6);
 
         visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(255, 92, 168, 56);
-        visuals.selection.stroke = Stroke::new(1.0, ACCENT_PINK);
+        visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT_PINK);
         egui_ctx.set_visuals(visuals);
 
         install_preview_fonts(egui_ctx);
@@ -6984,7 +6984,7 @@ impl StreamerApp {
                         egui::pos2(bar_rect.left(), bar_rect.bottom() - 0.5),
                         egui::pos2(bar_rect.right(), bar_rect.bottom() - 0.5),
                     ],
-                    Stroke::new(1.0, CARD_BORDER),
+                    Stroke::new(1.0_f32, CARD_BORDER),
                 );
             });
 
@@ -6996,7 +6996,7 @@ impl StreamerApp {
                 Frame::NONE
                     .fill(BG_DARK)
                     .inner_margin(Margin::symmetric(14, 16))
-                    .stroke(Stroke::new(1.0, CARD_BORDER)),
+                    .stroke(Stroke::new(1.0_f32, CARD_BORDER)),
             )
             .show(ctx, |ui| {
                 // Navigation items
@@ -7133,7 +7133,7 @@ impl StreamerApp {
                         RichText::new("+ Add Streamer").font(font_semibold(13.0)).color(TEXT_PRIMARY),
                     )
                         .fill(BTN_SECONDARY)
-                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                         .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(ui.available_width(), 35.0));
                     if ui.add(add_btn).clicked() {
@@ -7153,7 +7153,7 @@ impl StreamerApp {
                     // Compact live Riot & Server status block
                     Frame::NONE
                         .fill(CARD_BG)
-                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                         .corner_radius(CornerRadius::same(6))
                         .inner_margin(Margin::symmetric(11, 9))
                         .show(ui, |ui| {
@@ -7206,7 +7206,7 @@ impl StreamerApp {
                 .frame(
                     Frame::NONE
                         .fill(CARD_BG)
-                        .stroke(Stroke::new(1.5, ACCENT_PINK))
+                        .stroke(Stroke::new(1.5_f32, ACCENT_PINK))
                         .corner_radius(CornerRadius::same(10))
                         .inner_margin(Margin::same(22)),
                 )
@@ -7252,7 +7252,7 @@ impl StreamerApp {
                     ui.add_space(3.0);
                     Frame::NONE
                         .fill(BG_DARK)
-                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                         .corner_radius(CornerRadius::same(6))
                         .inner_margin(Margin::same(3))
                         .show(ui, |ui| {
@@ -7326,7 +7326,7 @@ impl StreamerApp {
                         let verify_label = if is_verifying { "Verifying..." } else { "Verify Link & Name" };
                         let verify_btn = egui::Button::new(RichText::new(verify_label).font(font_semibold(12.0)).color(Color32::WHITE))
                             .fill(BTN_SECONDARY)
-                            .stroke(Stroke::new(1.0, ALLY_TEAL))
+                            .stroke(Stroke::new(1.0_f32, ALLY_TEAL))
                             .corner_radius(CornerRadius::same(6))
                             .min_size(Vec2::new(140.0, 30.0));
                         if ui.add_enabled(!is_verifying, verify_btn).clicked() {
@@ -7338,7 +7338,7 @@ impl StreamerApp {
                             .unwrap_or(false);
                         let open_btn = egui::Button::new(RichText::new("Open Link").color(TEXT_PRIMARY).size(12.0))
                             .fill(BTN_SECONDARY)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                             .corner_radius(CornerRadius::same(5))
                             .min_size(Vec2::new(82.0, 28.0));
                         if ui.add_enabled(can_open, open_btn).clicked() {
@@ -7366,7 +7366,7 @@ impl StreamerApp {
                         ui.add_space(6.0);
                         let local_btn = egui::Button::new(RichText::new("Save Local").color(TEXT_PRIMARY))
                             .fill(BTN_SECONDARY)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                             .corner_radius(CornerRadius::same(6))
                             .min_size(Vec2::new(92.0, 34.0));
                         submit_local = ui.add(local_btn).clicked();
@@ -7439,7 +7439,7 @@ impl StreamerApp {
         fg_painter.rect_stroke(
             screen.shrink(0.5),
             CornerRadius::same(8),
-            Stroke::new(1.0, CARD_BORDER),
+            Stroke::new(1.0_f32, CARD_BORDER),
             StrokeKind::Inside,
         );
         paint_top_gradient_bar(&fg_painter, screen, 8.0, 2.5);
@@ -7453,7 +7453,7 @@ impl StreamerApp {
             UpdateState::Available(info) => {
                 Frame::NONE
                     .fill(CARD_BG)
-                    .stroke(Stroke::new(1.2, ACCENT_PINK))
+                    .stroke(Stroke::new(1.2_f32, ACCENT_PINK))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(14, 10))
                     .show(ui, |ui| {
@@ -7495,7 +7495,7 @@ impl StreamerApp {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 let rel_btn = egui::Button::new(RichText::new("Release Notes").size(11.5).color(TEXT_PRIMARY))
                                     .fill(BTN_SECONDARY)
-                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                     .corner_radius(CornerRadius::same(5));
                                 if ui.add(rel_btn).clicked() {
                                     let _ = open::that(&info.html_url);
@@ -7504,7 +7504,7 @@ impl StreamerApp {
                                 let toggle_lbl = if self.show_update_changelog { "Hide Changelog" } else { "Show Changelog" };
                                 let ch_btn = egui::Button::new(RichText::new(toggle_lbl).size(11.5).color(ACCENT_BLUSH))
                                     .fill(BTN_SECONDARY)
-                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                     .corner_radius(CornerRadius::same(5));
                                 if ui.add(ch_btn).clicked() {
                                     self.show_update_changelog = !self.show_update_changelog;
@@ -7520,7 +7520,7 @@ impl StreamerApp {
                             ui.add_space(8.0);
                             Frame::NONE
                                 .fill(HEADER_BG)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(6))
                                 .inner_margin(Margin::symmetric(10, 8))
                                 .show(ui, |ui| {
@@ -7544,7 +7544,7 @@ impl StreamerApp {
             UpdateState::Downloading(msg) | UpdateState::Installing(msg) => {
                 Frame::NONE
                     .fill(CARD_BG)
-                    .stroke(Stroke::new(1.0, ACCENT_BLUSH))
+                    .stroke(Stroke::new(1.0_f32, ACCENT_BLUSH))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(14, 9))
                     .show(ui, |ui| {
@@ -7559,7 +7559,7 @@ impl StreamerApp {
             UpdateState::Error(msg) if self.active_tab != ActiveTab::Settings => {
                 Frame::NONE
                     .fill(CARD_BG)
-                    .stroke(Stroke::new(1.0, ERR_ROSE))
+                    .stroke(Stroke::new(1.0_f32, ERR_ROSE))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(14, 8))
                     .show(ui, |ui| {
@@ -7612,7 +7612,7 @@ impl StreamerApp {
 
         let frame_resp = Frame::NONE
             .fill(CARD_BG)
-            .stroke(Stroke::new(1.0, border_col))
+            .stroke(Stroke::new(1.0_f32, border_col))
             .corner_radius(CornerRadius::same(8))
             .inner_margin(Margin::symmetric(16, 12))
             .show(ui, |ui| {
@@ -7710,7 +7710,7 @@ impl StreamerApp {
                         ui.add_space(6.0);
                         Frame::NONE
                             .fill(BG_DARK)
-                            .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.3)))
+                            .stroke(Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.3)))
                             .corner_radius(CornerRadius::same(5))
                             .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| {
@@ -7738,7 +7738,7 @@ impl StreamerApp {
                         ui.add_space(8.0);
                         Frame::NONE
                             .fill(BG_DARK)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                             .corner_radius(CornerRadius::same(6))
                             .inner_margin(Margin::symmetric(10, 8))
                             .show(ui, |ui| {
@@ -7789,7 +7789,7 @@ impl StreamerApp {
                                                 RichText::new("Open").size(12.0).color(ACCENT_BLUSH),
                                             )
                                             .fill(BTN_SECONDARY)
-                                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                             .corner_radius(CornerRadius::same(4));
                                             let open_resp = ui.add(open_cand).on_hover_text(cand.url.as_str());
                                             button_rects.push(open_resp.rect);
@@ -7820,7 +7820,7 @@ impl StreamerApp {
                 ui.painter().rect_stroke(
                     card_rect,
                     CornerRadius::same(8),
-                    Stroke::new(1.0, Color32::from_rgb(43, 43, 54)),
+                    Stroke::new(1.0_f32, Color32::from_rgb(43, 43, 54)),
                     StrokeKind::Inside,
                 );
             }
@@ -7858,7 +7858,7 @@ impl StreamerApp {
                 if !history.is_empty() {
                     let clear = egui::Button::new(RichText::new("Clear").font(font_medium(13.0)).color(TEXT_MUTED))
                         .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                         .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(64.0, 34.0));
                     if ui.add(clear).clicked() {
@@ -7882,7 +7882,7 @@ impl StreamerApp {
                 )
                 .fill(if filter_active { SURFACE_HOVER } else { CARD_BG })
                 .stroke(Stroke::new(
-                    1.0,
+                    1.0_f32,
                     if filter_active { ACCENT_PINK.linear_multiply(0.65) } else { CARD_BORDER },
                 ))
                 .corner_radius(CornerRadius::same(6))
@@ -7928,7 +7928,7 @@ impl StreamerApp {
 
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.35)))
+                .stroke(Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.35)))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::symmetric(14, 12))
                 .show(ui, |ui| {
@@ -7937,7 +7937,7 @@ impl StreamerApp {
                         ui.add_space(6.0);
                         Frame::NONE
                             .fill(BG_DARK)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                             .corner_radius(CornerRadius::same(6))
                             .inner_margin(Margin::same(3))
                             .show(ui, |ui| {
@@ -7956,7 +7956,7 @@ impl StreamerApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let done_btn = egui::Button::new(RichText::new("Done").color(TEXT_PRIMARY).size(13.0))
                                 .fill(BTN_SECONDARY)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(5));
                             if ui.add(done_btn).clicked() {
                                 self.show_filters_popover = false;
@@ -7965,7 +7965,7 @@ impl StreamerApp {
                                 ui.add_space(6.0);
                                 let reset = egui::Button::new(RichText::new("Reset").color(ACCENT_BLUSH).size(13.0))
                                     .fill(Color32::TRANSPARENT)
-                                    .stroke(Stroke::new(1.0, ACCENT_PINK.linear_multiply(0.45)))
+                                    .stroke(Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.45)))
                                     .corner_radius(CornerRadius::same(5));
                                 if ui.add(reset).clicked() {
                                     self.reset_history_filters();
@@ -8179,7 +8179,7 @@ impl StreamerApp {
         ui.horizontal(|ui| {
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(6))
                 .inner_margin(Margin::same(3))
                 .show(ui, |ui| {
@@ -8211,7 +8211,7 @@ impl StreamerApp {
                 let sync_label = if is_syncing { "Syncing..." } else { "Sync Database" };
                 let sync_btn = egui::Button::new(RichText::new(sync_label).font(font_medium(13.0)).color(TEXT_PRIMARY))
                     .fill(BTN_SECONDARY)
-                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                     .corner_radius(CornerRadius::same(6))
                     .min_size(Vec2::new(124.0, 34.0));
                 if ui.add_enabled(!is_syncing, sync_btn).clicked() {
@@ -8270,7 +8270,7 @@ impl StreamerApp {
                 };
                 Frame::NONE
                     .fill(CARD_BG)
-                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(16, 12))
                     .show(ui, |ui| {
@@ -8308,14 +8308,14 @@ impl StreamerApp {
                                 if self.dir_source_tab == DirectorySourceTab::Custom {
                                     let del = egui::Button::new(RichText::new("Delete").color(ERR_ROSE).size(13.0))
                                         .fill(Color32::TRANSPARENT)
-                                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                         .corner_radius(CornerRadius::same(5));
                                     if ui.add(del).clicked() {
                                         to_delete = Some((d.riot_id.clone(), d.platform.clone()));
                                     }
                                     let edit = egui::Button::new(RichText::new("Edit").color(TEXT_PRIMARY).size(13.0))
                                         .fill(BTN_SECONDARY)
-                                        .stroke(Stroke::new(1.0, CARD_BORDER))
+                                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                         .corner_radius(CornerRadius::same(5));
                                     if ui.add(edit).clicked() {
                                         to_edit = Some(d.clone());
@@ -8323,7 +8323,7 @@ impl StreamerApp {
                                 }
                                 let open_btn = egui::Button::new(RichText::new("Open").color(TEXT_PRIMARY).size(13.0))
                                     .fill(BTN_SECONDARY)
-                                    .stroke(Stroke::new(1.0, CARD_BORDER))
+                                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                     .corner_radius(CornerRadius::same(5));
                                 if ui.add(open_btn).clicked() {
                                     let _ = open::that(&d.channel_url);
@@ -8361,7 +8361,7 @@ impl StreamerApp {
             ui.add_space(36.0);
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(10))
                 .inner_margin(Margin::same(24))
                 .show(ui, |ui| {
@@ -8420,7 +8420,7 @@ impl StreamerApp {
         ui.horizontal(|ui| {
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(6))
                 .inner_margin(Margin::same(3))
                 .show(ui, |ui| {
@@ -8522,7 +8522,7 @@ impl StreamerApp {
             RecommendationsState::Error(err) => {
                 Frame::NONE
                     .fill(ERR_ROSE.linear_multiply(0.12))
-                    .stroke(Stroke::new(1.0, ERR_ROSE.linear_multiply(0.6)))
+                    .stroke(Stroke::new(1.0_f32, ERR_ROSE.linear_multiply(0.6)))
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(Margin::same(14))
                     .show(ui, |ui| {
@@ -8576,7 +8576,7 @@ impl StreamerApp {
                         };
                         Frame::NONE
                             .fill(CARD_BG)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(Margin::symmetric(16, 14))
                             .show(ui, |ui| {
@@ -8609,7 +8609,7 @@ impl StreamerApp {
                                         }
                                         let save_btn = egui::Button::new(RichText::new("+ Directory").color(TEXT_PRIMARY).size(13.0))
                                             .fill(BTN_SECONDARY)
-                                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                             .corner_radius(CornerRadius::same(6))
                                             .min_size(Vec2::new(98.0, 32.0));
                                         if ui.add(save_btn).clicked() {
@@ -8642,7 +8642,7 @@ impl StreamerApp {
             // Card 1: Valorant Servers & Detection (GitHub owner/repo intentionally hidden from end users)
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
@@ -8706,7 +8706,7 @@ impl StreamerApp {
             // Card 2: Features & Windows Integration (left-to-right ON/OFF toggle sliders)
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
@@ -8766,7 +8766,7 @@ impl StreamerApp {
             // Card 3: Optional Platform API Keys
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
@@ -8788,7 +8788,7 @@ impl StreamerApp {
                             let yt_busy = matches!(yt_check, CheckState::Checking);
                             let test_yt = egui::Button::new(RichText::new(if yt_busy { "Testing..." } else { "Test Key" }).font(font_medium(12.5)).color(TEXT_PRIMARY))
                                 .fill(BTN_SECONDARY)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(78.0, 28.0));
                             if ui.add_enabled(!yt_busy, test_yt).clicked() {
@@ -8797,7 +8797,7 @@ impl StreamerApp {
                             }
                             let get_yt = egui::Button::new(RichText::new("Get YouTube Key").font(font_medium(12.5)).color(ACCENT_BLUSH))
                                 .fill(BTN_SECONDARY)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(124.0, 28.0));
                             if ui
@@ -8835,7 +8835,7 @@ impl StreamerApp {
                             let tw_busy = matches!(twitch_check, CheckState::Checking);
                             let test_tw = egui::Button::new(RichText::new(if tw_busy { "Testing..." } else { "Test Twitch" }).font(font_medium(12.5)).color(TEXT_PRIMARY))
                                 .fill(BTN_SECONDARY)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(88.0, 28.0));
                             if ui.add_enabled(!tw_busy, test_tw).clicked() {
@@ -8847,7 +8847,7 @@ impl StreamerApp {
                             }
                             let get_tw = egui::Button::new(RichText::new("Get Twitch Keys").font(font_medium(12.5)).color(ACCENT_BLUSH))
                                 .fill(BTN_SECONDARY)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(124.0, 28.0));
                             if ui.add(get_tw).on_hover_text("Opens Twitch Developer Console -> Applications").clicked() {
@@ -8900,7 +8900,7 @@ impl StreamerApp {
                     .show(ui, |ui| {
                         Frame::NONE
                             .fill(BG_DARK)
-                            .stroke(Stroke::new(1.0, CARD_BORDER))
+                            .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                             .corner_radius(CornerRadius::same(6))
                             .inner_margin(Margin::same(14))
                             .show(ui, |ui| {
@@ -8943,7 +8943,7 @@ impl StreamerApp {
             // Card 4: App Updates & Version
             Frame::NONE
                 .fill(CARD_BG)
-                .stroke(Stroke::new(1.0, CARD_BORDER))
+                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::same(18))
                 .show(ui, |ui| {
@@ -8966,7 +8966,7 @@ impl StreamerApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let open_rel = egui::Button::new(RichText::new("Open Releases").color(TEXT_PRIMARY).size(13.5))
                                 .fill(BTN_SECONDARY)
-                                .stroke(Stroke::new(1.0, CARD_BORDER))
+                                .stroke(Stroke::new(1.0_f32, CARD_BORDER))
                                 .corner_radius(CornerRadius::same(6))
                                 .min_size(Vec2::new(118.0, 34.0));
                             if ui.add(open_rel).clicked() {
@@ -9472,6 +9472,7 @@ fn main() -> Result<()> {
     // Keep alive for the whole run; dropped (icon removed) when event_loop.run_app returns.
     let _tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu))
+        .with_menu_on_left_click(false)
         .with_tooltip("Valorant Streamer Radar")
         .with_icon(create_tray_icon())
         .build()?;

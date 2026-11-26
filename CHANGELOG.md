@@ -13,6 +13,9 @@ GitHub Releases automatically pull the matching version notes from this file.
 - **Faster Batched Twitch Detection & Leading IGN Tag Stripping:** Updated IGN cleaning to strip leading platform prefixes (`TTV `, `YT_`, `twitch.tv/`, `Kick-`) in addition to trailing suffixes, and batched Twitch candidate checks (`base`, raw login, `tv`, `_tv`, `ttv`) into a single Helix or aliased GraphQL HTTP request per player.
 - **Cross-Platform Directory Fallback, Resilient Chat Parsing & Offline Version Fallback:** Players registered in the streamer directory who are offline on their listed platform now still get checked on other platforms; `/chat/v6/messages` parsing now tolerates `null` fields, excludes `ares-parties`/`ares-lobby` chat from leaking into match scans, and preserves `ares-pregame` stream plugs; `client_version` now falls back to `CI server version` in `ShooterGame.log` if `valorant-api.com` is temporarily unreachable.
 
+### Changed
+- **Dependency Updates & Clean Compiler Build:** Updated Rust crates (`reqwest 0.13` with native Windows TLS, `tray-icon 0.27`, `sha2 0.11`, `base64 0.23`, `tauri-winrt-notification 0.8`, `winreg 0.56`), synced GitHub Actions workflows to `actions/checkout@v6`, and explicitly typed all `Stroke::new` width literals as `f32` to eliminate Rust's future-compatibility warnings (`issue #154024`).
+
 ## [1.2.9] - 2026-11-25
 
 ### Fixed

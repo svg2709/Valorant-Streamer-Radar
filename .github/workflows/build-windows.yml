@@ -22,7 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install Rust toolchain (MSRV 1.80+)
+      - name: Install Rust toolchain (MSRV 1.85+)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo registry and build artifacts

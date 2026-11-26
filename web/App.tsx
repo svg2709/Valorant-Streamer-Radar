@@ -12,6 +12,7 @@ import {
   DEFAULT_CONFIG,
   DesktopTab,
   DirectoryStreamer,
+  LastMatchPlayerAudit,
   LastMatchSummary,
   LogLineEntry,
   Platform,
@@ -120,9 +121,90 @@ export default function App() {
       my_agent: 'Omen',
       players_checked: 7,
       party_skipped: 2,
+      hidden_skipped: 0,
       streamers_found: INITIAL_HISTORY.filter((h) => h.match_id === INITIAL_HISTORY[0]?.match_id).length,
       scanned_at: INITIAL_HISTORY[0]?.timestamp ?? formatRadarTimestamp(new Date()),
       server_name: getServerRegionInfo('na-us-east').label,
+      player_audits: [
+        {
+          riot_id: INITIAL_HISTORY[0]?.riot_id ?? 'TylerFPS#NA1',
+          team_relation: INITIAL_HISTORY[0]?.team_relation ?? 'Enemy',
+          agent_name: INITIAL_HISTORY[0]?.agent_name ?? 'Jett',
+          outcome: 'Detected',
+          confidence_tier: INITIAL_HISTORY[0]?.confidence_tier ?? 'Confirmed',
+          confidence: INITIAL_HISTORY[0]?.confidence ?? 98,
+          summary: `${INITIAL_HISTORY[0]?.channel ?? 'TylerFPS'} on ${INITIAL_HISTORY[0]?.platform ?? 'Twitch'} (${INITIAL_HISTORY[0]?.source ?? 'Directory'}) — ${INITIAL_HISTORY[0]?.match_reason ?? 'Verified streamer directory match'}`,
+          steps: [
+            {
+              stage: 'Directory',
+              outcome: 'Live (Confirmed)',
+              detail: `Matched '${INITIAL_HISTORY[0]?.channel ?? 'TylerFPS'}' in streamer database -> In-Game Server Confirmed.`,
+            },
+            {
+              stage: 'ML Heuristic',
+              outcome: 'Skipped',
+              detail: 'Skipped heuristic lookup because verified Directory channel is already live.',
+            },
+            {
+              stage: 'Match Chat',
+              outcome: 'No Plug',
+              detail: 'No stream URLs or self-promo mentions found in match chat.',
+            },
+          ],
+        },
+        {
+          riot_id: 'KairoVal#NA1',
+          team_relation: 'Ally',
+          agent_name: 'Sova',
+          outcome: 'No Match',
+          confidence_tier: '',
+          confidence: 0,
+          summary: 'Checked Directory, YouTube, Twitch, Kick & Match Chat — no live match',
+          steps: [
+            {
+              stage: 'Directory',
+              outcome: 'No Entry',
+              detail: 'Riot ID not listed in community or custom streamer database.',
+            },
+            {
+              stage: 'YouTube',
+              outcome: 'No Match',
+              detail: "Searched live streams for 'KairoVal Valorant' (region US) -> 0 candidates passed ML, server & broadcast filters.",
+            },
+            {
+              stage: 'Twitch',
+              outcome: 'No Match',
+              detail: 'Batched [kairoval, kairovaltv, kairoval_tv, kairovalttv] -> offline or not streaming VALORANT.',
+            },
+            {
+              stage: 'Kick',
+              outcome: 'No Match',
+              detail: "Checked Kick slug(s) for 'KairoVal' -> offline or no matching live VALORANT stream.",
+            },
+            {
+              stage: 'Match Chat',
+              outcome: 'No Plug',
+              detail: 'No stream URLs or self-promo mentions found in match chat.',
+            },
+          ],
+        },
+        {
+          riot_id: 'DuoMate#NA1',
+          team_relation: 'Ally',
+          agent_name: 'Sage',
+          outcome: 'Party Skipped',
+          confidence_tier: '',
+          confidence: 0,
+          summary: 'Skipped automatically (same party as you)',
+          steps: [
+            {
+              stage: 'Party Guard',
+              outcome: 'Skipped',
+              detail: 'Matched your match-details partyId — saved YouTube, Twitch & Kick lookups (toggleable in Settings).',
+            },
+          ],
+        },
+      ],
     })
   );
 
@@ -281,6 +363,30 @@ export default function App() {
         const isoNow = now.toISOString();
         const uniqueMatchId = `${scenario.match_id}-${Date.now().toString().slice(-4)}`;
         const foundEntries: StreamerEntry[] = [];
+        const playerAudits: LastMatchPlayerAudit[] = [];
+
+        // Record party-skipped players when party guard is enabled
+        if (config.skip_party_members) {
+          for (const p of scenario.players) {
+            if (!p.isPartyMember) continue;
+            playerAudits.push({
+              riot_id: p.riot_id,
+              team_relation: p.team_relation,
+              agent_name: p.agent_name,
+              outcome: 'Party Skipped',
+              confidence_tier: '',
+              confidence: 0,
+              summary: 'Skipped automatically (same party as you)',
+              steps: [
+                {
+                  stage: 'Party Guard',
+                  outcome: 'Skipped',
+                  detail: 'Matched your match-details partyId — saved YouTube, Twitch & Kick lookups (toggleable in Settings).',
+                },
+              ],
+            });
+          }
+        }
 
         const chatByPlayer = new Map<string, string>();
         if (config.capture_in_game_chat && scenario.chatLog) {
@@ -296,6 +402,78 @@ export default function App() {
 
           const chatBody = chatByPlayer.get(p.riot_id.toLowerCase());
           const chatPlug = chatBody ? extractChatStreamPlug(chatBody, p.riot_id) : null;
+          const steps: LastMatchPlayerAudit['steps'] = [];
+          const cleanName = p.riot_id.split('#')[0] || p.riot_id;
+
+          if (p.detectionSource === 'directory' && p.liveStream) {
+            steps.push({
+              stage: 'Directory',
+              outcome: `Live (${p.liveStream.confidenceTier})`,
+              detail: `Matched '${p.liveStream.channel}' on ${p.liveStream.platform} -> ${p.liveStream.serverMatchStatus} (${p.liveStream.confidence}%).`,
+            });
+            steps.push({
+              stage: 'ML Heuristic',
+              outcome: 'Skipped',
+              detail: 'Skipped heuristic lookup because a registered Directory channel is already live.',
+            });
+          } else {
+            steps.push({
+              stage: 'Directory',
+              outcome: 'No Entry',
+              detail: 'Riot ID not listed in community or custom streamer database.',
+            });
+            if (p.liveStream) {
+              steps.push({
+                stage: p.liveStream.platform,
+                outcome: `${p.liveStream.confidenceTier} (${p.liveStream.confidence}%)`,
+                detail: `${p.liveStream.channel} — ${p.liveStream.match_reason} (${p.liveStream.serverMatchStatus}).`,
+              });
+            } else if (p.rejectedCrossRegion) {
+              steps.push({
+                stage: 'Server Guard',
+                outcome: 'Rejected',
+                detail: p.rejectedCrossRegion,
+              });
+            } else {
+              steps.push({
+                stage: 'YouTube',
+                outcome: 'No Match',
+                detail: `Searched live streams for '${cleanName} Valorant' -> 0 candidates passed ML, server & broadcast filters.`,
+              });
+              steps.push({
+                stage: 'Twitch',
+                outcome: 'No Match',
+                detail: `Batched login candidates for '${cleanName}' -> offline or not streaming VALORANT.`,
+              });
+              steps.push({
+                stage: 'Kick',
+                outcome: 'No Match',
+                detail: `Checked Kick slug(s) for '${cleanName}' -> offline or no matching live VALORANT stream.`,
+              });
+            }
+          }
+
+          if (!config.capture_in_game_chat) {
+            steps.push({
+              stage: 'Match Chat',
+              outcome: 'Disabled',
+              detail: 'In-game chat capture is disabled in Settings.',
+            });
+          } else if (chatPlug) {
+            steps.push({
+              stage: 'Match Chat',
+              outcome: 'Matched',
+              detail: `Detected ${chatPlug.platform} self-plug in post-match chat: "${chatPlug.rawMessage}"`,
+            });
+          } else {
+            steps.push({
+              stage: 'Match Chat',
+              outcome: 'No Plug',
+              detail: 'No stream URLs or self-promo mentions found in match chat.',
+            });
+          }
+
+          let playerTopEntry: StreamerEntry | null = null;
 
           if (p.liveStream) {
             const entry: StreamerEntry = {
@@ -324,6 +502,7 @@ export default function App() {
               candidates: p.liveStream.candidates,
             };
             foundEntries.push(entry);
+            playerTopEntry = entry;
             pushLog(
               p.liveStream.confidenceTier === 'Unverified' ? 'scan' : 'hit',
               `${p.liveStream.confidenceTier.toUpperCase()} [${p.liveStream.platform} · ${p.liveStream.confidence}%] ${p.riot_id} (${p.liveStream.serverMatchStatus}) -> ${p.liveStream.url}`
@@ -359,12 +538,50 @@ export default function App() {
               server_region: regionForScan.shortLabel,
             };
             foundEntries.push(chatEntry);
+            if (!playerTopEntry || (chatEntry.confidence ?? 0) > (playerTopEntry.confidence ?? 0)) {
+              playerTopEntry = chatEntry;
+            }
             pushLog(
               'chat',
               `CHAT PLUG [${chatPlug.platform}] ${p.riot_id} said "${chatPlug.rawMessage}" -> extracted ${chatPlug.url}`
             );
           }
+
+          if (playerTopEntry) {
+            playerAudits.push({
+              riot_id: p.riot_id,
+              team_relation: p.team_relation,
+              agent_name: p.agent_name,
+              outcome: 'Detected',
+              confidence_tier: playerTopEntry.confidence_tier ?? 'Unverified',
+              confidence: playerTopEntry.confidence ?? 0,
+              summary: `${playerTopEntry.channel} on ${playerTopEntry.platform} (${playerTopEntry.source ?? 'Heuristic'}) — ${playerTopEntry.match_reason ?? ''}`,
+              steps,
+            });
+          } else {
+            playerAudits.push({
+              riot_id: p.riot_id,
+              team_relation: p.team_relation,
+              agent_name: p.agent_name,
+              outcome: 'No Match',
+              confidence_tier: '',
+              confidence: 0,
+              summary: p.rejectedCrossRegion
+                ? `Cross-region false positive rejected (${regionForScan.shortLabel} server guard)`
+                : 'Checked Directory, YouTube, Twitch, Kick & Match Chat — no live match',
+              steps,
+            });
+          }
         }
+
+        const outcomeRank = (o: LastMatchPlayerAudit['outcome']) =>
+          o === 'Detected' ? 0 : o === 'No Match' ? 1 : o === 'Party Skipped' ? 2 : 3;
+        playerAudits.sort(
+          (a, b) =>
+            outcomeRank(a.outcome) - outcomeRank(b.outcome) ||
+            (b.confidence ?? 0) - (a.confidence ?? 0) ||
+            a.riot_id.toLowerCase().localeCompare(b.riot_id.toLowerCase())
+        );
 
         const playersChecked = scannablePlayers.length;
         setLastScannedMatch({
@@ -374,9 +591,11 @@ export default function App() {
           my_agent: 'Jett',
           players_checked: playersChecked,
           party_skipped: partySkipped,
+          hidden_skipped: 0,
           streamers_found: foundEntries.length,
           scanned_at: timestamp,
           server_name: regionForScan.label,
+          player_audits: playerAudits,
         });
 
         if (foundEntries.length > 0) {

@@ -269,6 +269,19 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
   const [showChangelog, setShowChangelog] = useState(true);
   const startupCheckedRef = useRef(false);
 
+  // Latest Match Scan Review window (strictly latest match only)
+  const [lastMatchModalOpen, setLastMatchModalOpen] = useState(false);
+  const [auditFilter, setAuditFilter] = useState<'all' | 'detected' | 'no_match' | 'skipped'>('all');
+
+  useEffect(() => {
+    if (!lastMatchModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLastMatchModalOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [lastMatchModalOpen]);
+
   // Close filters popover on outside click or Escape
   useEffect(() => {
     if (!filtersOpen) return;
@@ -1324,10 +1337,18 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {/* SUBSECTION 1: LATEST MATCH (quiet unboxed summary bar) */}
+                  {/* SUBSECTION 1: LATEST MATCH (clickable to open Latest Match Scan Review window) */}
                   {lastScannedMatch && (
                     <section aria-label="Latest Match">
-                      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuditFilter('all');
+                          setLastMatchModalOpen(true);
+                        }}
+                        title="Click to review how every player in your latest match was checked for live streams"
+                        className="mb-2.5 flex w-full cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1F1F26] bg-[#09090D] px-3 py-2 text-left transition-colors hover:border-[#FF5CA8]/60 hover:bg-[#101016]"
+                      >
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
                           <span className="inline-block h-2 w-2 rounded-full bg-[#FF5CA8]" />
                           <h3 className="text-xs font-bold tracking-wider text-[#FFA6D2] uppercase">
@@ -1352,6 +1373,9 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             {lastScannedMatch.party_skipped > 0
                               ? `, ${lastScannedMatch.party_skipped} party skipped`
                               : ''}
+                            {(lastScannedMatch.hidden_skipped ?? 0) > 0
+                              ? `, ${lastScannedMatch.hidden_skipped} hidden`
+                              : ''}
                           </span>
                           <span className="text-[#1F1F26]">·</span>
                           <span
@@ -1364,10 +1388,15 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
                             {lastScannedMatch.streamers_found} detected
                           </span>
                         </div>
-                        <span className="font-mono text-xs text-[#5A6275] tabular-nums">
-                          {lastScannedMatch.scanned_at}
+                        <span className="flex items-center gap-2 font-mono text-xs">
+                          <span className="text-[#5A6275] tabular-nums">
+                            {lastScannedMatch.scanned_at}
+                          </span>
+                          <span className="font-sans font-semibold text-[#FFA6D2]">
+                            Review scan ›
+                          </span>
                         </span>
-                      </div>
+                      </button>
 
                       {latestMatchEntries.length > 0 ? (
                         <div className="space-y-2">
@@ -2217,6 +2246,218 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({
           )}
         </div>
       </div>
+
+      {/* Latest Match Scan Review Modal (strictly for the latest scanned match only) */}
+      {lastMatchModalOpen && lastScannedMatch && (() => {
+        const audits = lastScannedMatch.player_audits ?? [];
+        const detectedCount = audits.filter((a) => a.outcome === 'Detected').length;
+        const noMatchCount = audits.filter((a) => a.outcome === 'No Match').length;
+        const skippedCount = audits.filter(
+          (a) => a.outcome === 'Party Skipped' || a.outcome === 'Hidden Name'
+        ).length;
+        const visibleAudits = audits.filter((a) => {
+          if (auditFilter === 'detected') return a.outcome === 'Detected';
+          if (auditFilter === 'no_match') return a.outcome === 'No Match';
+          if (auditFilter === 'skipped') {
+            return a.outcome === 'Party Skipped' || a.outcome === 'Hidden Name';
+          }
+          return true;
+        });
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-[2px]"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setLastMatchModalOpen(false);
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Latest Match Scan Review"
+              className="flex max-h-[85vh] w-full max-w-[680px] flex-col rounded-[10px] border-[1.5px] border-[#FF5CA8] bg-[#0B0B0E] p-5 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-bold text-[#FFF5FA]">
+                      Latest Match Scan Review
+                    </span>
+                    <span className="text-[#1F1F26]">/</span>
+                    <span className="font-semibold text-[#F4F4F6]">
+                      {lastScannedMatch.queue_name}
+                    </span>
+                    <span className="text-[#8E95A5]">{lastScannedMatch.map_name}</span>
+                    {lastScannedMatch.server_name && (
+                      <>
+                        <span className="text-[#1F1F26]">·</span>
+                        <span className="text-[#2DD4BF]">
+                          {lastScannedMatch.server_name}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1 font-mono text-[11.5px] text-[#8E95A5]">
+                    Scanned {lastScannedMatch.scanned_at} · {lastScannedMatch.players_checked} checked,{' '}
+                    {lastScannedMatch.party_skipped} party skipped,{' '}
+                    {lastScannedMatch.hidden_skipped ?? 0} hidden ·{' '}
+                    {lastScannedMatch.streamers_found} detected
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLastMatchModalOpen(false)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-[#1F1F26] bg-[#121216] px-2.5 text-xs font-medium text-[#F4F4F6] hover:border-[#FF5CA8]/50"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-3.5 inline-flex w-fit flex-wrap items-center gap-1 rounded-md border border-[#1F1F26] bg-[#07070A] p-1">
+                {(
+                  [
+                    ['all', `All (${audits.length})`],
+                    ['detected', `Detected (${detectedCount})`],
+                    ['no_match', `No Match (${noMatchCount})`],
+                    ['skipped', `Skipped (${skippedCount})`],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setAuditFilter(key)}
+                    className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                      auditFilter === key
+                        ? 'border border-[#2C2C36] bg-[#1A1A20] font-semibold text-[#FFF5FA]'
+                        : 'border border-transparent text-[#8E95A5] hover:text-[#F4F4F6]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+                {audits.length === 0 ? (
+                  <div className="rounded-lg border border-[#1F1F26] bg-[#07070A] p-4">
+                    <p className="text-[13px] font-semibold text-[#F4F4F6]">
+                      No per-player scan trace recorded for this match yet.
+                    </p>
+                    <p className="mt-1 text-xs text-[#8E95A5]">
+                      Click Check Last Match in the sidebar (or finish your next match) to review every Directory, YouTube, Twitch, Kick, and Chat check performed for each player.
+                    </p>
+                  </div>
+                ) : visibleAudits.length === 0 ? (
+                  <p className="py-6 text-center text-xs text-[#8E95A5]">
+                    No players match this filter.
+                  </p>
+                ) : (
+                  visibleAudits.map((audit) => {
+                    const badgeColor =
+                      audit.outcome === 'Detected'
+                        ? audit.confidence_tier === 'Confirmed'
+                          ? '#22C55E'
+                          : audit.confidence_tier === 'Probable'
+                            ? '#FB923C'
+                            : '#8E95A5'
+                        : audit.outcome === 'Party Skipped'
+                          ? '#2DD4BF'
+                          : audit.outcome === 'Hidden Name'
+                            ? '#FF668A'
+                            : '#8E95A5';
+                    const badgeLabel =
+                      audit.outcome === 'Detected'
+                        ? audit.confidence
+                          ? `${audit.confidence_tier || 'Detected'} · ${audit.confidence}%`
+                          : audit.confidence_tier || 'Detected'
+                        : audit.outcome;
+
+                    return (
+                      <div
+                        key={`${audit.riot_id}-${audit.agent_name}-${audit.outcome}`}
+                        className="rounded-lg border border-[#1F1F26] bg-[#07070A] px-3.5 py-2.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {audit.team_relation && (
+                              <span
+                                className={`font-mono text-[10.5px] font-semibold uppercase ${
+                                  audit.team_relation === 'Ally'
+                                    ? 'text-[#2DD4BF]'
+                                    : 'text-[#FB923C]'
+                                }`}
+                              >
+                                {audit.team_relation}
+                              </span>
+                            )}
+                            <span className="text-[13.5px] font-bold text-[#FFF5FA]">
+                              {audit.riot_id}
+                            </span>
+                            {audit.agent_name && (
+                              <span className="text-xs text-[#8E95A5]">{audit.agent_name}</span>
+                            )}
+                          </div>
+                          <span
+                            className="font-mono text-[11.5px] font-semibold"
+                            style={{ color: badgeColor }}
+                          >
+                            {badgeLabel}
+                          </span>
+                        </div>
+
+                        {audit.summary && (
+                          <p className="mt-1 text-xs text-[#F4F4F6]">{audit.summary}</p>
+                        )}
+
+                        {audit.steps.length > 0 && (
+                          <div className="mt-2 space-y-1 border-t border-[#16161C] pt-2">
+                            {audit.steps.map((step, idx) => {
+                              const stepColor =
+                                step.outcome.startsWith('Live') ||
+                                step.outcome.startsWith('Confirmed') ||
+                                step.outcome === 'Matched'
+                                  ? '#22C55E'
+                                  : step.outcome.startsWith('Probable')
+                                    ? '#FB923C'
+                                    : step.outcome === 'Rejected'
+                                      ? '#FF668A'
+                                      : step.outcome === 'Skipped' || step.outcome === 'Disabled'
+                                        ? '#2DD4BF'
+                                        : '#8E95A5';
+                              return (
+                                <div
+                                  key={`${step.stage}-${idx}`}
+                                  className="flex flex-wrap items-baseline gap-x-1.5 text-[11.5px] leading-snug"
+                                >
+                                  <span className="font-mono font-semibold text-[#FFA6D2]">
+                                    [{step.stage}]
+                                  </span>
+                                  <span
+                                    className="font-mono font-semibold"
+                                    style={{ color: stepColor }}
+                                  >
+                                    {step.outcome}
+                                  </span>
+                                  <span className="text-[#8E95A5]">{step.detail}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <p className="mt-3 text-[11px] text-[#5A6275]">
+                Scan review is kept strictly for your latest match only (not stored in previous history).
+              </p>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -3,6 +3,11 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.12] - 2026-11-26
+
+### Added
+- **Latest Match Scan Review Window (Latest Match Only):** Clicking the **LATEST MATCH** header bar in History now opens an AMOLED Black **Latest Match Scan Review** window showing a per-player breakdown of how the app checked every lobby member (Directory lookup, IGN filter, YouTube/Twitch/Kick ML heuristic checks, Match Chat plugs, Party Guard skips, and Hidden/Streamer Mode names) with `All / Detected / No Match / Skipped` filter tabs. Scan traces are stored strictly on `last_match.json` for your latest match only (never bloating previous history).
+
 ## [1.2.11] - 2026-11-26
 
 ### Added

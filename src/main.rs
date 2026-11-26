@@ -612,6 +612,28 @@ enum BgTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PlayerCheckStep {
+    stage: String,
+    outcome: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LastMatchPlayerAudit {
+    riot_id: String,
+    team_relation: String,
+    agent_name: String,
+    outcome: String,
+    #[serde(default)]
+    confidence_tier: String,
+    #[serde(default)]
+    confidence: u8,
+    summary: String,
+    #[serde(default)]
+    steps: Vec<PlayerCheckStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct LastMatchSummary {
     match_id: String,
     queue_name: String,
@@ -627,6 +649,8 @@ struct LastMatchSummary {
     scanned_at: String,
     #[serde(default, alias = "shard")]
     server_name: String,
+    #[serde(default)]
+    player_audits: Vec<LastMatchPlayerAudit>,
 }
 
 struct AppState {
@@ -2461,6 +2485,87 @@ fn filter_scannable_players(
         scannable.push(player_info);
     }
     (scannable, party_skipped, hidden_skipped)
+}
+
+/// Captures audit rows for players excluded before external platform lookups (party members & hidden names)
+/// so the Latest Match Scan Review window accounts for every player in the lobby.
+fn build_skipped_player_audits(
+    players: &[MatchPlayerInfo],
+    my_puuid: &str,
+    skip_party_members: bool,
+) -> Vec<LastMatchPlayerAudit> {
+    let mut seen = HashSet::new();
+    let mut audits = Vec::new();
+    let my_low = my_puuid.trim().to_ascii_lowercase();
+    for player_info in players {
+        let sub_low = player_info.record.subject.trim().to_ascii_lowercase();
+        if sub_low == my_low || !seen.insert(sub_low) {
+            continue;
+        }
+        if skip_party_members && player_info.is_party_member {
+            let label = if is_visible_game_name(&player_info.record.game_name) {
+                format!("{}#{}", player_info.record.game_name, player_info.record.tag_line)
+            } else if !player_info.agent_name.is_empty() {
+                format!("Party Member ({})", player_info.agent_name)
+            } else {
+                "Party Member".to_string()
+            };
+            audits.push(LastMatchPlayerAudit {
+                riot_id: label,
+                team_relation: player_info.team_relation.clone(),
+                agent_name: player_info.agent_name.clone(),
+                outcome: "Party Skipped".to_string(),
+                confidence_tier: String::new(),
+                confidence: 0,
+                summary: "Skipped automatically (same party as you)".to_string(),
+                steps: vec![PlayerCheckStep {
+                    stage: "Party Guard".to_string(),
+                    outcome: "Skipped".to_string(),
+                    detail: "Matched your match-details partyId — saved YouTube, Twitch & Kick lookups (toggleable in Settings)."
+                        .to_string(),
+                }],
+            });
+            continue;
+        }
+        if !is_visible_game_name(&player_info.record.game_name) {
+            let label = if !player_info.agent_name.is_empty() {
+                format!("Hidden ({})", player_info.agent_name)
+            } else {
+                "Hidden Player".to_string()
+            };
+            audits.push(LastMatchPlayerAudit {
+                riot_id: label,
+                team_relation: player_info.team_relation.clone(),
+                agent_name: player_info.agent_name.clone(),
+                outcome: "Hidden Name".to_string(),
+                confidence_tier: String::new(),
+                confidence: 0,
+                summary: "Riot returned blank or invisible name (Streamer Mode / privacy)".to_string(),
+                steps: vec![PlayerCheckStep {
+                    stage: "Name Resolver".to_string(),
+                    outcome: "Skipped".to_string(),
+                    detail: "No visible Riot ID in match-details, name-service, or post-match chat."
+                        .to_string(),
+                }],
+            });
+        }
+    }
+    audits
+}
+
+fn sort_last_match_audits(audits: &mut [LastMatchPlayerAudit]) {
+    let rank = |outcome: &str| match outcome {
+        "Detected" => 0u8,
+        "No Match" => 1u8,
+        "Party Skipped" => 2u8,
+        _ => 3u8,
+    };
+    audits.sort_by(|a, b| {
+        rank(&a.outcome)
+            .cmp(&rank(&b.outcome))
+            .then_with(|| b.confidence.cmp(&a.confidence))
+            .then_with(|| a.riot_id.to_ascii_lowercase().cmp(&b.riot_id.to_ascii_lowercase()))
+    });
 }
 
 struct RiotAuth {
@@ -5410,7 +5515,7 @@ async fn scan_player(
     region: &'static ServerRegionInfo,
     player_info: MatchPlayerInfo,
     chat_plug: Option<ChatStreamPlug>,
-) -> Vec<StreamerEntry> {
+) -> (Vec<StreamerEntry>, LastMatchPlayerAudit) {
     let player = player_info.record;
     let riot_id = format!("{}#{}", player.game_name, player.tag_line);
     let now = Local::now();
@@ -5453,7 +5558,9 @@ async fn scan_player(
     };
 
     let mut out = Vec::new();
+    let mut audit_steps: Vec<PlayerCheckStep> = Vec::new();
     let mut ran_heuristics = false;
+    let mut skipped_generic_ign = false;
 
     // Phase 1: exact Riot ID or known alias mapping from centralized/local streamer database
     let linked: Vec<(&DirectoryStreamer, &'static str)> = directory
@@ -5461,7 +5568,13 @@ async fn scan_player(
         .filter_map(|d| directory_entry_matches_player(d, &riot_id).map(|kind| (d, kind)))
         .collect();
     let mut checked_dir_platforms: HashSet<&'static str> = HashSet::new();
-    if !linked.is_empty() {
+    if linked.is_empty() {
+        audit_steps.push(PlayerCheckStep {
+            stage: "Directory".to_string(),
+            outcome: "No Entry".to_string(),
+            detail: "Riot ID not listed in community or custom streamer database.".to_string(),
+        });
+    } else {
         for (d, match_kind) in linked {
             if let Some(cp) = canonical_platform(&d.platform) {
                 checked_dir_platforms.insert(cp);
@@ -5480,6 +5593,14 @@ async fn scan_player(
             };
             if let Some((title, url)) = hit {
                 let (tier, conf, srv_status, reason) = evaluate_directory_server_match(d, region, match_kind);
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Directory".to_string(),
+                    outcome: format!("Live ({})", tier.as_str()),
+                    detail: format!(
+                        "Matched '{}' on {} ({}) -> {} ({}%)",
+                        d.channel_name, d.platform, match_kind, srv_status, conf
+                    ),
+                });
                 out.push(make(
                     &d.platform,
                     d.channel_name.clone(),
@@ -5493,6 +5614,15 @@ async fn scan_player(
                     reason,
                     Vec::new(),
                 ));
+            } else {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Directory".to_string(),
+                    outcome: "Offline".to_string(),
+                    detail: format!(
+                        "Found '{}' on {} in database, but channel is currently offline.",
+                        d.channel_name, d.platform
+                    ),
+                });
             }
         }
     }
@@ -5509,81 +5639,200 @@ async fn scan_player(
     // without re-heuristically guessing on the already-verified offline platform.
     if out.is_empty() {
         ran_heuristics = true;
-        let check_yt = !checked_dir_platforms.contains("YouTube");
-        let check_tw = !checked_dir_platforms.contains("Twitch");
-        let check_kick = !checked_dir_platforms.contains("Kick");
-        let (yt_cands, tw_cands, kick_cands) = tokio::join!(
-            async {
-                if check_yt {
-                    check_youtube_live_candidates(
-                        &client,
-                        &player.game_name,
-                        &config.youtube_api_key,
-                        region,
-                        &match_ctx,
-                    )
-                    .await
-                } else {
-                    Vec::new()
-                }
-            },
-            async {
-                if check_tw {
-                    check_twitch_live_candidates(
-                        &client,
-                        &player.game_name,
-                        &config.twitch_client_id,
-                        twitch_token.as_deref(),
-                        region,
-                        &match_ctx,
-                    )
-                    .await
-                } else {
-                    Vec::new()
-                }
-            },
-            async {
-                if check_kick {
-                    check_kick_live_candidates(&client, &player.game_name, region, &match_ctx).await
-                } else {
-                    Vec::new()
-                }
-            },
-        );
-        let mut all_cands: Vec<LikelyStreamerCandidate> = Vec::new();
-        all_cands.extend(yt_cands);
-        all_cands.extend(tw_cands);
-        all_cands.extend(kick_cands);
-        all_cands.sort_by(|a, b| b.confidence.cmp(&a.confidence));
-        let mut dedup_urls = HashSet::new();
-        all_cands.retain(|c| dedup_urls.insert(c.url.to_ascii_lowercase()));
-        all_cands.truncate(3);
+        let cleaned = clean_ign(&player.game_name);
+        let name_norm = normalize(&cleaned);
+        let name_leet = unfold_leetspeak(&strip_channel_affixes(&cleaned));
+        let ign_too_generic =
+            name_norm.chars().count() < 4 || is_generic_ign(&name_norm) || is_generic_ign(&name_leet);
 
-        if let Some(best) = all_cands.first().cloned() {
-            let tier_str = if best.confidence_tier.is_empty() {
-                "Unverified"
+        if ign_too_generic {
+            skipped_generic_ign = true;
+            audit_steps.push(PlayerCheckStep {
+                stage: "IGN Filter".to_string(),
+                outcome: "Skipped".to_string(),
+                detail: format!(
+                    "Skipped YouTube/Twitch/Kick heuristic search for '{}' (too short or common/generic word to prevent false positives).",
+                    cleaned
+                ),
+            });
+        } else {
+            let check_yt = !checked_dir_platforms.contains("YouTube");
+            let check_tw = !checked_dir_platforms.contains("Twitch");
+            let check_kick = !checked_dir_platforms.contains("Kick");
+            let tw_logins = build_twitch_candidate_logins(&player.game_name);
+            let (yt_cands, tw_cands, kick_cands) = tokio::join!(
+                async {
+                    if check_yt {
+                        check_youtube_live_candidates(
+                            &client,
+                            &player.game_name,
+                            &config.youtube_api_key,
+                            region,
+                            &match_ctx,
+                        )
+                        .await
+                    } else {
+                        Vec::new()
+                    }
+                },
+                async {
+                    if check_tw {
+                        check_twitch_live_candidates(
+                            &client,
+                            &player.game_name,
+                            &config.twitch_client_id,
+                            twitch_token.as_deref(),
+                            region,
+                            &match_ctx,
+                        )
+                        .await
+                    } else {
+                        Vec::new()
+                    }
+                },
+                async {
+                    if check_kick {
+                        check_kick_live_candidates(&client, &player.game_name, region, &match_ctx).await
+                    } else {
+                        Vec::new()
+                    }
+                },
+            );
+
+            // Record per-platform check trace for the Latest Match Scan Review window
+            if !check_yt {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "YouTube".to_string(),
+                    outcome: "Skipped".to_string(),
+                    detail: "Already checked offline via Directory.".to_string(),
+                });
+            } else if let Some(top) = yt_cands.first() {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "YouTube".to_string(),
+                    outcome: format!("{} ({}%)", top.confidence_tier, top.confidence),
+                    detail: format!(
+                        "Query '{} Valorant' ({}) -> {} ({})",
+                        cleaned, region.yt_region_code, top.channel, top.match_reason
+                    ),
+                });
             } else {
-                best.confidence_tier.as_str()
-            };
-            out.push(make(
-                &best.platform,
-                best.channel.clone(),
-                best.title.clone(),
-                best.url.clone(),
-                "Heuristic",
-                String::new(),
-                best.confidence,
-                tier_str,
-                best.server_match_status.clone(),
-                best.match_reason.clone(),
-                all_cands,
-            ));
+                audit_steps.push(PlayerCheckStep {
+                    stage: "YouTube".to_string(),
+                    outcome: "No Match".to_string(),
+                    detail: format!(
+                        "Searched live streams for '{} Valorant' (region {}) -> 0 candidates passed ML, server & broadcast filters.",
+                        cleaned, region.yt_region_code
+                    ),
+                });
+            }
+
+            if !check_tw {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Twitch".to_string(),
+                    outcome: "Skipped".to_string(),
+                    detail: "Already checked offline via Directory.".to_string(),
+                });
+            } else if tw_logins.is_empty() {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Twitch".to_string(),
+                    outcome: "Skipped".to_string(),
+                    detail: "No valid Twitch login candidates could be derived from IGN.".to_string(),
+                });
+            } else if let Some(top) = tw_cands.first() {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Twitch".to_string(),
+                    outcome: format!("{} ({}%)", top.confidence_tier, top.confidence),
+                    detail: format!(
+                        "Batched [{}] -> {} ({})",
+                        tw_logins.join(", "),
+                        top.channel,
+                        top.match_reason
+                    ),
+                });
+            } else {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Twitch".to_string(),
+                    outcome: "No Match".to_string(),
+                    detail: format!(
+                        "Batched [{}] -> offline, not in VALORANT category, or rejected by ML/server filters.",
+                        tw_logins.join(", ")
+                    ),
+                });
+            }
+
+            if !check_kick {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Kick".to_string(),
+                    outcome: "Skipped".to_string(),
+                    detail: "Already checked offline via Directory.".to_string(),
+                });
+            } else if let Some(top) = kick_cands.first() {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Kick".to_string(),
+                    outcome: format!("{} ({}%)", top.confidence_tier, top.confidence),
+                    detail: format!("Checked Kick channel -> {} ({})", top.channel, top.match_reason),
+                });
+            } else {
+                audit_steps.push(PlayerCheckStep {
+                    stage: "Kick".to_string(),
+                    outcome: "No Match".to_string(),
+                    detail: format!(
+                        "Checked Kick slug(s) for '{}' -> offline or no matching live VALORANT stream.",
+                        cleaned
+                    ),
+                });
+            }
+
+            let mut all_cands: Vec<LikelyStreamerCandidate> = Vec::new();
+            all_cands.extend(yt_cands);
+            all_cands.extend(tw_cands);
+            all_cands.extend(kick_cands);
+            all_cands.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+            let mut dedup_urls = HashSet::new();
+            all_cands.retain(|c| dedup_urls.insert(c.url.to_ascii_lowercase()));
+            all_cands.truncate(3);
+
+            if let Some(best) = all_cands.first().cloned() {
+                let tier_str = if best.confidence_tier.is_empty() {
+                    "Unverified"
+                } else {
+                    best.confidence_tier.as_str()
+                };
+                out.push(make(
+                    &best.platform,
+                    best.channel.clone(),
+                    best.title.clone(),
+                    best.url.clone(),
+                    "Heuristic",
+                    String::new(),
+                    best.confidence,
+                    tier_str,
+                    best.server_match_status.clone(),
+                    best.match_reason.clone(),
+                    all_cands,
+                ));
+            }
         }
+    } else {
+        audit_steps.push(PlayerCheckStep {
+            stage: "ML Heuristic".to_string(),
+            outcome: "Skipped".to_string(),
+            detail: "Skipped heuristic lookup because a registered Directory channel is already live.".to_string(),
+        });
     }
 
     // Phase 3: Post-match in-game text chat stream plug ("im live on yt", dropped stream URL/handle)
     if let Some(plug) = chat_plug {
         let quote = short(&plug.raw_message, 140);
+        audit_steps.push(PlayerCheckStep {
+            stage: "Match Chat".to_string(),
+            outcome: "Matched".to_string(),
+            detail: format!(
+                "Detected {} self-plug in post-match chat: \"{}\"",
+                plug.platform,
+                short(&plug.raw_message, 90)
+            ),
+        });
         if let Some(existing) = out.iter_mut().find(|e| e.platform.eq_ignore_ascii_case(&plug.platform)) {
             existing.chat_message = quote;
             existing.confidence = 100;
@@ -5705,9 +5954,49 @@ async fn scan_player(
                 ));
             }
         }
+    } else if !config.capture_in_game_chat {
+        audit_steps.push(PlayerCheckStep {
+            stage: "Match Chat".to_string(),
+            outcome: "Disabled".to_string(),
+            detail: "In-game chat capture is disabled in Settings.".to_string(),
+        });
+    } else {
+        audit_steps.push(PlayerCheckStep {
+            stage: "Match Chat".to_string(),
+            outcome: "No Plug".to_string(),
+            detail: "No stream URLs or self-promo mentions found in match chat.".to_string(),
+        });
     }
 
-    out
+    let audit = if let Some(best) = out.iter().max_by_key(|e| e.confidence) {
+        LastMatchPlayerAudit {
+            riot_id: riot_id.clone(),
+            team_relation: team_relation.clone(),
+            agent_name: agent_name.clone(),
+            outcome: "Detected".to_string(),
+            confidence_tier: best.confidence_tier.clone(),
+            confidence: best.confidence,
+            summary: format!("{} on {} ({}) — {}", best.channel, best.platform, best.source, best.match_reason),
+            steps: audit_steps,
+        }
+    } else {
+        LastMatchPlayerAudit {
+            riot_id: riot_id.clone(),
+            team_relation: team_relation.clone(),
+            agent_name: agent_name.clone(),
+            outcome: "No Match".to_string(),
+            confidence_tier: String::new(),
+            confidence: 0,
+            summary: if skipped_generic_ign {
+                "Generic/short IGN skipped heuristic scan; no Directory entry or chat plug".to_string()
+            } else {
+                "Checked Directory, YouTube, Twitch, Kick & Match Chat — no live match".to_string()
+            },
+            steps: audit_steps,
+        }
+    };
+
+    (out, audit)
 }
 
 async fn sync_directory_only(public_client: Client, state: Arc<Mutex<AppState>>, ctx: egui::Context) {
@@ -5874,6 +6163,7 @@ async fn scan_last_match(
 
     // Exclude self, duplicates, (when enabled) party members, and hidden/blank Riot IDs
     let total_roster = players.len();
+    let mut player_audits = build_skipped_player_audits(&players, &my_puuid, config.skip_party_members);
     let (scannable_players, party_skipped, hidden_skipped) =
         filter_scannable_players(players, &my_puuid, config.skip_party_members);
     let players_checked = scannable_players.len();
@@ -5939,7 +6229,8 @@ async fn scan_last_match(
     let mut copied_primary = false;
     while let Some(res) = set.join_next().await {
         match res {
-            Ok(entries) => {
+            Ok((entries, audit)) => {
+                player_audits.push(audit);
                 for entry in entries {
                     let is_alertable = !entry.confidence_tier.eq_ignore_ascii_case("Unverified");
                     let should_copy = is_alertable && !copied_primary;
@@ -5954,6 +6245,7 @@ async fn scan_last_match(
         }
     }
 
+    sort_last_match_audits(&mut player_audits);
     let checked_time = Local::now().format("%d %b %Y | %I:%M %p").to_string();
     let summary = LastMatchSummary {
         match_id,
@@ -5966,6 +6258,7 @@ async fn scan_last_match(
         streamers_found: found,
         scanned_at: checked_time,
         server_name: effective_region.label.to_string(),
+        player_audits,
     };
     save_json("last_match.json", &summary);
     lock(&state).last_match_summary = Some(summary);
@@ -7354,6 +7647,14 @@ fn render_check_banner(ui: &mut egui::Ui, state: &CheckState) -> Option<String> 
     apply_name
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuditFilter {
+    All,
+    Detected,
+    NoMatch,
+    Skipped,
+}
+
 struct StreamerApp {
     state: Arc<Mutex<AppState>>,
     manual_scan_tx: mpsc::UnboundedSender<ScanTrigger>,
@@ -7369,6 +7670,9 @@ struct StreamerApp {
     status_filter: StatusFilter,
     show_filters_popover: bool,
     expanded_cards: HashSet<String>,
+    // Latest Match Scan Review window (strictly latest match only)
+    show_last_match_modal: bool,
+    audit_filter: AuditFilter,
     // Update banner changelog viewer
     show_update_changelog: bool,
     // Directory manager state
@@ -7474,6 +7778,8 @@ impl StreamerApp {
             status_filter: StatusFilter::All,
             show_filters_popover: false,
             expanded_cards: HashSet::new(),
+            show_last_match_modal: false,
+            audit_filter: AuditFilter::All,
             show_update_changelog: false,
             dir_source_tab: DirectorySourceTab::Custom,
             dir_search: String::new(),
@@ -8281,6 +8587,11 @@ impl StreamerApp {
             }
         }
 
+        // Latest Match Scan Review window (only for the most recent scanned match)
+        if self.show_last_match_modal {
+            self.render_last_match_audit_window(ctx, last_match_summary.as_ref());
+        }
+
         // Main panel (AMOLED Black canvas)
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(BG_DARK).inner_margin(Margin::symmetric(20, 16)))
@@ -8455,6 +8766,327 @@ impl StreamerApp {
                 ui.add_space(10.0);
             }
             _ => {}
+        }
+    }
+
+    fn render_last_match_audit_window(
+        &mut self,
+        ctx: &egui::Context,
+        last_match: Option<&LastMatchSummary>,
+    ) {
+        let mut close_modal = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+
+        egui::Window::new("Latest Match Scan Review")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .default_width(680.0)
+            .min_width(640.0)
+            .max_width(700.0)
+            .frame(
+                Frame::NONE
+                    .fill(CARD_BG)
+                    .stroke(Stroke::new(1.5_f32, ACCENT_PINK))
+                    .corner_radius(CornerRadius::same(10))
+                    .inner_margin(Margin::same(20)),
+            )
+            .show(ctx, |ui| {
+                let Some(m) = last_match else {
+                    ui.label(
+                        RichText::new("No match has been scanned yet.")
+                            .color(TEXT_MUTED)
+                            .size(13.0),
+                    );
+                    ui.add_space(12.0);
+                    if ui.button("Close").clicked() {
+                        close_modal = true;
+                    }
+                    return;
+                };
+
+                // Header summary
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 7.0;
+                            ui.label(
+                                RichText::new(&m.queue_name)
+                                    .font(font_bold(15.0))
+                                    .color(ACCENT_PEARL),
+                            );
+                            ui.label(RichText::new("\u{00B7}").color(CARD_BORDER));
+                            ui.label(
+                                RichText::new(&m.map_name)
+                                    .font(font_semibold(14.5))
+                                    .color(TEXT_PRIMARY),
+                            );
+                            if !m.server_name.is_empty() {
+                                ui.label(RichText::new("\u{00B7}").color(CARD_BORDER));
+                                ui.label(
+                                    RichText::new(&m.server_name)
+                                        .font(font_semibold(13.0))
+                                        .color(ALLY_TEAL),
+                                );
+                            }
+                        });
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "Scanned {}  \u{00B7}  {} players checked, {} party skipped, {} hidden  \u{00B7}  {} detected",
+                                m.scanned_at,
+                                m.players_checked,
+                                m.party_skipped,
+                                m.hidden_skipped,
+                                m.streamers_found
+                            ))
+                            .font(font_mono(11.5))
+                            .color(TEXT_MUTED),
+                        );
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        let close_btn = egui::Button::new(
+                            RichText::new("Close").font(font_medium(12.5)).color(TEXT_PRIMARY),
+                        )
+                        .fill(BTN_SECONDARY)
+                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
+                        .corner_radius(CornerRadius::same(6));
+                        if ui.add(close_btn).clicked() {
+                            close_modal = true;
+                        }
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                // Filter bar
+                let total_cnt = m.player_audits.len();
+                let detected_cnt = m.player_audits.iter().filter(|a| a.outcome == "Detected").count();
+                let no_match_cnt = m.player_audits.iter().filter(|a| a.outcome == "No Match").count();
+                let skipped_cnt = m
+                    .player_audits
+                    .iter()
+                    .filter(|a| a.outcome == "Party Skipped" || a.outcome == "Hidden Name")
+                    .count();
+
+                Frame::NONE
+                    .fill(Color32::from_rgb(7, 7, 10))
+                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(Margin::same(3))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            segmented_tab_btn(
+                                ui,
+                                &mut self.audit_filter,
+                                AuditFilter::All,
+                                &format!("All ({total_cnt})"),
+                            );
+                            segmented_tab_btn(
+                                ui,
+                                &mut self.audit_filter,
+                                AuditFilter::Detected,
+                                &format!("Detected ({detected_cnt})"),
+                            );
+                            segmented_tab_btn(
+                                ui,
+                                &mut self.audit_filter,
+                                AuditFilter::NoMatch,
+                                &format!("No Match ({no_match_cnt})"),
+                            );
+                            segmented_tab_btn(
+                                ui,
+                                &mut self.audit_filter,
+                                AuditFilter::Skipped,
+                                &format!("Skipped ({skipped_cnt})"),
+                            );
+                        });
+                    });
+
+                ui.add_space(10.0);
+
+                if m.player_audits.is_empty() {
+                    Frame::NONE
+                        .fill(Color32::from_rgb(7, 7, 10))
+                        .stroke(Stroke::new(1.0_f32, CARD_BORDER))
+                        .corner_radius(CornerRadius::same(7))
+                        .inner_margin(Margin::same(16))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("No per-player scan trace recorded for this match yet.")
+                                    .font(font_semibold(13.0))
+                                    .color(TEXT_PRIMARY),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new("Click 'Check Last Match' in the sidebar (or finish your next match) to inspect every Directory, YouTube, Twitch, Kick, and Chat check performed for each player.")
+                                    .color(TEXT_MUTED)
+                                    .size(12.0),
+                            );
+                        });
+                } else {
+                    let visible: Vec<&LastMatchPlayerAudit> = m
+                        .player_audits
+                        .iter()
+                        .filter(|a| match self.audit_filter {
+                            AuditFilter::All => true,
+                            AuditFilter::Detected => a.outcome == "Detected",
+                            AuditFilter::NoMatch => a.outcome == "No Match",
+                            AuditFilter::Skipped => {
+                                a.outcome == "Party Skipped" || a.outcome == "Hidden Name"
+                            }
+                        })
+                        .collect();
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("latest_match_audit_scroll")
+                        .max_height(410.0)
+                        .show(ui, |ui| {
+                            if visible.is_empty() {
+                                ui.label(
+                                    RichText::new("No players match this filter.")
+                                        .color(TEXT_MUTED)
+                                        .size(12.5),
+                                );
+                                return;
+                            }
+
+                            for audit in visible {
+                                let (badge_label, badge_color, card_border) = match audit.outcome.as_str() {
+                                    "Detected" => {
+                                        let tier_col = match audit.confidence_tier.as_str() {
+                                            "Confirmed" => LIVE_GREEN,
+                                            "Probable" => ENEMY_AMBER,
+                                            _ => TEXT_MUTED,
+                                        };
+                                        let lbl = if audit.confidence > 0 {
+                                            format!("{} \u{00B7} {}%", audit.confidence_tier, audit.confidence)
+                                        } else {
+                                            "Detected".to_string()
+                                        };
+                                        (lbl, tier_col, tier_col.linear_multiply(0.4))
+                                    }
+                                    "Party Skipped" => (
+                                        "Party Skipped".to_string(),
+                                        ALLY_TEAL,
+                                        CARD_BORDER,
+                                    ),
+                                    "Hidden Name" => (
+                                        "Hidden Name".to_string(),
+                                        ERR_ROSE,
+                                        CARD_BORDER,
+                                    ),
+                                    _ => ("No Match".to_string(), TEXT_MUTED, CARD_BORDER),
+                                };
+
+                                Frame::NONE
+                                    .fill(Color32::from_rgb(7, 7, 10))
+                                    .stroke(Stroke::new(1.0_f32, card_border))
+                                    .corner_radius(CornerRadius::same(7))
+                                    .inner_margin(Margin::symmetric(12, 10))
+                                    .show(ui, |ui| {
+                                        // Player row header
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 7.0;
+                                            if !audit.team_relation.is_empty() {
+                                                let team_col = if audit.team_relation == "Ally" {
+                                                    ALLY_TEAL
+                                                } else {
+                                                    ENEMY_AMBER
+                                                };
+                                                ui.label(
+                                                    RichText::new(audit.team_relation.to_uppercase())
+                                                        .font(font_mono_semi(10.5))
+                                                        .color(team_col),
+                                                );
+                                            }
+                                            ui.label(
+                                                RichText::new(&audit.riot_id)
+                                                    .font(font_bold(13.5))
+                                                    .color(ACCENT_PEARL),
+                                            );
+                                            if !audit.agent_name.is_empty() {
+                                                ui.label(
+                                                    RichText::new(&audit.agent_name)
+                                                        .font(font_medium(12.0))
+                                                        .color(TEXT_MUTED),
+                                                );
+                                            }
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new(badge_label)
+                                                            .font(font_mono_semi(11.5))
+                                                            .color(badge_color),
+                                                    );
+                                                },
+                                            );
+                                        });
+
+                                        if !audit.summary.is_empty() {
+                                            ui.add_space(3.0);
+                                            ui.label(
+                                                RichText::new(&audit.summary)
+                                                    .size(12.0)
+                                                    .color(TEXT_PRIMARY),
+                                            );
+                                        }
+
+                                        if !audit.steps.is_empty() {
+                                            ui.add_space(6.0);
+                                            for step in &audit.steps {
+                                                let step_col = if step.outcome.starts_with("Live")
+                                                    || step.outcome.starts_with("Confirmed")
+                                                    || step.outcome == "Matched"
+                                                {
+                                                    LIVE_GREEN
+                                                } else if step.outcome.starts_with("Probable") {
+                                                    ENEMY_AMBER
+                                                } else if step.outcome == "Skipped" || step.outcome == "Disabled" {
+                                                    ALLY_TEAL
+                                                } else {
+                                                    TEXT_MUTED
+                                                };
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                                    ui.label(
+                                                        RichText::new(format!("[{}]", step.stage))
+                                                            .font(font_mono_semi(11.0))
+                                                            .color(ACCENT_BLUSH),
+                                                    );
+                                                    ui.label(
+                                                        RichText::new(&step.outcome)
+                                                            .font(font_mono_semi(11.0))
+                                                            .color(step_col),
+                                                    );
+                                                    ui.label(
+                                                        RichText::new(&step.detail)
+                                                            .size(11.5)
+                                                            .color(TEXT_MUTED),
+                                                    );
+                                                });
+                                            }
+                                        }
+                                    });
+                                ui.add_space(7.0);
+                            }
+                        });
+                }
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Scan review is kept strictly for your latest match only (not stored in previous history).")
+                            .size(11.0)
+                            .color(TEXT_MUTED),
+                    );
+                });
+            });
+
+        if close_modal {
+            self.show_last_match_modal = false;
         }
     }
 
@@ -8935,45 +9567,77 @@ impl StreamerApp {
         let filters_active = self.has_active_history_filters();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // Subsection 1: Latest Match (matches preview header weight, colors, and monospace stats)
+            // Subsection 1: Latest Match (clickable to open the Latest Match Scan Review window)
             if let Some(m) = last_match {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    paint_status_dot(ui, ACCENT_PINK, false);
-                    ui.label(RichText::new("LATEST MATCH").font(font_bold(11.5)).color(ACCENT_BLUSH));
-                    ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
-                    ui.label(RichText::new(&m.queue_name).font(font_semibold(13.0)).color(ACCENT_PEARL));
-                    ui.label(RichText::new(&m.map_name).font(font_medium(13.0)).color(TEXT_PRIMARY));
-                    if !m.server_name.is_empty() {
-                        ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                        ui.label(RichText::new(&m.server_name).font(font_semibold(12.5)).color(ALLY_TEAL));
+                let latest_frame = Frame::NONE
+                    .fill(Color32::from_rgb(9, 9, 13))
+                    .stroke(Stroke::new(1.0_f32, CARD_BORDER))
+                    .corner_radius(CornerRadius::same(7))
+                    .inner_margin(Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width((ui.available_width() - 102.0).max(200.0));
+                                ui.spacing_mut().item_spacing.x = 7.0;
+                                paint_status_dot(ui, ACCENT_PINK, false);
+                                ui.label(RichText::new("LATEST MATCH").font(font_bold(11.5)).color(ACCENT_BLUSH));
+                                ui.label(RichText::new("/").size(12.5).color(CARD_BORDER));
+                                ui.label(RichText::new(&m.queue_name).font(font_semibold(13.0)).color(ACCENT_PEARL));
+                                ui.label(RichText::new(&m.map_name).font(font_medium(13.0)).color(TEXT_PRIMARY));
+                                if !m.server_name.is_empty() {
+                                    ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                                    ui.label(RichText::new(&m.server_name).font(font_semibold(12.5)).color(ALLY_TEAL));
+                                }
+                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                                let mut count_parts = vec![format!("{} scanned", m.players_checked)];
+                                if m.party_skipped > 0 {
+                                    count_parts.push(format!("{} party skipped", m.party_skipped));
+                                }
+                                if m.hidden_skipped > 0 {
+                                    count_parts.push(format!("{} hidden", m.hidden_skipped));
+                                }
+                                let summary_counts = count_parts.join(", ");
+                                ui.label(RichText::new(summary_counts).font(font_mono(12.0)).color(TEXT_MUTED));
+                                ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
+                                if m.streamers_found > 0 {
+                                    ui.label(
+                                        RichText::new(format!("{} detected", m.streamers_found))
+                                            .font(font_mono_semi(12.0))
+                                            .color(LIVE_GREEN),
+                                    );
+                                } else {
+                                    ui.label(RichText::new("0 detected").font(font_mono(12.0)).color(TEXT_MUTED));
+                                }
+                            });
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new("Review scan \u{203A}")
+                                        .font(font_semibold(11.5))
+                                        .color(ACCENT_BLUSH),
+                                );
+                            });
+                        });
+                    });
+
+                let latest_rect = latest_frame.response.rect;
+                let modal_busy = self.show_add_modal || self.show_last_match_modal;
+                if !modal_busy && ui.rect_contains_pointer(latest_rect) {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    ui.painter().rect_stroke(
+                        latest_rect,
+                        CornerRadius::same(7),
+                        Stroke::new(1.0_f32, ACCENT_PINK.linear_multiply(0.6)),
+                        StrokeKind::Inside,
+                    );
+                    if ui.input(|i| i.pointer.primary_clicked()) {
+                        self.audit_filter = AuditFilter::All;
+                        self.show_last_match_modal = true;
                     }
-                    ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                    let mut count_parts = vec![format!("{} scanned", m.players_checked)];
-                    if m.party_skipped > 0 {
-                        count_parts.push(format!("{} party skipped", m.party_skipped));
-                    }
-                    if m.hidden_skipped > 0 {
-                        count_parts.push(format!("{} hidden", m.hidden_skipped));
-                    }
-                    let summary_counts = count_parts.join(", ");
-                    let count_lbl = ui.label(RichText::new(summary_counts).font(font_mono(12.0)).color(TEXT_MUTED));
-                    if m.hidden_skipped > 0 {
-                        count_lbl.on_hover_text(
-                            "Riot returned blank or invisible names (e.g. Streamer Mode / privacy) for these player(s).",
-                        );
-                    }
-                    ui.label(RichText::new("/").size(12.0).color(CARD_BORDER));
-                    if m.streamers_found > 0 {
-                        ui.label(
-                            RichText::new(format!("{} detected", m.streamers_found))
-                                .font(font_mono_semi(12.0))
-                                .color(LIVE_GREEN),
-                        );
-                    } else {
-                        ui.label(RichText::new("0 detected").font(font_mono(12.0)).color(TEXT_MUTED));
-                    }
-                });
+                }
+                latest_frame.response.on_hover_text(
+                    "Click to review how every player in your latest match was checked for live streams.",
+                );
 
                 ui.add_space(9.0);
                 if !latest_entries.is_empty() {
@@ -11238,7 +11902,66 @@ mod tests {
         assert!(rep.contains(&"kairo".to_string()));
         assert!(rep.len() <= 4);
     }
+
+    #[test]
+    fn test_last_match_player_audits_capture_skipped_and_sort_cleanly() {
+        let mk = |sub: &str, name: &str, agent: &str, party: bool| MatchPlayerInfo {
+            record: RiotNameRecord {
+                subject: sub.to_string(),
+                game_name: name.to_string(),
+                tag_line: "IND".to_string(),
+            },
+            team_relation: "Ally".to_string(),
+            agent_name: agent.to_string(),
+            is_party_member: party,
+        };
+        let roster = vec![
+            mk("me", "LocalMe", "Omen", false),
+            mk("p1", "DuoFriend", "Sage", true),
+            mk("p2", "\u{3164}", "Jett", false),
+            mk("p3", "EnemyPlayer", "Reyna", false),
+        ];
+        let mut audits = build_skipped_player_audits(&roster, "me", true);
+        assert_eq!(audits.len(), 2);
+        assert!(audits.iter().any(|a| a.outcome == "Party Skipped" && a.riot_id == "DuoFriend#IND"));
+        assert!(audits.iter().any(|a| a.outcome == "Hidden Name" && a.riot_id == "Hidden (Jett)"));
+
+        audits.push(LastMatchPlayerAudit {
+            riot_id: "LiveStreamer#IND".to_string(),
+            team_relation: "Enemy".to_string(),
+            agent_name: "Clove".to_string(),
+            outcome: "Detected".to_string(),
+            confidence_tier: "Confirmed".to_string(),
+            confidence: 100,
+            summary: "Live on Twitch".to_string(),
+            steps: Vec::new(),
+        });
+        audits.push(LastMatchPlayerAudit {
+            riot_id: "EnemyPlayer#IND".to_string(),
+            team_relation: "Enemy".to_string(),
+            agent_name: "Reyna".to_string(),
+            outcome: "No Match".to_string(),
+            confidence_tier: String::new(),
+            confidence: 0,
+            summary: "No live match".to_string(),
+            steps: Vec::new(),
+        });
+
+        sort_last_match_audits(&mut audits);
+        assert_eq!(audits[0].outcome, "Detected");
+        assert_eq!(audits[1].outcome, "No Match");
+        assert_eq!(audits[2].outcome, "Party Skipped");
+        assert_eq!(audits[3].outcome, "Hidden Name");
+
+        // Legacy last_match.json without player_audits must still deserialize cleanly
+        let legacy: LastMatchSummary = serde_json::from_str(
+            r#"{"match_id":"m1","queue_name":"Competitive","map_name":"Ascent","players_checked":7,"streamers_found":0,"scanned_at":"now"}"#,
+        )
+        .expect("legacy last_match.json");
+        assert!(legacy.player_audits.is_empty());
+    }
 }
+
 
 
 

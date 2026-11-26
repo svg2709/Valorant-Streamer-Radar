@@ -43,7 +43,7 @@ export interface ServerRegionInfo {
 
 export const COMMUNITY_REPO_OWNER = 'svg2709';
 export const COMMUNITY_REPO_NAME = 'Valorant-Streamer-Radar';
-export const APP_VERSION = '1.2.11';
+export const APP_VERSION = '1.2.12';
 
 export const SERVER_REGIONS: ServerRegionInfo[] = [
   {
@@ -284,6 +284,23 @@ export interface RecommendedStreamer {
   server_region: ServerRegionCode;
 }
 
+export interface PlayerCheckStep {
+  stage: string;
+  outcome: string;
+  detail: string;
+}
+
+export interface LastMatchPlayerAudit {
+  riot_id: string;
+  team_relation: TeamRelation;
+  agent_name: string;
+  outcome: 'Detected' | 'No Match' | 'Party Skipped' | 'Hidden Name';
+  confidence_tier?: ConfidenceTier | '';
+  confidence?: number;
+  summary: string;
+  steps: PlayerCheckStep[];
+}
+
 export interface LastMatchSummary {
   match_id: string;
   queue_name: string;
@@ -291,9 +308,11 @@ export interface LastMatchSummary {
   my_agent?: string;
   players_checked: number;
   party_skipped: number;
+  hidden_skipped?: number;
   streamers_found: number;
   scanned_at: string;
   server_name: string;
+  player_audits?: LastMatchPlayerAudit[];
 }
 
 export type DesktopTab = 'history' | 'directory' | 'discover' | 'settings';

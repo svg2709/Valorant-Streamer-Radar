@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.10%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.10 for Windows" />
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-v1.2.11%20(.exe)-ff5ca8?style=for-the-badge&labelColor=141b27" alt="Download Valorant Streamer Radar v1.2.11 for Windows" />
   </a>
   &nbsp;
   <a href="https://github.com/svg2709/Valorant-Streamer-Radar/releases/latest/download/ValorantStreamerRadar.exe">
@@ -22,7 +22,7 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-ff5ca8?style=flat-square)
 ![Built With](https://img.shields.io/badge/Built%20With-Rust-ffa6d2?style=flat-square)
-![Version](https://img.shields.io/badge/Version-v1.2.10-fff5fa?style=flat-square&labelColor=141b27)
+![Version](https://img.shields.io/badge/Version-v1.2.11-fff5fa?style=flat-square&labelColor=141b27)
 ![Mode](https://img.shields.io/badge/Mode-Post--Match%20Only%20(No%20Sniping)-10b981?style=flat-square)
 ![VRAM](https://img.shields.io/badge/GPU%20VRAM-0%20MB-38bdf8?style=flat-square)
 ![Vibe](https://img.shields.io/badge/100%25-Vibecoded-a855f7?style=flat-square)
@@ -63,9 +63,11 @@ Please keep the following limitations in mind:
 
 ---
 
-## Key Features (v1.2.10)
+## Key Features (v1.2.11)
 
-### 1. Server-Aware, Confidence-Tiered Streamer Detection
+### 1. Embedded Pure-Rust ML & Server-Aware Streamer Detection
+- **Keyless offline ML scoring engine:** Uses Jaro-Winkler, character n-gram Dice, gaming phonetic encoding, leet-speak unfolding, affix stripping, match-context alignment (agent, map, queue, Riot tag), and a calibrated logistic regression classifier directly in Rust — with zero API keys, zero cloud latency, and 0 MB GPU VRAM.
+- **Broadcast & non-gameplay filtering:** Automatically suppresses false positives from VCT watch parties, co-streams, 24/7 reruns, rebroadcasts, and clip/highlight channels.
 - **Three clear confidence tiers:** Every match is classified as **Confirmed**, **Probable**, or **Unverified**—never treating weak display-name similarity as a confirmed streamer.
 - **Server-first matching:** Compares your actual in-game Valorant server against the streamer's verified or detected in-game server (prioritizing actual in-game server over streaming region or language).
 - **Cross-server false-positive rejection:** Incompatible regions (for example, an NA/US streamer appearing while you play on the **Mumbai** server) are penalized or rejected instead of being falsely flagged.
@@ -91,7 +93,7 @@ Please keep the following limitations in mind:
 - **Cached discovery:** When enabled in **Settings**, unlocks the **Discover** tab to fetch regional live Valorant streams on Twitch/YouTube with a **5-minute local cache** and clearly labels them as **Discovery Suggestions — Not Matched to Your Lobby**.
 
 ### 6. Automatic Version Update Detection & Synced Changelog
-- Compares the installed version (`v1.2.10`) against the latest published GitHub Release (toggleable in Settings, ON by default, and shown only inside the GUI when opened).
+- Compares the installed version (`v1.2.11`) against the latest published GitHub Release (toggleable in Settings, ON by default, and shown only inside the GUI when opened).
 - Displays the latest version number, release changelog (synced directly from [`CHANGELOG.md`](CHANGELOG.md)), and download/install action when a newer version is available.
 - **Automatically hides** the update notification when no newer version is pending—no manual dismissal needed.
 - Gracefully handles network errors, missing releases, and GitHub API rate limits without falsely claiming the app is up to date.
@@ -195,7 +197,7 @@ Valorant-Streamer-Radar/
 ├── web/                                      # Interactive React/TypeScript web simulator
 ├── streamers.json                            # Central moderated community streamer database
 ├── CHANGELOG.md                              # Versioned release notes (source for GitHub Releases)
-├── Cargo.toml                                # Rust package manifest (v1.2.10)
+├── Cargo.toml                                # Rust package manifest (v1.2.11)
 └── README.md
 ```
 
@@ -213,7 +215,7 @@ Valorant-Streamer-Radar/
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the complete version history and release notes for **v1.2.10** and earlier versions.
+See [`CHANGELOG.md`](CHANGELOG.md) for the complete version history and release notes for **v1.2.11** and earlier versions.
 
 ---
 

@@ -1128,9 +1128,9 @@ fn classify_region_evidence(text: &str, lang_code: Option<&str>) -> RegionEviden
 
     // 1. Highest priority: explicit in-game Valorant server cues
     const IN_GAME_SERVER_MAP: &[(&[&str], GeoZone)] = &[
-        (&["mumbai server", "mumbai lobby", "ind server", "india server"], GeoZone::India),
+        (&["mumbai server", "mumbai lobby", "mumbai ping", "ind server", "ind lobby", "india server"], GeoZone::India),
         (&["tokyo server", "tokyo lobby", "jp server", "japan server"], GeoZone::Japan),
-        (&["manila server", "singapore server", "sg server", "hk server", "hong kong server", "sea server"], GeoZone::Sea),
+        (&["manila server", "singapore server", "sg server", "sg lobby", "hk server", "hk lobby", "hong kong server", "sea server", "ph lobby"], GeoZone::Sea),
         (&["seoul server", "kr server", "korea server"], GeoZone::Korea),
         (&["sydney server", "oce server", "oce ranked"], GeoZone::Oce),
         (
@@ -1160,7 +1160,10 @@ fn classify_region_evidence(text: &str, lang_code: Option<&str>) -> RegionEviden
     }
 
     // 2. Secondary priority: explicit regional / broadcast location cues
-    const INDIA_KEYS: &[&str] = &["mumbai", "india", "indian", "hindi", "hinglish", "ist", "delhi", "hyderabad"];
+    const INDIA_KEYS: &[&str] = &[
+        "mumbai", "india", "indian", "hindi", "hinglish", "ist", "delhi", "hyderabad",
+        "bengaluru", "bangalore", "blr", "pune", "chennai", "kolkata", "desi",
+    ];
     if INDIA_KEYS.iter().any(|k| has_ascii_word(&lower, k)) || lower.contains("[in]") || lower.contains("(in)") {
         return RegionEvidence::StreamingRegion(GeoZone::India);
     }
@@ -1278,18 +1281,681 @@ fn is_generic_ign(norm: &str) -> bool {
 fn looks_like_valorant_stream(title: &str, channel: &str) -> bool {
     let combined = format!("{title} {channel}").to_ascii_lowercase();
     const VAL_HINTS: &[&str] = &[
-        "valorant", "valo", "vct", "radiant", "immortal", "ascendant", "premier", "ranked", "comp",
+        "valorant", "valo", "radiant", "immortal", "ascendant", "premier", "ranked", "comp",
         "ascent", "bind", "haven", "split", "icebox", "breeze", "fracture", "pearl", "lotus", "sunset",
         "abyss", "corrode", "summit", "jett", "reyna", "clove", "omen", "sova", "cypher", "chamber", "raze",
     ];
     VAL_HINTS.iter().any(|k| has_ascii_word(&combined, k))
 }
 
-/// Multi-signal heuristic scorer. Never promotes heuristic matches to `Confirmed` (which requires
-/// verified database match + compatible server, or direct match-chat link). Rejects incompatible
-/// regions (e.g., NA/US streamer while user is playing on Mumbai server) and marks unknown regions
-/// strictly as `Unverified`.
-fn score_heuristic_candidate(
+// ============================================================================
+// PURE-RUST EMBEDDED ML + FUZZY / PHONETIC CANDIDATE SCORING ENGINE
+// ============================================================================
+
+#[derive(Debug, Clone, Default)]
+struct MatchSignalContext<'a> {
+    tag_line: &'a str,
+    map_name: &'a str,
+    agent_name: &'a str,
+    queue_name: &'a str,
+}
+
+/// Unfolds common gaming leet-speak substitutions (`z3r0_fps` -> `zerofps`, `k4ir0` -> `kairo`).
+fn unfold_leetspeak(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        let mapped = match ch.to_ascii_lowercase() {
+            '0' => 'o',
+            '1' => 'i',
+            '3' => 'e',
+            '4' | '@' => 'a',
+            '5' | '$' => 's',
+            '7' => 't',
+            '8' => 'b',
+            other => other,
+        };
+        if mapped.is_alphanumeric() {
+            for lc in mapped.to_lowercase() {
+                out.push(lc);
+            }
+        }
+    }
+    out
+}
+
+/// Collapses runs of identical characters (`kairooo` -> `kairo`, `rohaaan` -> `rohan`).
+fn collapse_repeated_chars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev: Option<char> = None;
+    for ch in s.chars() {
+        if Some(ch) != prev {
+            out.push(ch);
+            prev = Some(ch);
+        }
+    }
+    out
+}
+
+/// Splits a handle on separators and camelCase boundaries into lowercase alphanumeric tokens.
+fn split_handle_tokens(raw: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower_or_digit = false;
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() {
+            let is_upper = ch.is_ascii_uppercase();
+            if is_upper && prev_lower_or_digit && !cur.is_empty() {
+                tokens.push(std::mem::take(&mut cur));
+            }
+            for lc in ch.to_lowercase() {
+                cur.push(lc);
+            }
+            prev_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        } else if !cur.is_empty() {
+            tokens.push(std::mem::take(&mut cur));
+            prev_lower_or_digit = false;
+        } else {
+            prev_lower_or_digit = false;
+        }
+    }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
+    tokens
+}
+
+fn is_channel_affix_token(tok: &str) -> bool {
+    matches!(
+        tok,
+        "ttv"
+            | "twitch"
+            | "yt"
+            | "youtube"
+            | "kick"
+            | "live"
+            | "tv"
+            | "official"
+            | "real"
+            | "gaming"
+            | "gamer"
+            | "plays"
+            | "playz"
+            | "val"
+            | "valo"
+            | "valorant"
+            | "stream"
+            | "streams"
+            | "channel"
+            | "op"
+            | "gg"
+    )
+}
+
+/// Extracts the core creator identity by stripping common leading/trailing streamer affixes
+/// (`KairoFPS Official` -> `kairofps`, `ZeroFPS Live` -> `zerofps`, `TTV_Jake_TV` -> `jake`).
+fn strip_channel_affixes(raw: &str) -> String {
+    let tokens = split_handle_tokens(raw);
+    if tokens.is_empty() {
+        return normalize(raw);
+    }
+    let mut start = 0usize;
+    let mut end = tokens.len();
+
+    while start + 1 < end && is_channel_affix_token(&tokens[start]) {
+        let rem_len: usize = tokens[start + 1..end].iter().map(|t| t.chars().count()).sum();
+        if rem_len >= 4 {
+            start += 1;
+        } else {
+            break;
+        }
+    }
+    while end > start + 1 && is_channel_affix_token(&tokens[end - 1]) {
+        let min_rem = if tokens[end - 1].chars().count() <= 3 { 5 } else { 4 };
+        let rem_len: usize = tokens[start..end - 1].iter().map(|t| t.chars().count()).sum();
+        if rem_len >= min_rem {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut joined: String = tokens[start..end].concat();
+    const GLUED_SUFFIXES: &[&str] = &[
+        "official", "valorant", "youtube", "twitch", "gaming", "streams", "stream", "playz", "plays", "ttv", "yt",
+    ];
+    for suf in GLUED_SUFFIXES {
+        if let Some(stem) = joined.strip_suffix(suf) {
+            if stem.chars().count() >= 4 {
+                joined = stem.to_string();
+                break;
+            }
+        }
+    }
+    if joined.is_empty() {
+        normalize(raw)
+    } else {
+        joined
+    }
+}
+
+/// Gaming-aware phonetic encoder (Metaphone/consonant-skeleton hybrid) so phonetically identical
+/// handles (`KrixVal`/`KryxVal`, `ZainFPS`/`ZeynFPS`, `Phaze`/`Faze`) align reliably.
+fn gaming_phonetic_code(norm_leet: &str) -> String {
+    if norm_leet.is_empty() {
+        return String::new();
+    }
+    let simplified = norm_leet
+        .replace("ph", "f")
+        .replace("ck", "k")
+        .replace("qu", "kw")
+        .replace("gh", "")
+        .replace("sh", "s")
+        .replace("ch", "k");
+
+    let mut out = String::with_capacity(simplified.len());
+    let mut prev: Option<char> = None;
+    for (idx, ch) in simplified.chars().enumerate() {
+        if !ch.is_ascii_alphabetic() {
+            continue;
+        }
+        if idx > 0 && matches!(ch, 'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'h') {
+            continue;
+        }
+        if ch == 'x' {
+            for pc in ['k', 's'] {
+                if Some(pc) != prev {
+                    out.push(pc);
+                    prev = Some(pc);
+                }
+            }
+            continue;
+        }
+        let mapped = match ch {
+            'c' => 'k',
+            'z' => 's',
+            'y' => 'i',
+            other => other,
+        };
+        if Some(mapped) != prev {
+            out.push(mapped);
+            prev = Some(mapped);
+        }
+    }
+    out
+}
+
+/// Standard Unicode-safe Jaro-Winkler string similarity (`0.0..=1.0`).
+fn jaro_winkler_similarity(a: &str, b: &str) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    if a == b {
+        return 1.0;
+    }
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+    let match_dist = (a_len.max(b_len) / 2).saturating_sub(1);
+
+    let mut a_matched = vec![false; a_len];
+    let mut b_matched = vec![false; b_len];
+    let mut matches = 0usize;
+
+    for i in 0..a_len {
+        let start = i.saturating_sub(match_dist);
+        let end = (i + match_dist + 1).min(b_len);
+        for j in start..end {
+            if !b_matched[j] && a_chars[i] == b_chars[j] {
+                a_matched[i] = true;
+                b_matched[j] = true;
+                matches += 1;
+                break;
+            }
+        }
+    }
+    if matches == 0 {
+        return 0.0;
+    }
+
+    let mut transpositions = 0usize;
+    let mut k = 0usize;
+    for i in 0..a_len {
+        if a_matched[i] {
+            while k < b_len && !b_matched[k] {
+                k += 1;
+            }
+            if k < b_len && a_chars[i] != b_chars[k] {
+                transpositions += 1;
+            }
+            k += 1;
+        }
+    }
+
+    let m = matches as f64;
+    let jaro = (m / a_len as f64 + m / b_len as f64 + (m - (transpositions as f64 / 2.0)) / m) / 3.0;
+    let prefix = a_chars
+        .iter()
+        .zip(b_chars.iter())
+        .take(4)
+        .take_while(|(ca, cb)| ca == cb)
+        .count();
+
+    if jaro >= 0.7 {
+        (jaro + (prefix as f64) * 0.1 * (1.0 - jaro)).min(1.0)
+    } else {
+        jaro
+    }
+}
+
+/// Character n-gram Sørensen-Dice multiset similarity (`0.0..=1.0`).
+fn ngram_dice_similarity(a: &str, b: &str, n: usize) -> f64 {
+    if a.is_empty() || b.is_empty() || n == 0 {
+        return 0.0;
+    }
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    if a_chars.len() < n || b_chars.len() < n {
+        return if a == b { 1.0 } else { 0.0 };
+    }
+    let mut counts_a: HashMap<String, usize> = HashMap::new();
+    for win in a_chars.windows(n) {
+        let key: String = win.iter().collect();
+        *counts_a.entry(key).or_insert(0) += 1;
+    }
+    let mut counts_b: HashMap<String, usize> = HashMap::new();
+    for win in b_chars.windows(n) {
+        let key: String = win.iter().collect();
+        *counts_b.entry(key).or_insert(0) += 1;
+    }
+    let total_a = a_chars.len() - n + 1;
+    let total_b = b_chars.len() - n + 1;
+    let mut inter = 0usize;
+    for (gram, ca) in &counts_a {
+        if let Some(cb) = counts_b.get(gram) {
+            inter += (*ca).min(*cb);
+        }
+    }
+    (2.0 * inter as f64) / ((total_a + total_b) as f64)
+}
+
+fn combined_ngram_dice(a: &str, b: &str) -> f64 {
+    0.55 * ngram_dice_similarity(a, b, 2) + 0.45 * ngram_dice_similarity(a, b, 3)
+}
+
+/// Token overlap similarity resilient to word reordering (`ACE Vex` <-> `Vex ACE Gaming`).
+fn token_overlap_similarity(a: &str, b: &str) -> f64 {
+    let toks_a: Vec<String> = split_handle_tokens(a)
+        .into_iter()
+        .filter(|t| !is_channel_affix_token(t))
+        .map(|t| unfold_leetspeak(&t))
+        .filter(|t| t.chars().count() >= 2)
+        .collect();
+    let toks_b: Vec<String> = split_handle_tokens(b)
+        .into_iter()
+        .filter(|t| !is_channel_affix_token(t))
+        .map(|t| unfold_leetspeak(&t))
+        .filter(|t| t.chars().count() >= 2)
+        .collect();
+    if toks_a.is_empty() || toks_b.is_empty() {
+        return 0.0;
+    }
+    let mut used_b = vec![false; toks_b.len()];
+    let mut matched = 0usize;
+    for ta in &toks_a {
+        for (idx, tb) in toks_b.iter().enumerate() {
+            if used_b[idx] {
+                continue;
+            }
+            let same = ta == tb
+                || (ta.chars().count() >= 4
+                    && tb.chars().count() >= 4
+                    && jaro_winkler_similarity(ta, tb) >= 0.88);
+            if same {
+                used_b[idx] = true;
+                matched += 1;
+                break;
+            }
+        }
+    }
+    if matched == 0 {
+        return 0.0;
+    }
+    let min_len = toks_a.len().min(toks_b.len()) as f64;
+    let union_len = (toks_a.len() + toks_b.len() - matched) as f64;
+    0.65 * (matched as f64 / min_len) + 0.35 * (matched as f64 / union_len.max(1.0))
+}
+
+#[derive(Debug, Clone)]
+struct HandleSimilarity {
+    exact_raw: bool,
+    exact_core: bool,
+    leet_exact: bool,
+    containment: f64,
+    jaro_winkler: f64,
+    ngram_dice: f64,
+    phonetic_sim: f64,
+    token_overlap: f64,
+    composite: f64,
+    min_core_len: usize,
+    reason_label: &'static str,
+}
+
+fn compute_handle_similarity(cleaned_ign: &str, channel: &str) -> Option<HandleSimilarity> {
+    let ign_norm = normalize(cleaned_ign);
+    let chan_norm = normalize(channel);
+    let ign_core = strip_channel_affixes(cleaned_ign);
+    let chan_core = strip_channel_affixes(channel);
+    let ign_leet = unfold_leetspeak(&ign_core);
+    let chan_leet = unfold_leetspeak(&chan_core);
+
+    if ign_norm.chars().count() < 4
+        || ign_core.chars().count() < 4
+        || chan_norm.is_empty()
+        || chan_core.is_empty()
+        || is_generic_ign(&ign_norm)
+        || is_generic_ign(&ign_core)
+        || is_generic_ign(&ign_leet)
+    {
+        return None;
+    }
+
+    let ign_rep = collapse_repeated_chars(&ign_leet);
+    let chan_rep = collapse_repeated_chars(&chan_leet);
+
+    let exact_raw = ign_norm == chan_norm;
+    let exact_core = !exact_raw && ign_core == chan_core;
+    let leet_exact = !exact_raw
+        && !exact_core
+        && (ign_leet == chan_leet || (ign_rep.chars().count() >= 4 && ign_rep == chan_rep));
+
+    let pair_containment = |a: &str, b: &str| -> f64 {
+        let a_len = a.chars().count();
+        let b_len = b.chars().count();
+        if a_len == 0 || b_len == 0 {
+            return 0.0;
+        }
+        if b.starts_with(a) || b.ends_with(a) {
+            let ratio = a_len as f64 / b_len as f64;
+            if ratio >= 0.55 {
+                return ratio.max(0.76);
+            }
+        } else if b.contains(a) && a_len >= 5 {
+            let ratio = a_len as f64 / b_len as f64;
+            if ratio >= 0.55 {
+                return ratio;
+            }
+        } else if a.contains(b) && b_len >= 5 {
+            let ratio = b_len as f64 / a_len as f64;
+            if ratio >= 0.60 {
+                return ratio;
+            }
+        }
+        0.0
+    };
+    let containment = if exact_raw || exact_core || leet_exact {
+        1.0
+    } else {
+        pair_containment(&ign_core, &chan_core)
+            .max(pair_containment(&ign_leet, &chan_leet))
+            .max(pair_containment(&ign_norm, &chan_norm))
+    };
+
+    let jaro_winkler = jaro_winkler_similarity(&ign_core, &chan_core)
+        .max(jaro_winkler_similarity(&ign_leet, &chan_leet))
+        .max(jaro_winkler_similarity(&ign_rep, &chan_rep) * 0.98);
+    let ngram_dice = combined_ngram_dice(&ign_core, &chan_core).max(combined_ngram_dice(&ign_leet, &chan_leet));
+
+    let p_ign = gaming_phonetic_code(&ign_leet);
+    let p_chan = gaming_phonetic_code(&chan_leet);
+    let phonetic_sim = if p_ign.chars().count() >= 3 && p_chan.chars().count() >= 3 {
+        jaro_winkler_similarity(&p_ign, &p_chan)
+    } else {
+        0.0
+    };
+
+    let token_overlap = token_overlap_similarity(cleaned_ign, channel);
+    let min_core_len = ign_core.chars().count().min(chan_core.chars().count());
+
+    let passes_gate = exact_raw
+        || exact_core
+        || leet_exact
+        || containment >= 0.55
+        || (min_core_len >= 5 && jaro_winkler >= 0.86 && ngram_dice >= 0.58)
+        || (min_core_len >= 5 && phonetic_sim >= 0.90 && jaro_winkler >= 0.80)
+        || (min_core_len >= 5 && token_overlap >= 0.80 && jaro_winkler >= 0.72);
+
+    if !passes_gate {
+        return None;
+    }
+
+    let composite = if exact_raw {
+        1.0
+    } else if exact_core {
+        0.97
+    } else if leet_exact {
+        0.94
+    } else {
+        (0.45 * jaro_winkler + 0.25 * ngram_dice + 0.15 * phonetic_sim + 0.15 * containment.max(token_overlap))
+            .clamp(0.0, 0.93)
+    };
+
+    let reason_label = if exact_raw {
+        "Exact channel handle"
+    } else if exact_core {
+        "Exact core handle"
+    } else if leet_exact {
+        "Leet-speak handle match"
+    } else if containment >= 0.75 {
+        "Close handle match"
+    } else if token_overlap >= 0.80 {
+        "Token handle match"
+    } else if phonetic_sim >= 0.90 {
+        "Phonetic handle match"
+    } else {
+        "Fuzzy handle match"
+    };
+
+    Some(HandleSimilarity {
+        exact_raw,
+        exact_core,
+        leet_exact,
+        containment,
+        jaro_winkler,
+        ngram_dice,
+        phonetic_sim,
+        token_overlap,
+        composite,
+        min_core_len,
+        reason_label,
+    })
+}
+
+/// Detects non-personal-gameplay broadcasts (VCT watch parties, co-streams, 24/7 reruns,
+/// clip compilations, or other games) to suppress false positives cleanly.
+fn non_gameplay_stream_risk(title: &str, channel: &str, game_confirmed: bool) -> f64 {
+    let lower = format!("{title} {channel}").to_ascii_lowercase();
+    let title_low = title.to_ascii_lowercase();
+    let mut risk: f64 = 0.0;
+
+    const HARD_BROADCAST_CUES: &[&str] = &[
+        "watch party",
+        "watchparty",
+        "co-stream",
+        "costream",
+        "co stream",
+        "rebroadcast",
+        "rerun",
+        "re-run",
+        "24/7",
+        "24x7",
+        "best clips",
+        "top clips",
+        "daily clips",
+        "clip compilation",
+        "highlights compilation",
+        "funny moments",
+        "official broadcast",
+        "champions tour",
+        "vct pacific",
+        "vct americas",
+        "vct emea",
+        "vct china",
+        "vct masters",
+        "vct champions",
+    ];
+    if HARD_BROADCAST_CUES.iter().any(|k| lower.contains(k)) {
+        risk += 0.85;
+    }
+
+    const MODERATE_NON_PLAY_CUES: &[&str] = &[
+        "vod review",
+        "vod-review",
+        "coaching session",
+        "tier list",
+        "patch notes",
+        "montage",
+        "giveaway 24",
+        "lofi",
+    ];
+    if MODERATE_NON_PLAY_CUES.iter().any(|k| lower.contains(k)) {
+        risk += 0.45;
+    }
+
+    // If category wasn't verified as VALORANT and title explicitly advertises another game without Valorant, reject.
+    if !game_confirmed
+        && !has_ascii_word(&title_low, "valorant")
+        && !has_ascii_word(&title_low, "valo")
+    {
+        const OTHER_GAMES: &[&str] = &[
+            "cs2",
+            "counter-strike",
+            "counter strike",
+            "league of legends",
+            "bgmi",
+            "pubg",
+            "gta rp",
+            "minecraft",
+            "fortnite",
+            "apex legends",
+            "overwatch",
+            "dota 2",
+            "just chatting",
+        ];
+        if OTHER_GAMES.iter().any(|g| has_ascii_word(&title_low, g)) {
+            risk = 1.0;
+        }
+    }
+
+    risk.clamp(0.0, 1.0)
+}
+
+/// Correlates stream metadata against the finished match (agent, map, queue, and Riot tag prior).
+fn compute_context_alignment(
+    platform: &str,
+    title: &str,
+    ctx: &MatchSignalContext<'_>,
+) -> (f64, Option<String>) {
+    let title_low = title.to_ascii_lowercase();
+    let tag_low = ctx.tag_line.trim().to_ascii_lowercase();
+    let mut score: f64 = 0.0;
+    let mut note: Option<String> = None;
+
+    // 1. Platform-aligned Riot tag prior (#TTV, #YT, #KICK, #LIVE)
+    let platform_tag_match = match platform {
+        "Twitch" => matches!(tag_low.as_str(), "ttv" | "twtv" | "twitch"),
+        "YouTube" => matches!(tag_low.as_str(), "yt" | "ytb" | "ytube"),
+        "Kick" => tag_low == "kick",
+        _ => false,
+    };
+    if platform_tag_match {
+        score += 0.45;
+        note = Some(format!("Riot tag #{}", ctx.tag_line.trim()));
+    } else if matches!(tag_low.as_str(), "live" | "tv") {
+        score += 0.22;
+    }
+
+    // 2. Exact agent cue in stream title/tags
+    let agent = ctx.agent_name.trim();
+    if !agent.is_empty() && !agent.eq_ignore_ascii_case("Unknown") {
+        let agent_low = agent.to_ascii_lowercase();
+        let matched_agent = has_ascii_word(&title_low, &agent_low)
+            || (agent_low == "kay/o" && has_ascii_word(&title_low, "kayo"));
+        if matched_agent {
+            score += 0.45;
+            if note.is_none() {
+                note = Some(format!("Agent cue ({agent})"));
+            }
+        }
+    }
+
+    // 3. Exact map cue in stream title/tags
+    let map = ctx.map_name.trim();
+    if !map.is_empty() && !map.eq_ignore_ascii_case("Unknown") {
+        if has_ascii_word(&title_low, &map.to_ascii_lowercase()) {
+            score += 0.35;
+            if note.is_none() {
+                note = Some(format!("Map cue ({map})"));
+            }
+        }
+    }
+
+    // 4. Queue/mode alignment
+    let queue_low = ctx.queue_name.trim().to_ascii_lowercase();
+    if queue_low == "competitive" {
+        const COMP_WORDS: &[&str] = &[
+            "ranked", "comp", "competitive", "immortal", "radiant", "ascendant", "diamond", "rr", "grind",
+        ];
+        if COMP_WORDS.iter().any(|w| has_ascii_word(&title_low, w)) {
+            score += 0.18;
+        }
+    } else if queue_low == "premier" && has_ascii_word(&title_low, "premier") {
+        score += 0.35;
+        if note.is_none() {
+            note = Some("Premier cue".to_string());
+        }
+    } else if !queue_low.is_empty()
+        && matches!(queue_low.as_str(), "swiftplay" | "unrated" | "deathmatch")
+        && has_ascii_word(&title_low, &queue_low)
+    {
+        score += 0.20;
+    }
+
+    (score.clamp(0.0, 1.0), note)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MlCandidateFeatures {
+    exact_handle: f64,
+    fuzzy_sim: f64,
+    containment: f64,
+    distinctiveness: f64,
+    game_signal: f64,
+    region_signal: f64,
+    context_align: f64,
+    non_gameplay_risk: f64,
+}
+
+/// Embedded calibrated logistic regression classifier (`sigmoid(w · x + b)`).
+fn ml_predict_match_probability(f: &MlCandidateFeatures) -> f64 {
+    let z = -3.45
+        + 0.95 * f.exact_handle
+        + 1.50 * f.fuzzy_sim
+        + 0.40 * f.containment
+        + 0.35 * f.distinctiveness
+        + 0.90 * f.game_signal
+        + 1.55 * f.region_signal
+        + 0.80 * f.context_align
+        - 2.80 * f.non_gameplay_risk;
+    1.0 / (1.0 + (-z).exp())
+}
+
+/// Pure-Rust ML + fuzzy/phonetic multi-signal candidate scorer.
+/// Never promotes heuristic matches to `Confirmed` (which requires verified database match +
+/// compatible server, or direct match-chat link). Rejects incompatible regions, generic IGNs,
+/// and non-gameplay broadcasts (VCT watch-parties, reruns, clip channels), and caps unknown
+/// regions strictly as `Unverified`.
+fn score_heuristic_candidate_with_context(
     platform: &str,
     cleaned_ign: &str,
     channel: &str,
@@ -1298,100 +1964,78 @@ fn score_heuristic_candidate(
     lang_code: Option<&str>,
     game_confirmed: bool,
     region: &ServerRegionInfo,
+    ctx: &MatchSignalContext<'_>,
 ) -> Option<LikelyStreamerCandidate> {
-    let ign_norm = normalize(cleaned_ign);
-    let chan_norm = normalize(channel);
-    if ign_norm.chars().count() < 4 || chan_norm.is_empty() || is_generic_ign(&ign_norm) {
-        return None;
-    }
+    let sim = compute_handle_similarity(cleaned_ign, channel)?;
 
     if !game_confirmed && !looks_like_valorant_stream(title, channel) {
         return None;
     }
 
-    // 1. Username-to-channel signal (similar usernames alone cannot confirm a match)
-    let is_exact_name = chan_norm == ign_norm;
-    let (mut score, name_reason): (i32, &str) = if is_exact_name {
-        (46, "Exact channel handle")
-    } else if chan_norm.starts_with(&ign_norm) || chan_norm.ends_with(&ign_norm) {
-        let ratio = (ign_norm.len() * 100) / chan_norm.len().max(1);
-        if ratio < 55 {
-            return None;
-        }
-        (36, "Close handle match")
-    } else if chan_norm.contains(&ign_norm) {
-        let ratio = (ign_norm.len() * 100) / chan_norm.len().max(1);
-        if ign_norm.len() < 5 || ratio < 55 {
-            return None;
-        }
-        (28, "Channel contains IGN")
-    } else if ign_norm.contains(&chan_norm) && chan_norm.len() >= 5 {
-        let ratio = (chan_norm.len() * 100) / ign_norm.len().max(1);
-        if ratio < 60 {
-            return None;
-        }
-        (28, "IGN matches channel")
-    } else {
+    let non_gameplay_risk = non_gameplay_stream_risk(title, channel, game_confirmed);
+    if non_gameplay_risk >= 0.75 {
         return None;
-    };
-
-    // 2. Game category signal
-    if game_confirmed {
-        score += 14;
-    } else if has_ascii_word(&title.to_ascii_lowercase(), "valorant") {
-        score += 8;
     }
 
-    // 3. Server-priority region compatibility (InGameServer > StreamingRegion > LanguageHint > Unknown)
+    let title_low = title.to_ascii_lowercase();
+    let title_mentions_val =
+        has_ascii_word(&title_low, "valorant") || has_ascii_word(&title_low, "valo");
+    let game_signal = if game_confirmed {
+        1.0
+    } else if title_mentions_val {
+        0.68
+    } else {
+        0.35
+    };
+
+    let (context_align, context_note) = compute_context_alignment(platform, title, ctx);
+
+    // Server-priority region compatibility (InGameServer > StreamingRegion > LanguageHint > Unknown)
     let combined_text = format!("{title} {channel}");
     let evidence = classify_region_evidence(&combined_text, lang_code);
-    let (tier, region_hint, server_status, region_note) = match evidence {
-        RegionEvidence::InGameServer(dz) if dz == region.zone => {
-            score += 28;
-            (
-                if score >= 74 { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
-                geo_zone_label(dz).to_string(),
-                "In-Game Server Match".to_string(),
-                format!("Explicit {} server cue", region.short_label),
-            )
-        }
-        RegionEvidence::InGameServer(dz) if zones_compatible(region.zone, dz) => {
-            score += 18;
-            (
-                if score >= 74 { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
-                geo_zone_label(dz).to_string(),
-                "Compatible Nearby Server".to_string(),
-                format!("Nearby server ({})", geo_zone_label(dz)),
-            )
-        }
-        RegionEvidence::StreamingRegion(dz) if dz == region.zone => {
-            score += 20;
-            (
-                if score >= 72 && is_exact_name { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
-                geo_zone_label(dz).to_string(),
-                "Streaming Region Match".to_string(),
-                format!("Streaming region matches {}", region.short_label),
-            )
-        }
-        RegionEvidence::StreamingRegion(dz) if zones_compatible(region.zone, dz) => {
-            score += 12;
-            (
-                if score >= 72 && is_exact_name { ConfidenceTier::Probable } else { ConfidenceTier::Unverified },
-                geo_zone_label(dz).to_string(),
-                "Compatible Streaming Region".to_string(),
-                format!("Compatible region ({})", geo_zone_label(dz)),
-            )
-        }
-        RegionEvidence::LanguageHint(dz) if dz == region.zone || zones_compatible(region.zone, dz) => {
-            // Language alone is never treated as proof of in-game server; cap below Probable unless exact + confirmed game
-            score += 8;
-            (
-                ConfidenceTier::Unverified,
-                format!("{} (Language hint only)", geo_zone_label(dz)),
-                "Server Unverified (Language Hint)".to_string(),
-                "Broadcast language matches region (server unverified)".to_string(),
-            )
-        }
+    let is_exact_like = sim.exact_raw || sim.exact_core || sim.leet_exact;
+
+    let (region_signal, region_hint, server_status, region_note, allow_probable, unknown_cap) = match evidence {
+        RegionEvidence::InGameServer(dz) if dz == region.zone => (
+            1.00,
+            geo_zone_label(dz).to_string(),
+            "In-Game Server Match".to_string(),
+            format!("Explicit {} server cue", region.short_label),
+            true,
+            false,
+        ),
+        RegionEvidence::InGameServer(dz) if zones_compatible(region.zone, dz) => (
+            0.72,
+            geo_zone_label(dz).to_string(),
+            "Compatible Nearby Server".to_string(),
+            format!("Nearby server ({})", geo_zone_label(dz)),
+            true,
+            false,
+        ),
+        RegionEvidence::StreamingRegion(dz) if dz == region.zone => (
+            0.68,
+            geo_zone_label(dz).to_string(),
+            "Streaming Region Match".to_string(),
+            format!("Streaming region matches {}", region.short_label),
+            is_exact_like || sim.composite >= 0.88,
+            false,
+        ),
+        RegionEvidence::StreamingRegion(dz) if zones_compatible(region.zone, dz) => (
+            0.45,
+            geo_zone_label(dz).to_string(),
+            "Compatible Streaming Region".to_string(),
+            format!("Compatible region ({})", geo_zone_label(dz)),
+            is_exact_like,
+            false,
+        ),
+        RegionEvidence::LanguageHint(dz) if dz == region.zone || zones_compatible(region.zone, dz) => (
+            0.24,
+            format!("{} (Language hint only)", geo_zone_label(dz)),
+            "Server Unverified (Language Hint)".to_string(),
+            "Broadcast language matches region (server unverified)".to_string(),
+            false,
+            false,
+        ),
         RegionEvidence::InGameServer(_conflict)
         | RegionEvidence::StreamingRegion(_conflict)
         | RegionEvidence::LanguageHint(_conflict) => {
@@ -1399,38 +2043,82 @@ fn score_heuristic_candidate(
             return None;
         }
         RegionEvidence::Unknown => {
-            // Unknown server/region: NEVER confirm; surface as Unverified only for exact handle +
-            // confirmed VALORANT category or explicit "valorant"/"valo" in the live stream title.
-            let title_low = title.to_ascii_lowercase();
-            let title_mentions_val =
-                has_ascii_word(&title_low, "valorant") || has_ascii_word(&title_low, "valo");
-            if !is_exact_name || (!game_confirmed && !title_mentions_val) {
+            // Unknown server/region: NEVER confirm; surface as Unverified only for exact/core/leet
+            // handles + confirmed VALORANT category or explicit "valorant"/"valo" in the live title.
+            if !is_exact_like || (!game_confirmed && !title_mentions_val) {
                 return None;
             }
-            score = score.min(58);
             (
-                ConfidenceTier::Unverified,
+                0.0,
                 "Server Unknown".to_string(),
                 "Server Unverified".to_string(),
                 "Streamer server could not be verified".to_string(),
+                false,
+                true,
             )
         }
     };
 
+    let exact_handle_feat = if sim.exact_raw {
+        1.0
+    } else if sim.exact_core {
+        0.92
+    } else if sim.leet_exact {
+        0.85
+    } else {
+        0.0
+    };
+    let fuzzy_sim_feat = (0.50 * sim.jaro_winkler + 0.30 * sim.ngram_dice + 0.20 * sim.phonetic_sim).clamp(0.0, 1.0);
+    let has_digits = cleaned_ign.chars().any(|c| c.is_ascii_digit());
+    let distinctiveness = (((sim.min_core_len.min(12) as f64 - 3.0) / 9.0)
+        + if has_digits { 0.12 } else { 0.0 })
+    .clamp(0.0, 1.0);
+
+    let features = MlCandidateFeatures {
+        exact_handle: exact_handle_feat,
+        fuzzy_sim: fuzzy_sim_feat,
+        containment: sim.containment.max(sim.token_overlap).clamp(0.0, 1.0),
+        distinctiveness,
+        game_signal,
+        region_signal,
+        context_align,
+        non_gameplay_risk,
+    };
+
+    let prob = ml_predict_match_probability(&features);
+    let mut raw_score = (prob * 100.0).round() as i32;
+    if unknown_cap {
+        raw_score = raw_score.min(58);
+    }
+
+    let tier = if allow_probable && raw_score >= 68 {
+        ConfidenceTier::Probable
+    } else {
+        ConfidenceTier::Unverified
+    };
+
     let final_conf = match tier {
-        ConfidenceTier::Probable => score.clamp(68, 88) as u8,
-        ConfidenceTier::Unverified => score.clamp(42, 62) as u8,
-        ConfidenceTier::Confirmed => score.clamp(90, 100) as u8,
+        ConfidenceTier::Probable => raw_score.clamp(68, 88) as u8,
+        ConfidenceTier::Unverified => raw_score.clamp(42, if unknown_cap { 58 } else { 62 }) as u8,
+        ConfidenceTier::Confirmed => raw_score.clamp(90, 100) as u8,
     };
     if final_conf < 48 {
         return None;
     }
 
-    let match_reason = if game_confirmed {
-        format!("{name_reason} + VALORANT live + {region_note}")
+    let name_desc = if is_exact_like {
+        sim.reason_label.to_string()
     } else {
-        format!("{name_reason} + {region_note}")
+        format!("{} ({}%)", sim.reason_label, (sim.composite * 100.0).round() as u32)
     };
+    let mut parts = vec![name_desc];
+    if game_confirmed {
+        parts.push("VALORANT live".to_string());
+    }
+    if let Some(cn) = context_note {
+        parts.push(cn);
+    }
+    parts.push(region_note);
 
     Some(LikelyStreamerCandidate {
         platform: platform.to_string(),
@@ -1441,8 +2129,31 @@ fn score_heuristic_candidate(
         confidence_tier: tier.as_str().to_string(),
         region_hint,
         server_match_status: server_status,
-        match_reason,
+        match_reason: parts.join(" + "),
     })
+}
+
+fn score_heuristic_candidate(
+    platform: &str,
+    cleaned_ign: &str,
+    channel: &str,
+    title: &str,
+    url: &str,
+    lang_code: Option<&str>,
+    game_confirmed: bool,
+    region: &ServerRegionInfo,
+) -> Option<LikelyStreamerCandidate> {
+    score_heuristic_candidate_with_context(
+        platform,
+        cleaned_ign,
+        channel,
+        title,
+        url,
+        lang_code,
+        game_confirmed,
+        region,
+        &MatchSignalContext::default(),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2330,6 +3041,96 @@ fn handle_from_stream_url(platform: &str, url: &str) -> Option<String> {
     }
 }
 
+/// Detects negations, questions directed at others, or anti-promo remarks so they aren't
+/// misclassified as a player plugging their own stream.
+fn is_non_promo_chat(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    const NEGATION_OR_QUESTION: &[&str] = &[
+        "not live",
+        "im not live",
+        "i'm not live",
+        "not streaming",
+        "dont stream",
+        "don't stream",
+        "fake ttv",
+        "fake yt",
+        "stop promoting",
+        "no promo",
+        "stream sniping",
+        "streamsniping",
+        "are you live",
+        "are u live",
+        "r u live",
+        "ru live",
+        "u live?",
+        "you live?",
+        "are you streaming",
+        "are u streaming",
+        "r u streaming",
+        "is he live",
+        "is she live",
+        "who is live",
+        "whos live",
+        "who's live",
+    ];
+    if NEGATION_OR_QUESTION.iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    if lower.ends_with('?') && !lower.contains("same name") && !lower.contains("check my") {
+        return true;
+    }
+    false
+}
+
+/// Lightweight weighted intent classifier for casual, abbreviated, and multilingual (e.g. Hinglish)
+/// post-match chat self-plugs without requiring an external LLM.
+fn score_chat_promo_intent(trimmed: &str) -> f64 {
+    let lower = trimmed.to_ascii_lowercase();
+    let mut score: f64 = 0.0;
+
+    if CHAT_LIVE_INTENT_RE.is_match(trimmed) {
+        score += 1.0;
+    }
+
+    const STRONG_SELF_PROMO: &[&str] = &[
+        "same name",
+        "same ign",
+        "same as ign",
+        "my pov",
+        "check my yt",
+        "check my twitch",
+        "check my kick",
+        "live rn",
+        "live right now",
+        "yt pe live",
+        "yt par live",
+        "live hu",
+        "live hoon",
+        "aaja stream",
+        "stream pe",
+        "drop a follow",
+        "drop a sub",
+        "come watch",
+        "ttv in name",
+        "im on twitch",
+        "i'm on twitch",
+        "im on yt",
+        "i'm on yt",
+        "on yt live",
+    ];
+    if STRONG_SELF_PROMO.iter().any(|p| lower.contains(p)) {
+        score += 1.1;
+    }
+
+    // Penalize third-person / accusatory phrasing when no direct link is shared
+    const THIRD_PERSON_PENALTIES: &[&str] = &["he is ", "she is ", "they are ", "bro is ", "stop ", "fake "];
+    if THIRD_PERSON_PENALTIES.iter().any(|p| lower.contains(p)) {
+        score -= 0.7;
+    }
+
+    score
+}
+
 fn extract_chat_stream_plug(body: &str) -> Option<ChatStreamPlug> {
     let trimmed = body.trim();
     if trimmed.is_empty() {
@@ -2393,8 +3194,9 @@ fn extract_chat_stream_plug(body: &str) -> Option<ChatStreamPlug> {
         }
     }
 
-    // Priority 1/2: Live/stream self-promo intent ("im live on yt", "streaming on twitch @name")
-    if CHAT_LIVE_INTENT_RE.is_match(trimmed) {
+    // Priority 1/2: Weighted live/stream self-promo intent ("im live on yt", "yt same name", "yt pe live hu")
+    // while rejecting negations, questions ("are u live?"), and stream-sniping accusations.
+    if !is_non_promo_chat(trimmed) && score_chat_promo_intent(trimmed) >= 1.0 {
         let platform = if CHAT_YT_WORD_RE.is_match(trimmed) {
             Some("YouTube")
         } else if CHAT_TW_WORD_RE.is_match(trimmed) {
@@ -2826,7 +3628,12 @@ fn names_roughly_match(entered: &str, detected: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    a == b || a.contains(&b) || b.contains(&a)
+    if a == b || a.contains(&b) || b.contains(&a) {
+        return true;
+    }
+    let ca = unfold_leetspeak(&strip_channel_affixes(entered));
+    let cb = unfold_leetspeak(&strip_channel_affixes(detected));
+    !ca.is_empty() && !cb.is_empty() && (ca == cb || ca.contains(&cb) || cb.contains(&ca))
 }
 
 async fn verify_streamer_entry(
@@ -3494,16 +4301,19 @@ async fn check_youtube_channel_live(client: &Client, channel_url: &str) -> Optio
     Some((title, url))
 }
 
-/// Region-aware multi-candidate YouTube heuristic: scores live Valorant streams and rejects cross-region mismatches.
+/// Region-aware multi-candidate YouTube heuristic: scores live Valorant streams via embedded ML
+/// fuzzy/phonetic scorer and rejects cross-region mismatches and non-gameplay broadcasts.
 async fn check_youtube_live_candidates(
     client: &Client,
     game_name: &str,
     api_key: &str,
     region: &ServerRegionInfo,
+    ctx: &MatchSignalContext<'_>,
 ) -> Vec<LikelyStreamerCandidate> {
     let cleaned = clean_ign(game_name);
     let name_norm = normalize(&cleaned);
-    if name_norm.chars().count() < 4 || is_generic_ign(&name_norm) {
+    let name_leet = unfold_leetspeak(&strip_channel_affixes(&cleaned));
+    if name_norm.chars().count() < 4 || is_generic_ign(&name_norm) || is_generic_ign(&name_leet) {
         return Vec::new();
     }
     let query = format!("{cleaned} Valorant");
@@ -3597,7 +4407,7 @@ async fn check_youtube_live_candidates(
         if !seen_urls.insert(url.clone()) {
             continue;
         }
-        if let Some(cand) = score_heuristic_candidate(
+        if let Some(cand) = score_heuristic_candidate_with_context(
             "YouTube",
             &cleaned,
             &channel,
@@ -3606,6 +4416,7 @@ async fn check_youtube_live_candidates(
             None,
             false,
             region,
+            ctx,
         ) {
             scored.push(cand);
         }
@@ -3886,20 +4697,18 @@ async fn fetch_twitch_streams_batch(
     hits
 }
 
-async fn check_twitch_live_candidates(
-    client: &Client,
-    game_name: &str,
-    client_id: &str,
-    bearer_token: Option<&str>,
-    region: &ServerRegionInfo,
-) -> Vec<LikelyStreamerCandidate> {
+/// Generates up to 4 high-yield Twitch login candidates (cleaned, raw, leet-unfolded,
+/// repeat-collapsed, and `tv`/`_tv`/`ttv` variants) for a single batched HTTP query.
+fn build_twitch_candidate_logins(game_name: &str) -> Vec<String> {
     let cleaned = clean_ign(game_name);
     let base: String = cleaned
         .to_ascii_lowercase()
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    if base.len() < 4 || is_generic_ign(&normalize(&cleaned)) {
+    let base_norm = normalize(&cleaned);
+    let leet_core = unfold_leetspeak(&strip_channel_affixes(&cleaned));
+    if base.len() < 4 || is_generic_ign(&base_norm) || is_generic_ign(&leet_core) {
         return Vec::new();
     }
 
@@ -3909,11 +4718,16 @@ async fn check_twitch_live_candidates(
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
+    let collapsed = collapse_repeated_chars(&base);
 
     let mut logins = Vec::new();
     let mut seen = HashSet::new();
     let mut push_login = |s: String| {
-        if s.len() >= 4 && s.len() <= 25 && seen.insert(s.clone()) {
+        if s.len() >= 4
+            && s.len() <= 25
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && seen.insert(s.clone())
+        {
             logins.push(s);
         }
     };
@@ -3921,12 +4735,34 @@ async fn check_twitch_live_candidates(
     if raw_login != base {
         push_login(raw_login);
     }
+    if leet_core != base && leet_core.len() >= 4 && !is_generic_ign(&leet_core) {
+        push_login(leet_core);
+    }
+    if collapsed != base && collapsed.len() >= 4 && !is_generic_ign(&collapsed) {
+        push_login(collapsed);
+    }
     if base.len() <= 18 && !base.ends_with("tv") && !base.ends_with("ttv") {
         push_login(format!("{base}tv"));
         push_login(format!("{base}_tv"));
         push_login(format!("{base}ttv"));
     }
     logins.truncate(4);
+    logins
+}
+
+async fn check_twitch_live_candidates(
+    client: &Client,
+    game_name: &str,
+    client_id: &str,
+    bearer_token: Option<&str>,
+    region: &ServerRegionInfo,
+    ctx: &MatchSignalContext<'_>,
+) -> Vec<LikelyStreamerCandidate> {
+    let cleaned = clean_ign(game_name);
+    let logins = build_twitch_candidate_logins(game_name);
+    if logins.is_empty() {
+        return Vec::new();
+    }
 
     let mut out = Vec::new();
     for (display, title, url, lang, tags, is_val) in
@@ -3938,7 +4774,7 @@ async fn check_twitch_live_candidates(
             format!("{title} {tags}")
         };
         let lang_opt = if lang.is_empty() { None } else { Some(lang.as_str()) };
-        if let Some(mut cand) = score_heuristic_candidate(
+        if let Some(mut cand) = score_heuristic_candidate_with_context(
             "Twitch",
             &cleaned,
             &display,
@@ -3947,6 +4783,7 @@ async fn check_twitch_live_candidates(
             lang_opt,
             is_val,
             region,
+            ctx,
         ) {
             cand.title = title;
             out.push(cand);
@@ -3992,6 +4829,7 @@ async fn check_kick_live_candidates(
     client: &Client,
     game_name: &str,
     region: &ServerRegionInfo,
+    ctx: &MatchSignalContext<'_>,
 ) -> Vec<LikelyStreamerCandidate> {
     let cleaned = clean_ign(game_name);
     let slug: String = cleaned
@@ -4000,39 +4838,51 @@ async fn check_kick_live_candidates(
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
         .collect();
-    if slug.len() < 4 || is_generic_ign(&normalize(&cleaned)) {
+    let leet_slug = unfold_leetspeak(&strip_channel_affixes(&cleaned));
+    if slug.len() < 4 || is_generic_ign(&normalize(&cleaned)) || is_generic_ign(&leet_slug) {
         return Vec::new();
     }
-    let resp = match client
-        .get(format!("https://kick.com/api/v2/channels/{slug}"))
-        .header("User-Agent", BROWSER_UA)
-        .header("Accept", "application/json")
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r,
-        _ => return Vec::new(),
-    };
-    let Ok(v) = resp.json::<Value>().await else {
-        return Vec::new();
-    };
-    if !v["livestream"].is_object() {
-        return Vec::new();
+
+    let mut slugs = vec![slug.clone()];
+    if leet_slug.len() >= 4 && leet_slug != slug && leet_slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        slugs.push(leet_slug);
     }
-    let title = v["livestream"]["session_title"].as_str().unwrap_or("Live on Kick").to_string();
-    let channel = v["user"]["username"].as_str().unwrap_or(&slug).to_string();
-    let lang = v["livestream"]["language"].as_str();
-    let is_val = v["livestream"]["categories"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .any(|c| c["name"].as_str().unwrap_or("").eq_ignore_ascii_case("VALORANT"))
-        })
-        .unwrap_or(false);
-    let url = format!("https://kick.com/{slug}");
-    score_heuristic_candidate("Kick", &cleaned, &channel, &title, &url, lang, is_val, region)
-        .into_iter()
-        .collect()
+
+    for candidate_slug in slugs {
+        let resp = match client
+            .get(format!("https://kick.com/api/v2/channels/{candidate_slug}"))
+            .header("User-Agent", BROWSER_UA)
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            _ => continue,
+        };
+        let Ok(v) = resp.json::<Value>().await else {
+            continue;
+        };
+        if !v["livestream"].is_object() {
+            continue;
+        }
+        let title = v["livestream"]["session_title"].as_str().unwrap_or("Live on Kick").to_string();
+        let channel = v["user"]["username"].as_str().unwrap_or(&candidate_slug).to_string();
+        let lang = v["livestream"]["language"].as_str();
+        let is_val = v["livestream"]["categories"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .any(|c| c["name"].as_str().unwrap_or("").eq_ignore_ascii_case("VALORANT"))
+            })
+            .unwrap_or(false);
+        let url = format!("https://kick.com/{candidate_slug}");
+        if let Some(cand) =
+            score_heuristic_candidate_with_context("Kick", &cleaned, &channel, &title, &url, lang, is_val, region, ctx)
+        {
+            return vec![cand];
+        }
+    }
+    Vec::new()
 }
 
 /// Optional (off by default) live Twitch + YouTube Valorant streamer recommendations for the active server region.
@@ -4647,7 +5497,14 @@ async fn scan_player(
         }
     }
 
-    // Phase 2: server-aware multi-signal heuristic fallback.
+    let match_ctx = MatchSignalContext {
+        tag_line: &player.tag_line,
+        map_name: &map_name,
+        agent_name: &agent_name,
+        queue_name: &queue_name,
+    };
+
+    // Phase 2: server-aware embedded ML + fuzzy/phonetic heuristic fallback.
     // If a Directory streamer was offline on their registered platform, still check other platforms
     // without re-heuristically guessing on the already-verified offline platform.
     if out.is_empty() {
@@ -4658,7 +5515,14 @@ async fn scan_player(
         let (yt_cands, tw_cands, kick_cands) = tokio::join!(
             async {
                 if check_yt {
-                    check_youtube_live_candidates(&client, &player.game_name, &config.youtube_api_key, region).await
+                    check_youtube_live_candidates(
+                        &client,
+                        &player.game_name,
+                        &config.youtube_api_key,
+                        region,
+                        &match_ctx,
+                    )
+                    .await
                 } else {
                     Vec::new()
                 }
@@ -4671,6 +5535,7 @@ async fn scan_player(
                         &config.twitch_client_id,
                         twitch_token.as_deref(),
                         region,
+                        &match_ctx,
                     )
                     .await
                 } else {
@@ -4679,7 +5544,7 @@ async fn scan_player(
             },
             async {
                 if check_kick {
-                    check_kick_live_candidates(&client, &player.game_name, region).await
+                    check_kick_live_candidates(&client, &player.game_name, region, &match_ctx).await
                 } else {
                     Vec::new()
                 }
@@ -4779,11 +5644,21 @@ async fn scan_player(
                             &config.twitch_client_id,
                             twitch_token.as_deref(),
                             region,
+                            &match_ctx,
                         )
                         .await
                     }
-                    "Kick" => check_kick_live_candidates(&client, &player.game_name, region).await,
-                    _ => check_youtube_live_candidates(&client, &player.game_name, &config.youtube_api_key, region).await,
+                    "Kick" => check_kick_live_candidates(&client, &player.game_name, region, &match_ctx).await,
+                    _ => {
+                        check_youtube_live_candidates(
+                            &client,
+                            &player.game_name,
+                            &config.youtube_api_key,
+                            region,
+                            &match_ctx,
+                        )
+                        .await
+                    }
                 }
             } else {
                 Vec::new()
@@ -10191,6 +11066,179 @@ mod tests {
         assert_eq!(exact_yt.confidence_tier, "Unverified");
         assert!(exact_yt.confidence <= 58);
     }
+
+    #[test]
+    fn test_ml_fuzzy_phonetic_and_leetspeak_matching() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai");
+
+        // 1. Leet-speak IGN ("z3r0_fps") matching stylized channel ("ZeroFPS Live")
+        let leet_hit = score_heuristic_candidate(
+            "YouTube",
+            "z3r0_fps",
+            "ZeroFPS Live",
+            "VALORANT Mumbai Server Ranked | Immortal Push",
+            "https://www.youtube.com/watch?v=leet1",
+            None,
+            true,
+            mumbai,
+        )
+        .expect("Leet-speak handle should match stylized channel");
+        assert_eq!(leet_hit.confidence_tier, "Probable");
+        assert!(leet_hit.confidence >= 68 && leet_hit.confidence <= 88);
+
+        // 2. Affix-stripped exact core ("KairoFPS" vs "KairoFPS Official")
+        let affix_hit = score_heuristic_candidate(
+            "YouTube",
+            "KairoFPS",
+            "KairoFPS Official",
+            "VALORANT Ranked Live | Mumbai Grind",
+            "https://www.youtube.com/watch?v=affix1",
+            None,
+            true,
+            mumbai,
+        )
+        .expect("Channel with Official suffix should match core IGN");
+        assert_eq!(affix_hit.confidence_tier, "Probable");
+
+        // 3. Phonetic variation ("KrixVal" vs "KryxVal")
+        let phonetic_hit = score_heuristic_candidate(
+            "Twitch",
+            "KrixVal",
+            "KryxVal",
+            "VALORANT Mumbai Server Grind",
+            "https://www.twitch.tv/kryxval",
+            Some("en"),
+            true,
+            mumbai,
+        )
+        .expect("Phonetically identical handle should match");
+        assert!(phonetic_hit.confidence >= 55);
+
+        // 4. Leet-disguised generic IGN ("Sh4d0w") must still be rejected
+        let leet_generic = score_heuristic_candidate(
+            "Twitch",
+            "Sh4d0w",
+            "Shadow",
+            "VALORANT Mumbai Server Live",
+            "https://www.twitch.tv/shadow",
+            Some("en"),
+            true,
+            mumbai,
+        );
+        assert!(leet_generic.is_none(), "Leet-disguised generic IGN must be rejected");
+
+        // 5. Completely unrelated channel must be rejected
+        let unrelated = score_heuristic_candidate(
+            "Twitch",
+            "RohanClutch",
+            "ValkyrieGaming",
+            "VALORANT Mumbai Server Live",
+            "https://www.twitch.tv/valkyriegaming",
+            Some("en"),
+            true,
+            mumbai,
+        );
+        assert!(unrelated.is_none(), "Unrelated channel handle must be rejected");
+    }
+
+    #[test]
+    fn test_ml_rejects_watch_parties_reruns_and_clip_channels() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai");
+        let watch_party = score_heuristic_candidate(
+            "YouTube",
+            "RohanClutch",
+            "RohanClutch",
+            "VCT Pacific Watch Party | PRX vs GEN Live",
+            "https://www.youtube.com/watch?v=wp1",
+            None,
+            true,
+            mumbai,
+        );
+        assert!(watch_party.is_none(), "Watch party broadcast must be rejected");
+
+        let rerun = score_heuristic_candidate(
+            "Twitch",
+            "RohanClutch",
+            "RohanClutch",
+            "VALORANT Mumbai 24/7 Best Clips Rerun",
+            "https://www.twitch.tv/rohanclutch",
+            None,
+            true,
+            mumbai,
+        );
+        assert!(rerun.is_none(), "24/7 rerun / clip channel must be rejected");
+    }
+
+    #[test]
+    fn test_ml_match_context_boosts_agent_map_and_platform_tag() {
+        let mumbai = server_region_by_code("ap-mumbai").expect("mumbai");
+        let base = score_heuristic_candidate_with_context(
+            "Twitch",
+            "KrixVal",
+            "KryxVal",
+            "VALORANT Mumbai Server | Jett on Ascent Ranked",
+            "https://www.twitch.tv/kryxval",
+            Some("en"),
+            true,
+            mumbai,
+            &MatchSignalContext::default(),
+        )
+        .expect("base hit");
+
+        let enriched = score_heuristic_candidate_with_context(
+            "Twitch",
+            "KrixVal",
+            "KryxVal",
+            "VALORANT Mumbai Server | Jett on Ascent Ranked",
+            "https://www.twitch.tv/kryxval",
+            Some("en"),
+            true,
+            mumbai,
+            &MatchSignalContext {
+                tag_line: "TTV",
+                map_name: "Ascent",
+                agent_name: "Jett",
+                queue_name: "Competitive",
+            },
+        )
+        .expect("context-enriched hit");
+
+        assert!(
+            enriched.confidence > base.confidence,
+            "Matching Riot tag, agent, map, and queue should boost ML confidence ({} vs {})",
+            enriched.confidence,
+            base.confidence
+        );
+    }
+
+    #[test]
+    fn test_chat_intent_handles_casual_hinglish_and_rejects_questions_or_negation() {
+        let same_name = extract_chat_stream_plug("yt same name gg").expect("casual same-name plug");
+        assert_eq!(same_name.platform, "YouTube");
+
+        let hinglish = extract_chat_stream_plug("bhai yt pe live hu aaja").expect("Hinglish self-plug");
+        assert_eq!(hinglish.platform, "YouTube");
+
+        let casual_tw = extract_chat_stream_plug("live rn on twitch come watch").expect("casual Twitch plug");
+        assert_eq!(casual_tw.platform, "Twitch");
+
+        assert!(extract_chat_stream_plug("are u live on twitch?").is_none());
+        assert!(extract_chat_stream_plug("im not live on yt bro").is_none());
+        assert!(extract_chat_stream_plug("stop stream sniping on twitch").is_none());
+    }
+
+    #[test]
+    fn test_twitch_candidate_logins_include_leetspeak_and_repeat_unfold() {
+        let logins = build_twitch_candidate_logins("k4ir0_fps");
+        assert!(logins.contains(&"k4ir0_fps".to_string()));
+        assert!(logins.contains(&"kairofps".to_string()));
+        assert!(logins.len() <= 4);
+
+        let rep = build_twitch_candidate_logins("kairooo");
+        assert!(rep.contains(&"kairo".to_string()));
+        assert!(rep.len() <= 4);
+    }
 }
+
 
 

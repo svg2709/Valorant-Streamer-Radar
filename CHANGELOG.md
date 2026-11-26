@@ -3,6 +3,15 @@
 All notable changes to **Valorant Streamer Radar** are documented in this file.
 GitHub Releases automatically pull the matching version notes from this file.
 
+## [1.2.11] - 2026-11-26
+
+### Added
+- **Pure-Rust Embedded ML + Fuzzy/Phonetic Detection Engine (100% Keyless & Offline):** Replaced rigid exact/substring heuristics with a calibrated logistic regression classifier (`sigmoid`) combining Jaro-Winkler similarity, character bigram/trigram Sørensen–Dice overlap, gaming phonetic encoding (`KrixVal` ↔ `KryxVal`), leet-speak unfolding (`z3r0_fps` ↔ `ZeroFPS Live`), repeated-character collapsing (`kairooo` ↔ `kairo`), channel affix stripping (`KairoFPS Official` ↔ `KairoFPS`), and token-order overlap — adding zero external crates, zero API keys, and 0 MB GPU VRAM overhead while keeping all heuristics strictly post-match and capped at `Probable`/`Unverified`.
+- **Non-Gameplay Broadcast & False-Positive Classifier:** Automatically detects and suppresses VCT watch parties, co-streams, 24/7 reruns, rebroadcasts, clip/highlight compilations, and non-Valorant stream titles while keeping leet-disguised generic IGNs (e.g., `Sh4d0w`) blocked.
+- **Post-Match Context Correlation:** Feeds the finished match's `agent_name`, `map_name`, `queue_name`, and player Riot tag (`#TTV`, `#YT`, `#KICK`, `#LIVE`) into the ML scorer to boost confidence when live stream metadata aligns with the match you just finished.
+- **Leet-Speak Candidate Expansion for Twitch & Kick:** Automatically includes leet-unfolded and repeat-collapsed login variants inside Twitch's single batched lookup (and Kick's fallback slug check) so stylized IGNs are actually discovered live.
+- **Weighted Post-Match Chat Intent Classifier:** Recognizes casual and Hinglish self-plugs (`"yt same name"`, `"yt pe live hu"`, `"live rn on twitch"`) while rejecting negations, questions directed at others (`"are u live?"`, `"im not live"`), and stream-sniping remarks.
+
 ## [1.2.10] - 2026-11-26
 
 ### Fixed
